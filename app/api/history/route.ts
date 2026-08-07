@@ -70,6 +70,10 @@ export async function POST(request: Request) {
     else return Response.json({error:"Não foi possível reconstruir este lembrete."},{status:409});
   } else if (type === "section" && before && Array.isArray(before.orders)) {
     for (const row of before.orders as Array<{id:number;sort_order:number}>) statements.push(env.DB.prepare("UPDATE posts SET sort_order=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(row.sort_order,row.id));
+  } else if(type==="vehicle_outage") {
+    if(action==="create")statements.push(env.DB.prepare("DELETE FROM vehicle_outages WHERE id=?").bind(id));
+    else if(action==="delete"&&before)statements.push(env.DB.prepare("INSERT INTO vehicle_outages (id,vehicle_id,starts_on,ends_on,reason,active) VALUES (?,?,?,?,?,?)").bind(id,before.vehicle_id,before.starts_on,before.ends_on,before.reason,before.active));
+    else return Response.json({error:"Não foi possível reconstruir este FA."},{status:409});
   } else {
     return Response.json({error:"O desfazer seguro ainda não está disponível para este tipo de alteração."},{status:409});
   }
@@ -82,15 +86,15 @@ export async function POST(request: Request) {
 }
 
 function assignmentUpdate(row: Row, id: number) {
-  return env.DB.prepare("UPDATE assignments SET schedule_id=?,guard_id=?,post_id=?,vehicle_id=?,shift=?,role=?,starts_at=?,ends_at=?,status=?,request_ref=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(row.schedule_id,row.guard_id,row.post_id,row.vehicle_id,row.shift,row.role,row.starts_at,row.ends_at,row.status,row.request_ref,id);
+  return env.DB.prepare("UPDATE assignments SET schedule_id=?,guard_id=?,post_id=?,vehicle_id=?,shift=?,role=?,starts_at=?,ends_at=?,status=?,request_ref=?,is_reassigned=?,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(row.schedule_id,row.guard_id,row.post_id,row.vehicle_id,row.shift,row.role,row.starts_at,row.ends_at,row.status,row.request_ref,row.is_reassigned||0,row.reassignment_note||null,id);
 }
 function assignmentInsert(row: Row, id: number) {
-  return env.DB.prepare("INSERT INTO assignments (id,schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,status,request_ref) VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(id,row.schedule_id,row.guard_id,row.post_id,row.vehicle_id,row.shift,row.role,row.starts_at,row.ends_at,row.status,row.request_ref);
+  return env.DB.prepare("INSERT INTO assignments (id,schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,status,request_ref,is_reassigned,reassignment_note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(id,row.schedule_id,row.guard_id,row.post_id,row.vehicle_id,row.shift,row.role,row.starts_at,row.ends_at,row.status,row.request_ref,row.is_reassigned||0,row.reassignment_note||null);
 }
 function movementUpdate(row:Row,id:number){return env.DB.prepare("UPDATE movements SET guard_id=?,type=?,starts_at=?,ends_at=?,request_ref=?,notes=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(row.guard_id,row.type,row.starts_at,row.ends_at,row.request_ref,row.notes,row.status,id)}
 function movementInsert(row:Row,id:number){return env.DB.prepare("INSERT INTO movements (id,guard_id,type,starts_at,ends_at,request_ref,notes,status) VALUES (?,?,?,?,?,?,?,?)").bind(id,row.guard_id,row.type,row.starts_at,row.ends_at,row.request_ref,row.notes,row.status)}
 function catalogRestore(type:string,row:Row,id:number) {
-  if(type==="guard") return env.DB.prepare("UPDATE guards SET registration=?,name=?,platoon=?,base_shift=?,active=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(row.registration,row.name,row.platoon,row.base_shift,row.active,id);
+  if(type==="guard") return env.DB.prepare("UPDATE guards SET registration=?,name=?,platoon=?,base_shift=?,work_regime=?,active=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(row.registration,row.name,row.platoon,row.base_shift,row.work_regime||"12x36",row.active,id);
   if(type==="post") return env.DB.prepare("UPDATE posts SET name=?,group_name=?,sort_order=?,active=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(row.name,row.group_name,row.sort_order,row.active,id);
   return env.DB.prepare("UPDATE vehicles SET prefix=?,type=?,zone=?,active=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(row.prefix,row.type,row.zone,row.active,id);
 }

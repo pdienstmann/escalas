@@ -10,6 +10,7 @@ type Data = {
   campaign: Item | null;
   days: Item[];
   choices: Item[];
+  vehicleOutages: Item[];
 };
 const empty: Data = {
   guards: [],
@@ -19,6 +20,7 @@ const empty: Data = {
   campaign: null,
   days: [],
   choices: [],
+  vehicleOutages: [],
 };
 
 export function GestaoClient({
@@ -188,6 +190,7 @@ export function GestaoClient({
     );
     if (r.ok) await load();
   }
+  async function deleteOutage(id:Item["id"]){if(!confirm("Retirar o registro de FA e disponibilizar novamente a viatura?"))return;const r=await fetch("/api/admin",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"vehicle_outage_delete",id})});const j=await r.json();setMessage(r.ok?"Viatura novamente disponível.":j.error);if(r.ok)await load()}
   async function movementAction(action:"movement_update"|"movement_delete",body:Record<string,string|number|null>) {
     if(action==="movement_delete"&&!confirm("Remover esta movimentação? A escala será recalculada imediatamente."))return;
     setMessage("");
@@ -216,7 +219,9 @@ export function GestaoClient({
             <select name="baseShift">
               <option>12x36 dia</option>
               <option>12x36 noite</option>
+              <option>Semanal</option>
             </select>
+            <select name="workRegime"><option value="12x36">Plantão 12x36</option><option value="weekly">Semanal</option></select>
           </Form>
           <Form title="Novo posto" onSubmit={(e) => submit(e, "post")}>
             <input name="name" placeholder="Nome do posto" required />
@@ -244,6 +249,7 @@ export function GestaoClient({
           <SectionOrder posts={data.posts} onReorder={(group, direction) => void reorderSection(group, direction)} />
           <GuardImport onImport={(rows) => void importGuards(rows)} />
         </div>
+        <FleetAvailability vehicles={data.vehicles} outages={data.vehicleOutages} onSubmit={(e)=>submit(e,"vehicle_outage")} onDelete={(id)=>void deleteOutage(id)}/>
         {message && (
           <p className="notice" role="status">
             {message}
@@ -650,6 +656,10 @@ function movementPeriod(item: Item) {
     end = new Date(String(item.ends_at));
   return `${start.toLocaleDateString("pt-BR")} a ${end.toLocaleDateString("pt-BR")}`;
 }
+function FleetAvailability({vehicles,outages,onSubmit,onDelete}:{vehicles:Item[];outages:Item[];onSubmit:(e:FormEvent<HTMLFormElement>)=>void;onDelete:(id:Item["id"])=>void}){
+  return <section className="fleet-status"><header><div><small>DISPONIBILIDADE EM TEMPO REAL</small><h3>Viaturas em funcionamento / FA</h3></div><span>{outages.length} em FA</span></header><div className="fleet-layout"><form className="data-form" onSubmit={onSubmit}><select name="vehicleId" required defaultValue=""><option value="">Selecionar viatura</option>{vehicles.map(v=><option key={String(v.id)} value={String(v.id)}>{String(v.prefix)} · {String(v.type)}</option>)}</select><label>Início do FA<input name="startsOn" type="date" required/></label><label>Retorno previsto — opcional<input name="endsOn" type="date"/></label><input name="reason" placeholder="Motivo / observação"/><button className="save">Registrar em FA</button></form><div className="fleet-list">{outages.length?outages.map(o=><article key={String(o.id)}><span className="fleet-icon">{vehicleIconLabel(String(o.type))}</span><div><b>{String(o.prefix)}</b><small>FA desde {formatDate(o.starts_on)}{o.ends_on?` até ${formatDate(o.ends_on)}`:" · prazo indeterminado"}</small>{o.reason&&<em>{String(o.reason)}</em>}</div><button onClick={()=>onDelete(o.id)}>Disponibilizar</button></article>):<p>Todas as viaturas estão disponíveis.</p>}</div></div></section>
+}
+const vehicleIconLabel=(type:string)=>type==="moto"?"MOTO":type==="pickup"?"CAM":type==="van"?"FUR":type==="suv"?"SUV":"SED";
 function CatalogEditor({
   editing,
   onClose,
@@ -698,8 +708,10 @@ function CatalogEditor({
               >
                 <option>12x36 dia</option>
                 <option>12x36 noite</option>
+                <option>Semanal</option>
               </select>
             </label>
+            <label>Tipo de escala<select name="workRegime" defaultValue={String(i.work_regime||"12x36")}><option value="12x36">Plantão 12x36</option><option value="weekly">Semanal</option></select></label>
           </>
         )}
         {editing.kind === "post" && (

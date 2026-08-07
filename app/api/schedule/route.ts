@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import {
   applyPatternsToSchedule,
+  applyWeeklyToSchedule,
   ensurePatterns,
 } from "../../../lib/pattern-engine";
 import { writeAudit } from "../../../lib/audit";
@@ -236,7 +237,7 @@ async function seedSchedule(date: string, scheduleId: number) {
   if (existing.length >= 20) return;
   const guards = (
     await env.DB.prepare(
-      "SELECT id FROM guards WHERE active=1 ORDER BY id",
+      "SELECT id FROM guards WHERE active=1 AND COALESCE(work_regime,'12x36')='12x36' ORDER BY id",
     ).all<{ id: number }>()
   ).results;
   const posts = (
@@ -246,8 +247,8 @@ async function seedSchedule(date: string, scheduleId: number) {
   ).results;
   const vehicles = (
     await env.DB.prepare(
-      "SELECT id FROM vehicles WHERE active=1 ORDER BY prefix",
-    ).all<{ id: number }>()
+      "SELECT id FROM vehicles WHERE active=1 AND NOT EXISTS (SELECT 1 FROM vehicle_outages o WHERE o.vehicle_id=vehicles.id AND o.active=1 AND o.starts_on<=? AND (o.ends_on IS NULL OR o.ends_on>=?)) ORDER BY prefix",
+    ).bind(date,date).all<{ id: number }>()
   ).results;
   const slots = [
     ...posts.map((p) => ({ postId: p.id, vehicleId: null, role: "guard" })),
@@ -318,6 +319,7 @@ async function ensureBase(date: string) {
     .first<{ id: number }>();
   if (schedule) {
     await applyPatternsToSchedule(env.DB, date, schedule.id);
+    await applyWeeklyToSchedule(env.DB,date,schedule.id);
     await seedSchedule(date, schedule.id);
   }
 }
@@ -333,14 +335,14 @@ export async function GET(request: Request) {
   const [guards, posts, vehicles, assignments, movements, notices] =
     await Promise.all([
       env.DB.prepare(
-        "SELECT id,name,registration,platoon FROM guards WHERE active=1 ORDER BY name",
+        "SELECT id,name,registration,platoon,base_shift,work_regime FROM guards WHERE active=1 ORDER BY name",
       ).all(),
       env.DB.prepare(
         "SELECT id,name,group_name FROM posts WHERE active=1 ORDER BY sort_order,name",
       ).all(),
       env.DB.prepare(
-        "SELECT id,prefix,type,zone FROM vehicles WHERE active=1 ORDER BY prefix",
-      ).all(),
+        "SELECT id,prefix,type,zone FROM vehicles v WHERE active=1 AND NOT EXISTS (SELECT 1 FROM vehicle_outages o WHERE o.vehicle_id=v.id AND o.active=1 AND o.starts_on<=? AND (o.ends_on IS NULL OR o.ends_on>=?)) ORDER BY prefix",
+      ).bind(date,date).all(),
       env.DB.prepare(
         "SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.schedule_id=? ORDER BY a.shift,a.role,g.name",
       )
@@ -361,6 +363,7 @@ export async function GET(request: Request) {
     active = assignments.results.filter(
       (a) => !blocked.has(Number(a.guard_id)),
     );
+  const appliedPattern=await env.DB.prepare("SELECT dp.code day_code,np.code night_code FROM schedule_patterns sp JOIN shift_patterns dp ON dp.id=sp.day_pattern_id JOIN shift_patterns np ON np.id=sp.night_pattern_id WHERE sp.schedule_id=?").bind(schedule?.id).first<Record<string,unknown>>();
   return Response.json({
     date,
     schedule,
@@ -371,6 +374,7 @@ export async function GET(request: Request) {
     removed: assignments.results.filter((a) => blocked.has(Number(a.guard_id))),
     movements: movements.results,
     notices: notices.results,
+    patternLabel: appliedPattern?`${appliedPattern.day_code} + ${appliedPattern.night_code} + SEMANAL`:"SEMANAL / AJUSTE MANUAL",
   });
 }
 
@@ -428,7 +432,7 @@ export async function POST(request: Request) {
   let assignmentId = id;
   if (id)
     await env.DB.prepare(
-      "UPDATE assignments SET guard_id=?,post_id=?,vehicle_id=?,shift=?,role=?,starts_at=?,ends_at=?,status=?,request_ref=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+      "UPDATE assignments SET guard_id=?,post_id=?,vehicle_id=?,shift=?,role=?,starts_at=?,ends_at=?,status=?,request_ref=?,is_reassigned=?,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
     )
       .bind(
         guardId,
@@ -440,12 +444,14 @@ export async function POST(request: Request) {
         end,
         b.status,
         b.requestRef || null,
+        b.isReassigned ? 1 : 0,
+        b.reassignmentNote || null,
         id,
       )
       .run();
   else {
     const created = await env.DB.prepare(
-      "INSERT INTO assignments (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,status,request_ref) VALUES (?,?,?,?,?,?,?,?,?,?)",
+      "INSERT INTO assignments (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,status,request_ref,is_reassigned,reassignment_note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
     )
       .bind(
         scheduleId,
@@ -458,6 +464,8 @@ export async function POST(request: Request) {
         end,
         b.status,
         b.requestRef || null,
+        b.isReassigned ? 1 : 0,
+        b.reassignmentNote || null,
       )
       .run();
     assignmentId = Number(created.meta.last_row_id);

@@ -8,6 +8,7 @@ type State = {
   vehicles: Rec[];
   assignments: Rec[];
   movements: Rec[];
+  patternLabel?: string;
 };
 const shifts = {
   day: [
@@ -72,7 +73,7 @@ function PrintPage({
         </div>
         <aside>
           <b>{new Date(data.date + "T12:00:00").toLocaleDateString("pt-BR")}</b>
-          <span>Escala 12x36</span>
+          <span>{data.patternLabel||"Escala operacional"}</span>
         </aside>
       </header>
       <table>
@@ -91,7 +92,7 @@ function PrintPage({
           {resources.map(({ kind, r }) => (
             <tr key={`${kind}-${r.id}`}>
               <td>
-                <b>{kind === "vehicle" ? r.prefix : r.name}</b>
+                <b>{kind === "vehicle" ? <><span className="print-vehicle-icon">{vehicleIcon(String(r.type))}</span>{r.prefix}</> : r.name}</b>
                 <small>{kind === "vehicle" ? r.zone : r.group_name}</small>
               </td>
               {shifts[period].map((s) => {
@@ -99,7 +100,7 @@ function PrintPage({
                     (a) =>
                       (kind === "vehicle"
                         ? a.vehicle_id === r.id
-                        : a.post_id === r.id) && a.shift === s.id,
+                        : a.post_id === r.id) && belongsToShift(a,s.id),
                   ),
                   required = kind === "vehicle" ? 2 : 1;
                 return (
@@ -113,6 +114,7 @@ function PrintPage({
                         {a.status !== "normal" && (
                           <em>{status(String(a.status))}</em>
                         )}
+                        {Number(a.is_reassigned)===1&&<em className="print-rem">REM</em>}
                         <small>
                           {String(a.starts_at).slice(11, 16)}–
                           {String(a.ends_at).slice(11, 16)}
@@ -193,6 +195,8 @@ function movementDetail(m: Rec) {
 }
 const status = (s: string) =>
   s === "overtime" ? "HE" : s === "time_bank" ? "BH" : "TROCA";
+const vehicleIcon=(type:string)=>type==="moto"?"●":type==="pickup"?"▰":type==="van"?"▣":type==="suv"?"◆":"▱";
+function belongsToShift(a:Rec,shift:string){if(String(a.shift)===shift)return true;if(String(a.shift)!=="W")return false;const start=String(a.starts_at).slice(11,16),end=String(a.ends_at).slice(11,16);if(shift==="2")return start<"13:00"&&end>"07:00";if(shift==="3")return start<"19:00"&&end>"13:00";return false}
 
 function makeVolumeData(data: State): State {
   const vehicles = data.vehicles.slice(0, 4);

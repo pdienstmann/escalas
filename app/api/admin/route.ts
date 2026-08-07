@@ -96,7 +96,7 @@ export async function GET(request: Request) {
     return Response.json({ error: "Não autorizado" }, { status: 401 });
   await seed();
   await syncConfirmedLeaves();
-  const [guards, posts, vehicles, movements, campaign, days, choices] =
+  const [guards, posts, vehicles, movements, campaign, days, choices, vehicleOutages] =
     await Promise.all([
       env.DB.prepare(
         "SELECT * FROM guards WHERE active = 1 ORDER BY name",
@@ -119,6 +119,7 @@ export async function GET(request: Request) {
       env.DB.prepare(
         "SELECT c.*,g.name AS guard_name FROM leave_choices c JOIN guards g ON g.id=c.guard_id WHERE c.status!='cancelled' ORDER BY c.date",
       ).all(),
+      env.DB.prepare("SELECT o.*,v.prefix,v.type FROM vehicle_outages o JOIN vehicles v ON v.id=o.vehicle_id WHERE o.active=1 ORDER BY o.starts_on DESC").all(),
     ]);
   return Response.json({
     guards: guards.results,
@@ -128,6 +129,7 @@ export async function GET(request: Request) {
     campaign,
     days: days.results,
     choices: choices.results,
+    vehicleOutages: vehicleOutages.results,
   });
 }
 
@@ -144,9 +146,9 @@ export async function POST(request: Request) {
       return Response.json({ok:true,count:rows.length});
     } else if (body.action === "guard") {
       const created = await env.DB.prepare(
-        "INSERT INTO guards (registration,name,platoon,base_shift) VALUES (?,?,?,?)",
+        "INSERT INTO guards (registration,name,platoon,base_shift,work_regime) VALUES (?,?,?,?,?)",
       )
-        .bind(body.registration, body.name, body.platoon, body.baseShift)
+        .bind(body.registration, body.name, body.platoon, body.baseShift, body.workRegime || "12x36")
         .run();
       const after = await env.DB.prepare("SELECT * FROM guards WHERE id=?").bind(created.meta.last_row_id).first();
       await writeAudit(request,{action:"create",entityType:"guard",entityId:Number(created.meta.last_row_id),summary:`Cadastrou o GM ${body.name}`,after:after as Record<string,unknown>});
@@ -166,16 +168,27 @@ export async function POST(request: Request) {
         .run();
       const after = await env.DB.prepare("SELECT * FROM vehicles WHERE id=?").bind(created.meta.last_row_id).first();
       await writeAudit(request,{action:"create",entityType:"vehicle",entityId:Number(created.meta.last_row_id),summary:`Cadastrou a viatura ${body.prefix}`,after:after as Record<string,unknown>});
+    } else if (body.action === "vehicle_outage") {
+      const created=await env.DB.prepare("INSERT INTO vehicle_outages (vehicle_id,starts_on,ends_on,reason) VALUES (?,?,?,?)").bind(body.vehicleId,body.startsOn,body.endsOn||null,body.reason||null).run();
+      const after=await env.DB.prepare("SELECT o.*,v.prefix FROM vehicle_outages o JOIN vehicles v ON v.id=o.vehicle_id WHERE o.id=?").bind(created.meta.last_row_id).first();
+      await writeAudit(request,{action:"create",entityType:"vehicle_outage",entityId:Number(created.meta.last_row_id),summary:`Registrou ${after?.prefix} em FA`,after:after as Record<string,unknown>,undoable:true});
+      return Response.json({ok:true});
+    } else if (body.action === "vehicle_outage_delete") {
+      const before=await env.DB.prepare("SELECT o.*,v.prefix FROM vehicle_outages o JOIN vehicles v ON v.id=o.vehicle_id WHERE o.id=?").bind(body.id).first<Record<string,unknown>>();
+      await env.DB.prepare("DELETE FROM vehicle_outages WHERE id=?").bind(body.id).run();
+      await writeAudit(request,{action:"delete",entityType:"vehicle_outage",entityId:body.id,summary:`Removeu FA de ${before?.prefix}`,before,undoable:true});
+      return Response.json({ok:true});
     } else if (body.action === "catalog_update" && body.entity === "guard") {
       const before = await env.DB.prepare("SELECT * FROM guards WHERE id=?").bind(body.id).first<Record<string,unknown>>();
       await env.DB.prepare(
-        "UPDATE guards SET registration=?,name=?,platoon=?,base_shift=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        "UPDATE guards SET registration=?,name=?,platoon=?,base_shift=?,work_regime=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
       )
         .bind(
           body.registration,
           body.name,
           body.platoon,
           body.baseShift,
+          body.workRegime || "12x36",
           body.id,
         )
         .run();

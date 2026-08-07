@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import {
   applyPatternsToSchedule,
+  applyWeeklyToSchedule,
   ensurePatterns,
   resolvePatternCodes,
 } from "../../../lib/pattern-engine";
@@ -28,7 +29,7 @@ export async function GET(request: Request) {
   const previewDate =
     new URL(request.url).searchParams.get("date") ||
     new Date().toISOString().slice(0, 10);
-  const [patterns, slots, guards, posts, vehicles, preview] = await Promise.all(
+  const [patterns, slots, guards, posts, vehicles, preview, weeklySlots] = await Promise.all(
     [
       env.DB.prepare(
         "SELECT p.*,COUNT(s.id) member_count FROM shift_patterns p LEFT JOIN pattern_slots s ON s.pattern_id=p.id WHERE p.active=1 GROUP BY p.id ORDER BY p.period,p.parity",
@@ -37,7 +38,7 @@ export async function GET(request: Request) {
         "SELECT s.*,g.name guard_name,g.registration,p.name post_name,p.group_name,v.prefix,v.zone FROM pattern_slots s JOIN guards g ON g.id=s.guard_id LEFT JOIN posts p ON p.id=s.post_id LEFT JOIN vehicles v ON v.id=s.vehicle_id ORDER BY s.pattern_id,p.group_name,p.name,v.prefix,s.role",
       ).all(),
       env.DB.prepare(
-        "SELECT id,name,registration,platoon FROM guards WHERE active=1 ORDER BY name",
+        "SELECT id,name,registration,platoon,base_shift,work_regime FROM guards WHERE active=1 ORDER BY name",
       ).all(),
       env.DB.prepare(
         "SELECT id,name,group_name FROM posts WHERE active=1 ORDER BY sort_order,name",
@@ -46,6 +47,7 @@ export async function GET(request: Request) {
         "SELECT id,prefix,zone FROM vehicles WHERE active=1 ORDER BY prefix",
       ).all(),
       resolvePatternCodes(env.DB, previewDate),
+      env.DB.prepare("SELECT w.*,g.name guard_name,g.platoon,p.name post_name,p.group_name,v.prefix,v.zone FROM weekly_slots w JOIN guards g ON g.id=w.guard_id LEFT JOIN posts p ON p.id=w.post_id LEFT JOIN vehicles v ON v.id=w.vehicle_id WHERE w.active=1 ORDER BY p.group_name,p.name,v.prefix,g.name").all(),
     ],
   );
   return Response.json({
@@ -54,6 +56,7 @@ export async function GET(request: Request) {
     guards: guards.results,
     posts: posts.results,
     vehicles: vehicles.results,
+    weeklySlots: weeklySlots.results,
     ...preview,
   });
 }
@@ -107,6 +110,25 @@ export async function POST(request: Request) {
       await writeAudit(request,{action:"delete",entityType:"pattern_slot",entityId:Number(body.id),summary:"Removeu uma posição do padrão 12x36",before,undoable:true});
       return Response.json({ ok: true });
     }
+    if(body.action==="weekly_save") {
+      const d=destination(body),id=Number(body.id||0);
+      const before=id?await env.DB.prepare("SELECT * FROM weekly_slots WHERE id=?").bind(id).first<Record<string,unknown>>():null;
+      let weeklyId=id;
+      if(id)await env.DB.prepare("UPDATE weekly_slots SET guard_id=?,weekdays=?,post_id=?,vehicle_id=?,role=?,starts_at=?,break_start=?,break_end=?,regular_end=?,overtime_end=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(body.guardId,body.weekdays||"1,2,3,4,5",d.postId,d.vehicleId,body.role,body.startsAt,body.breakStart||null,body.breakEnd||null,body.regularEnd,body.overtimeEnd||null,id).run();
+      else {const created=await env.DB.prepare("INSERT INTO weekly_slots (guard_id,weekdays,post_id,vehicle_id,role,starts_at,break_start,break_end,regular_end,overtime_end) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(body.guardId,body.weekdays||"1,2,3,4,5",d.postId,d.vehicleId,body.role,body.startsAt,body.breakStart||null,body.breakEnd||null,body.regularEnd,body.overtimeEnd||null).run();weeklyId=Number(created.meta.last_row_id)}
+      await env.DB.prepare("UPDATE guards SET work_regime='weekly',base_shift='Semanal' WHERE id=?").bind(body.guardId).run();
+      await env.DB.prepare("DELETE FROM pattern_slots WHERE guard_id=?").bind(body.guardId).run();
+      const after=await env.DB.prepare("SELECT * FROM weekly_slots WHERE id=?").bind(weeklyId).first();
+      await writeAudit(request,{action:id?"update":"create",entityType:"weekly_slot",entityId:weeklyId,summary:`${id?"Alterou":"Criou"} escala semanal`,before,after:after as Record<string,unknown>});
+      return Response.json({ok:true,message:"Escala semanal salva e integrada aos dias úteis."});
+    }
+    if(body.action==="weekly_delete") {
+      const before=await env.DB.prepare("SELECT * FROM weekly_slots WHERE id=?").bind(body.id).first<Record<string,unknown>>();
+      await env.DB.prepare("DELETE FROM weekly_slots WHERE id=?").bind(body.id).run();
+      if(before)await env.DB.prepare("UPDATE guards SET work_regime='12x36' WHERE id=?").bind(before.guard_id).run();
+      await writeAudit(request,{action:"delete",entityType:"weekly_slot",entityId:Number(body.id),summary:"Removeu escala semanal",before});
+      return Response.json({ok:true});
+    }
     if (body.action === "apply") {
       if (!body.confirm)
         return Response.json(
@@ -134,6 +156,7 @@ export async function POST(request: Request) {
         dayCode: body.dayCode ? String(body.dayCode) : undefined,
         nightCode: body.nightCode ? String(body.nightCode) : undefined,
       });
+      await applyWeeklyToSchedule(env.DB,date,schedule.id);
       await writeAudit(request,{action:"apply",entityType:"schedule_pattern",entityId:schedule.id,summary:`Aplicou os padrões ${body.dayCode} e ${body.nightCode} na escala de ${date}`,after:{date,dayCode:body.dayCode,nightCode:body.nightCode}});
       return Response.json({ ok: true, ...result, date });
     }

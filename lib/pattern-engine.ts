@@ -178,3 +178,16 @@ export async function applyPatternsToSchedule(
       .run();
   return { ...automatic, dayCode, nightCode, applied: commands.length > 0 };
 }
+
+export async function applyWeeklyToSchedule(db:D1Database,date:string,scheduleId:number) {
+  const weekday=new Date(`${date}T12:00:00Z`).getUTCDay();
+  if(weekday===0||weekday===6)return 0;
+  const slots=(await db.prepare("SELECT w.* FROM weekly_slots w JOIN guards g ON g.id=w.guard_id WHERE w.active=1 AND g.active=1 AND instr(','||w.weekdays||',',','||?||',')>0 AND (w.vehicle_id IS NULL OR NOT EXISTS (SELECT 1 FROM vehicle_outages o WHERE o.vehicle_id=w.vehicle_id AND o.active=1 AND o.starts_on<=? AND (o.ends_on IS NULL OR o.ends_on>=?)))").bind(String(weekday),date,date).all<Record<string,unknown>>()).results;
+  const statements:D1PreparedStatement[]=[];
+  for(const slot of slots){
+    const end=String(slot.overtime_end||slot.regular_end);
+    statements.push(db.prepare("INSERT OR IGNORE INTO assignments (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,status,request_ref) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(scheduleId,slot.guard_id,slot.post_id,slot.vehicle_id,"W",slot.role,`${date}T${slot.starts_at}`,`${date}T${end}`,slot.overtime_end?"overtime":"normal",slot.overtime_end?`HE semanal após ${slot.regular_end}`:null));
+  }
+  if(statements.length)await db.batch(statements);
+  return statements.length;
+}

@@ -12,6 +12,7 @@ export const users = sqliteTable("users", {
 export const guards = sqliteTable("guards", {
   id: integer("id").primaryKey({autoIncrement:true}), registration: text("registration").notNull().unique(), name:text("name").notNull(),
   platoon:text("platoon"), baseShift:text("base_shift"), active:integer("active",{mode:"boolean"}).notNull().default(true), ...audit,
+  workRegime:text("work_regime",{enum:["12x36","weekly"]}).notNull().default("12x36"),
 });
 export const posts = sqliteTable("posts", {
   id:integer("id").primaryKey({autoIncrement:true}), name:text("name").notNull(), groupName:text("group_name").notNull(), sortOrder:integer("sort_order").notNull().default(0), active:integer("active",{mode:"boolean"}).notNull().default(true), ...audit,
@@ -24,8 +25,10 @@ export const schedules = sqliteTable("schedules", {
 },t=>[uniqueIndex("idx_schedules_date").on(t.date)]);
 export const assignments = sqliteTable("assignments", {
   id:integer("id").primaryKey({autoIncrement:true}), scheduleId:integer("schedule_id").notNull().references(()=>schedules.id), guardId:integer("guard_id").notNull().references(()=>guards.id),
-  postId:integer("post_id").references(()=>posts.id), vehicleId:integer("vehicle_id").references(()=>vehicles.id), shift:text("shift").notNull(), role:text("role",{enum:["guard","driver","patrol","third"]}).notNull().default("guard"), startsAt:text("starts_at").notNull(), endsAt:text("ends_at").notNull(), status:text("status",{enum:["normal","overtime","time_bank","swap"]}).notNull().default("normal"), requestRef:text("request_ref"), ...audit,
+  postId:integer("post_id").references(()=>posts.id), vehicleId:integer("vehicle_id").references(()=>vehicles.id), shift:text("shift").notNull(), role:text("role",{enum:["guard","driver","patrol","third"]}).notNull().default("guard"), startsAt:text("starts_at").notNull(), endsAt:text("ends_at").notNull(), status:text("status",{enum:["normal","overtime","time_bank","swap"]}).notNull().default("normal"), requestRef:text("request_ref"), isReassigned:integer("is_reassigned",{mode:"boolean"}).notNull().default(false), reassignmentNote:text("reassignment_note"), ...audit,
 },t=>[uniqueIndex("idx_assignments_schedule_guard_time").on(t.scheduleId,t.guardId,t.startsAt)]);
+export const weeklySlots = sqliteTable("weekly_slots", {id:integer("id").primaryKey({autoIncrement:true}),guardId:integer("guard_id").notNull().references(()=>guards.id),weekdays:text("weekdays").notNull().default("1,2,3,4,5"),postId:integer("post_id").references(()=>posts.id),vehicleId:integer("vehicle_id").references(()=>vehicles.id),role:text("role").notNull().default("guard"),startsAt:text("starts_at").notNull().default("08:00"),breakStart:text("break_start"),breakEnd:text("break_end"),regularEnd:text("regular_end").notNull().default("17:00"),overtimeEnd:text("overtime_end"),active:integer("active",{mode:"boolean"}).notNull().default(true),...audit},t=>[uniqueIndex("idx_weekly_slots_guard").on(t.guardId)]);
+export const vehicleOutages = sqliteTable("vehicle_outages", {id:integer("id").primaryKey({autoIncrement:true}),vehicleId:integer("vehicle_id").notNull().references(()=>vehicles.id),startsOn:text("starts_on").notNull(),endsOn:text("ends_on"),reason:text("reason"),active:integer("active",{mode:"boolean"}).notNull().default(true),...audit});
 export const movements = sqliteTable("movements", {
   id:integer("id").primaryKey({autoIncrement:true}), guardId:integer("guard_id").notNull().references(()=>guards.id), type:text("type",{enum:["day_off","vacation","course","medical_leave","technical_reserve","time_bank","swap"]}).notNull(), startsAt:text("starts_at").notNull(), endsAt:text("ends_at").notNull(), requestRef:text("request_ref"), notes:text("notes"), status:text("status",{enum:["pending","approved","rejected"]}).notNull().default("approved"), ...audit,
 });

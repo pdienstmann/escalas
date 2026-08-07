@@ -29,6 +29,13 @@
       "when": 1786120000000,
       "tag": "0003_audit_history",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786122000000,
+      "tag": "0004_work_regimes_and_fleet",
+      "breakpoints": true
     }
   ]
 }

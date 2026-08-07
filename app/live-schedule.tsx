@@ -7,6 +7,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 type Rec = Record<string, string | number | null>;
@@ -20,6 +21,7 @@ type State = {
   removed: Rec[];
   movements: Rec[];
   notices: Rec[];
+  patternLabel?: string;
 };
 type Pick = {
   kind: "post" | "vehicle";
@@ -49,14 +51,18 @@ export function LiveSchedule() {
     [date, setDate] = useState("2026-08-12"),
     [query, setQuery] = useState(""),
     [saving, setSaving] = useState(false);
+  const loadSequence=useRef(0);
   const load = useCallback(async () => {
+    const sequence=++loadSequence.current;
     try {
       setPick(null);
+      setData(null);
       const r = await fetch(`/api/schedule?date=${date}&_=${Date.now()}`, {
         cache: "no-store",
       });
       if (!r.ok) throw new Error();
-      setData(await r.json());
+      const value=await r.json();
+      if(sequence===loadSequence.current)setData(value);
     } catch {
       setMessage(
         "Não foi possível consultar a escala. Recarregue a página para tentar novamente.",
@@ -167,12 +173,14 @@ export function LiveSchedule() {
       endsAt: t.end,
       status: assignment.status,
       requestRef: assignment.request_ref || null,
+      isReassigned: assignment.is_reassigned || 0,
+      reassignmentNote: assignment.reassignment_note || null,
     });
   }
   if (!data)
     return (
       <main className="live-loading">
-        {message || "Preparando a escala operacional…"}
+        <div className="loading-card"><span className="loading-spinner"/><b>Carregando escala de {new Date(date+"T12:00:00").toLocaleDateString("pt-BR")}</b><small>{message||"Aplicando padrões, afastamentos e disponibilidade das viaturas…"}</small></div>
       </main>
     );
   const holes = resources.reduce(
@@ -184,7 +192,7 @@ export function LiveSchedule() {
             (a) =>
               (x.kind === "post"
                 ? a.post_id === x.r.id
-                : a.vehicle_id === x.r.id) && a.shift === s.id,
+                : a.vehicle_id === x.r.id) && belongsToShift(a,s.id),
           ).length < (x.kind === "vehicle" ? 2 : 1),
       ).length,
     0,
@@ -196,7 +204,7 @@ export function LiveSchedule() {
           <span className="crest">GM</span>
           <div>
             <b>Escala diária</b>
-            <small>Guarda Municipal de Novo Hamburgo</small>
+            <small>{new Date(data.date+"T12:00:00").toLocaleDateString("pt-BR")} · {data.patternLabel}</small>
           </div>
         </div>
         <div className="date">
@@ -233,7 +241,8 @@ export function LiveSchedule() {
         <Link href="/historico">Histórico</Link>
       </nav>
       <section className="toolbar">
-        <strong>Dados reais</strong>
+        <strong>Escala de {new Date(data.date+"T12:00:00").toLocaleDateString("pt-BR")}</strong>
+        <span className="pattern-confirm">Padrão: {data.patternLabel}</span>
         <span className="sync">● sincronizado</span>
         <input
           value={query}
@@ -417,7 +426,7 @@ function Row({
               (a) =>
                 (kind === "post"
                   ? a.post_id === resource.id
-                  : a.vehicle_id === resource.id) && a.shift === s.id,
+                  : a.vehicle_id === resource.id) && belongsToShift(a,s.id),
             ),
             need = kind === "vehicle" ? 2 : 1;
           return (
@@ -430,7 +439,7 @@ function Row({
               {list.map((a) => (
                 <button
                   draggable
-                  className={`live-person ${a.status} ${Number(a.id) === selectedId ? "is-selected" : ""}`}
+                  className={`live-person ${a.status} ${Number(a.is_reassigned)?"reassigned":""} ${Number(a.id) === selectedId ? "is-selected" : ""}`}
                   key={a.id}
                   onDragStart={(e) => {
                     e.dataTransfer.effectAllowed = "move";
@@ -451,6 +460,7 @@ function Row({
                       {statusShort(String(a.status))}
                     </span>
                   )}
+                  {Number(a.is_reassigned)===1&&<span className="badge remanejamento">REM</span>}
                   <small>
                     {String(a.starts_at).slice(11, 16)}–
                     {String(a.ends_at).slice(11, 16)}
@@ -620,6 +630,8 @@ function Editor({
           <option value="swap">Troca de serviço</option>
         </select>
       </label>
+      <label className="reassignment-check"><span><input type="checkbox" name="isReassigned" defaultChecked={Number(a?.is_reassigned)===1}/> GM remanejado — precisa ser avisado</span></label>
+      <label>Observação do remanejamento<input name="reassignmentNote" defaultValue={String(a?.reassignment_note||"")} placeholder="Origem, motivo ou orientação"/></label>
       <label>
         Requerimento
         <input
@@ -650,6 +662,7 @@ const statusClass = (s: string) =>
   s === "overtime" ? "he" : s === "time_bank" ? "bh" : "troca";
 const statusShort = (s: string) =>
   s === "overtime" ? "HE" : s === "time_bank" ? "BH" : "TROCA";
+function belongsToShift(a:Rec,shift:string){if(String(a.shift)===shift)return true;if(String(a.shift)!=="W")return false;const start=String(a.starts_at).slice(11,16),end=String(a.ends_at).slice(11,16);if(shift==="2")return start<"13:00"&&end>"07:00";if(shift==="3")return start<"19:00"&&end>"13:00";return false}
 const labelStatus = (s: string) =>
   ({
     day_off: "Folga",
