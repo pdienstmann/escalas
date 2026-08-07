@@ -21,6 +21,8 @@ type State = {
   removed: Rec[];
   movements: Rec[];
   notices: Rec[];
+  sections: Rec[];
+  availableForRedeployment: Rec[];
   patternLabel?: string;
 };
 type Pick = {
@@ -75,19 +77,22 @@ export function LiveSchedule() {
   }, [load]);
   const resources = useMemo(() => {
     if (!data) return [];
+    const sectionMeta=new Map(data.sections.map(section=>[String(section.section_key),section]));
     const all = [
       ...data.vehicles.map((r) => ({
         kind: "vehicle" as const,
         r,
-        section: "VIATURAS E ZONAS",
+        section: String(sectionMeta.get("VEHICLES")?.label||"VIATURAS E ZONAS"),
+        order:Number(sectionMeta.get("VEHICLES")?.sort_order||0),
       })),
       ...data.posts.map((r) => ({
         kind: "post" as const,
         r,
-        section: String(r.group_name || "POSTOS"),
+        section: String(sectionMeta.get(`POST:${r.group_name}`)?.label||r.group_name||"POSTOS"),
+        order:Number(sectionMeta.get(`POST:${r.group_name}`)?.sort_order||99),
       })),
     ];
-    return all.filter((x) =>
+    return all.sort((a,b)=>a.order-b.order||String(a.section).localeCompare(String(b.section))).filter((x) =>
       `${x.r.name || ""} ${x.r.prefix || ""} ${x.r.zone || ""} ${x.r.group_name || ""}`
         .toLowerCase()
         .includes(query.toLowerCase()),
@@ -119,6 +124,9 @@ export function LiveSchedule() {
                         j.assignment,
                       ]
                     : current.assignments,
+                availableForRedeployment: j.assignment
+                  ? current.availableForRedeployment.filter((a) => a.id !== j.assignment.id)
+                  : current.availableForRedeployment,
               }
             : current,
         );
@@ -328,6 +336,7 @@ export function LiveSchedule() {
               )}
             </div>
           </section>
+          {data.availableForRedeployment.length>0&&<section className="redeployment-pool"><header><div><span>VIATURA INDISPONÍVEL</span><h2>GMs à disposição para remanejamento</h2><p>Estas designações foram retiradas de uma VTR em FA ou desativada; escolha um novo destino antes de fechar a escala.</p></div><b>{data.availableForRedeployment.length}</b></header><div>{data.availableForRedeployment.map(a=><article key={String(a.id)}><div><b>{String(a.guard_name)}</b><small>{String(a.starts_at).slice(11,16)}–{String(a.ends_at).slice(11,16)} · aguardando destino</small></div><button onClick={()=>data.posts[0]&&setPick({kind:"post",resource:data.posts[0],shift:String(a.shift)==="W"?"2":String(a.shift),assignment:a})}>Remanejar</button></article>)}</div></section>}
         </section>
         <aside className={`editor ${pick ? "editor-active" : ""}`}>
           {pick ? (
@@ -403,7 +412,7 @@ function Row({
           className={`group ${section === "SEDE DA GM" ? "headquarters" : ""}`}
         >
           <td colSpan={5}>
-            {kind === "vehicle" ? "▰" : "◆"} {section}
+            {kind === "vehicle" ? "🚓" : "◆"} {section}
           </td>
         </tr>
       )}
@@ -457,13 +466,12 @@ function Row({
                   <b>{a.guard_name}</b>
                   {a.status !== "normal" && (
                     <span className={`badge ${statusClass(String(a.status))}`}>
-                      {statusShort(String(a.status))}
+                      {String(a.work_kind)==="weekly"&&String(a.regular_ends_at||"")!==String(a.ends_at)?weeklyHeShort(a):statusShort(String(a.status))}
                     </span>
                   )}
                   {Number(a.is_reassigned)===1&&<span className="badge remanejamento">REM</span>}
                   <small>
-                    {String(a.starts_at).slice(11, 16)}–
-                    {String(a.ends_at).slice(11, 16)}
+                    {weeklyDisplay(a)}
                   </small>
                 </button>
               ))}
@@ -657,11 +665,13 @@ function Editor({
   );
 }
 const vehicleIcon = (t: string) =>
-  t === "moto" ? "◉" : t === "pickup" ? "▰" : t === "van" ? "▣" : "▱";
+  t === "moto" ? "🏍️" : t === "pickup" ? "🛻" : t === "van" ? "🚐" : t === "suv" ? "🚙" : "🚓";
 const statusClass = (s: string) =>
   s === "overtime" ? "he" : s === "time_bank" ? "bh" : "troca";
 const statusShort = (s: string) =>
   s === "overtime" ? "HE" : s === "time_bank" ? "BH" : "TROCA";
+function weeklyDisplay(a:Rec){const start=String(a.starts_at).slice(11,16),regular=String(a.regular_ends_at||"").slice(11,16),end=String(a.ends_at).slice(11,16),breakStart=String(a.break_starts_at||"").slice(11,16),breakEnd=String(a.break_ends_at||"").slice(11,16);if(String(a.work_kind)!=="weekly")return `${start}–${end}`;const base=breakStart&&breakEnd?`${start}–${breakStart} / ${breakEnd}–${regular}`:`${start}–${regular}`;return end!==regular?`${base} + HE semanal ${regular}–${end}`:base}
+function weeklyHeShort(a:Rec){const start=String(a.regular_ends_at).slice(11,16),end=String(a.ends_at).slice(11,16);const minutes=(value:string)=>Number(value.slice(0,2))*60+Number(value.slice(3,5));return `HE SEMANAL · ${Math.max(0,(minutes(end)-minutes(start))/60)}h`}
 function belongsToShift(a:Rec,shift:string){if(String(a.shift)===shift)return true;if(String(a.shift)!=="W")return false;const start=String(a.starts_at).slice(11,16),end=String(a.ends_at).slice(11,16);if(shift==="2")return start<"13:00"&&end>"07:00";if(shift==="3")return start<"19:00"&&end>"13:00";return false}
 const labelStatus = (s: string) =>
   ({

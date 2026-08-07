@@ -6,6 +6,7 @@ import {
   resolvePatternCodes,
 } from "../../../lib/pattern-engine";
 import { writeAudit } from "../../../lib/audit";
+import { permitted } from "../../../lib/access";
 
 export const dynamic = "force-dynamic";
 const demoGuards = [
@@ -62,15 +63,6 @@ const demoGuards = [
   "DOUGLAS",
   "DE ALMEIDA",
 ];
-
-function permitted(request: Request) {
-  const host = new URL(request.url).hostname;
-  return (
-    host === "localhost" ||
-    host === "127.0.0.1" ||
-    Boolean(request.headers.get("oai-authenticated-user-id"))
-  );
-}
 
 async function ensureCatalog() {
   const [guardCount, vehicleCount, postRows] = await Promise.all([
@@ -213,6 +205,13 @@ async function ensureDemoMovements() {
   );
 }
 
+async function ensureSections(){
+  const groups=(await env.DB.prepare("SELECT group_name,MIN(sort_order) sort_order FROM posts WHERE active=1 GROUP BY group_name").all<{group_name:string;sort_order:number}>()).results;
+  const commands=[env.DB.prepare("INSERT OR IGNORE INTO schedule_sections (section_key,label,sort_order) VALUES ('VEHICLES','VIATURAS E ZONAS',0)")];
+  for(const group of groups)commands.push(env.DB.prepare("INSERT OR IGNORE INTO schedule_sections (section_key,label,sort_order) VALUES (?,?,?)").bind(`POST:${group.group_name}`,group.group_name,Number(group.sort_order||0)+10));
+  await env.DB.batch(commands);
+}
+
 function shiftTimes(date: string, shift: string) {
   const values: Record<string, [string, string]> = {
     "2": ["07:00", "13:00"],
@@ -311,6 +310,7 @@ async function seedSchedule(date: string, scheduleId: number) {
 async function ensureBase(date: string) {
   await ensureCatalog();
   await ensureDemoMovements();
+  await ensureSections();
   await ensurePatterns(env.DB);
   await env.DB.prepare(
     "INSERT OR IGNORE INTO schedules (date,status) VALUES (?,'draft')",
@@ -335,7 +335,7 @@ export async function GET(request: Request) {
   const schedule = await env.DB.prepare("SELECT * FROM schedules WHERE date=?")
     .bind(date)
     .first<Record<string, unknown>>();
-  const [guards, posts, vehicles, assignments, movements, notices] =
+  const [guards, posts, vehicles, assignments, movements, notices, outages, sections] =
     await Promise.all([
       env.DB.prepare(
         "SELECT id,name,registration,platoon,base_shift,work_regime FROM guards WHERE active=1 ORDER BY name",
@@ -361,10 +361,13 @@ export async function GET(request: Request) {
       )
         .bind(date)
         .all(),
+      env.DB.prepare("SELECT o.*,v.prefix,v.type,v.zone FROM vehicle_outages o JOIN vehicles v ON v.id=o.vehicle_id WHERE o.active=1 AND o.starts_on<=? AND (o.ends_on IS NULL OR o.ends_on>=?)").bind(date,date).all(),
+      env.DB.prepare("SELECT section_key,label,sort_order FROM schedule_sections ORDER BY sort_order,label").all(),
     ]);
   const blocked = new Set(movements.results.map((m) => Number(m.guard_id))),
+    visibleVehicleIds=new Set(vehicles.results.map((v)=>Number(v.id))),
     active = assignments.results.filter(
-      (a) => !blocked.has(Number(a.guard_id)),
+      (a) => !blocked.has(Number(a.guard_id))&&(!a.vehicle_id||visibleVehicleIds.has(Number(a.vehicle_id))),
     );
   const appliedPattern=await env.DB.prepare("SELECT dp.code day_code,np.code night_code FROM schedule_patterns sp JOIN shift_patterns dp ON dp.id=sp.day_pattern_id JOIN shift_patterns np ON np.id=sp.night_pattern_id WHERE sp.schedule_id=?").bind(schedule?.id).first<Record<string,unknown>>();
   const suggested=appliedPattern?null:await resolvePatternCodes(env.DB,date);
@@ -375,9 +378,12 @@ export async function GET(request: Request) {
     posts: posts.results,
     vehicles: vehicles.results,
     assignments: active,
+    availableForRedeployment: assignments.results.filter((a)=>!blocked.has(Number(a.guard_id))&&Boolean(a.vehicle_id)&&!visibleVehicleIds.has(Number(a.vehicle_id))),
     removed: assignments.results.filter((a) => blocked.has(Number(a.guard_id))),
     movements: movements.results,
     notices: notices.results,
+    outages: outages.results,
+    sections: sections.results,
     patternLabel: appliedPattern?`${appliedPattern.day_code} + ${appliedPattern.night_code} + SEMANAL`:`${suggested?.dayCode} + ${suggested?.nightCode} + SEMANAL · AJUSTES`,
   });
 }
@@ -436,7 +442,7 @@ export async function POST(request: Request) {
   let assignmentId = id;
   if (id)
     await env.DB.prepare(
-      "UPDATE assignments SET guard_id=?,post_id=?,vehicle_id=?,shift=?,role=?,starts_at=?,ends_at=?,status=?,request_ref=?,is_reassigned=?,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+      "UPDATE assignments SET guard_id=?,post_id=?,vehicle_id=?,shift=?,role=?,starts_at=?,ends_at=?,regular_ends_at=COALESCE(?,regular_ends_at),break_starts_at=COALESCE(?,break_starts_at),break_ends_at=COALESCE(?,break_ends_at),work_kind=COALESCE(?,work_kind),status=?,request_ref=?,is_reassigned=?,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
     )
       .bind(
         guardId,
@@ -446,6 +452,10 @@ export async function POST(request: Request) {
         b.role,
         start,
         end,
+        b.regularEndsAt || null,
+        b.breakStartsAt || null,
+        b.breakEndsAt || null,
+        b.workKind || null,
         b.status,
         b.requestRef || null,
         b.isReassigned ? 1 : 0,
@@ -455,7 +465,7 @@ export async function POST(request: Request) {
       .run();
   else {
     const created = await env.DB.prepare(
-      "INSERT INTO assignments (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,status,request_ref,is_reassigned,reassignment_note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+      "INSERT INTO assignments (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,regular_ends_at,break_starts_at,break_ends_at,work_kind,status,request_ref,is_reassigned,reassignment_note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
     )
       .bind(
         scheduleId,
@@ -466,6 +476,10 @@ export async function POST(request: Request) {
         b.role,
         start,
         end,
+        b.regularEndsAt || null,
+        b.breakStartsAt || null,
+        b.breakEndsAt || null,
+        b.workKind || "shift",
         b.status,
         b.requestRef || null,
         b.isReassigned ? 1 : 0,

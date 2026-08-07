@@ -1,0 +1,13 @@
+name = "escala-gmnh"
+main = "./worker/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "escala-gmnh"
+database_id = "cef77d96-af7a-4516-b9cf-882b6c01ebb2"
+
+[assets]
+directory = "./dist/client"
+binding = "ASSETS"

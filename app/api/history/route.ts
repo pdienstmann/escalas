@@ -1,12 +1,9 @@
 import { env } from "cloudflare:workers";
 import { actorFromRequest, writeAudit } from "../../../lib/audit";
+import { permitted } from "../../../lib/access";
 
 export const dynamic = "force-dynamic";
 
-function permitted(request: Request) {
-  const host = new URL(request.url).hostname;
-  return host === "localhost" || host === "127.0.0.1" || Boolean(request.headers.get("oai-authenticated-user-id"));
-}
 
 export async function GET(request: Request) {
   if (!permitted(request)) return Response.json({error:"Não autorizado"},{status:401});
@@ -86,10 +83,10 @@ export async function POST(request: Request) {
 }
 
 function assignmentUpdate(row: Row, id: number) {
-  return env.DB.prepare("UPDATE assignments SET schedule_id=?,guard_id=?,post_id=?,vehicle_id=?,shift=?,role=?,starts_at=?,ends_at=?,status=?,request_ref=?,is_reassigned=?,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(row.schedule_id,row.guard_id,row.post_id,row.vehicle_id,row.shift,row.role,row.starts_at,row.ends_at,row.status,row.request_ref,row.is_reassigned||0,row.reassignment_note||null,id);
+  return env.DB.prepare("UPDATE assignments SET schedule_id=?,guard_id=?,post_id=?,vehicle_id=?,shift=?,role=?,starts_at=?,ends_at=?,regular_ends_at=?,break_starts_at=?,break_ends_at=?,work_kind=?,status=?,request_ref=?,is_reassigned=?,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(row.schedule_id,row.guard_id,row.post_id,row.vehicle_id,row.shift,row.role,row.starts_at,row.ends_at,row.regular_ends_at||null,row.break_starts_at||null,row.break_ends_at||null,row.work_kind||"shift",row.status,row.request_ref,row.is_reassigned||0,row.reassignment_note||null,id);
 }
 function assignmentInsert(row: Row, id: number) {
-  return env.DB.prepare("INSERT INTO assignments (id,schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,status,request_ref,is_reassigned,reassignment_note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(id,row.schedule_id,row.guard_id,row.post_id,row.vehicle_id,row.shift,row.role,row.starts_at,row.ends_at,row.status,row.request_ref,row.is_reassigned||0,row.reassignment_note||null);
+  return env.DB.prepare("INSERT INTO assignments (id,schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,regular_ends_at,break_starts_at,break_ends_at,work_kind,status,request_ref,is_reassigned,reassignment_note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(id,row.schedule_id,row.guard_id,row.post_id,row.vehicle_id,row.shift,row.role,row.starts_at,row.ends_at,row.regular_ends_at||null,row.break_starts_at||null,row.break_ends_at||null,row.work_kind||"shift",row.status,row.request_ref,row.is_reassigned||0,row.reassignment_note||null);
 }
 function movementUpdate(row:Row,id:number){return env.DB.prepare("UPDATE movements SET guard_id=?,type=?,starts_at=?,ends_at=?,request_ref=?,notes=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(row.guard_id,row.type,row.starts_at,row.ends_at,row.request_ref,row.notes,row.status,id)}
 function movementInsert(row:Row,id:number){return env.DB.prepare("INSERT INTO movements (id,guard_id,type,starts_at,ends_at,request_ref,notes,status) VALUES (?,?,?,?,?,?,?,?)").bind(id,row.guard_id,row.type,row.starts_at,row.ends_at,row.request_ref,row.notes,row.status)}

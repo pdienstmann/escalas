@@ -40,3 +40,73 @@
 - Validação e publicação da escala.
 - PDF A3 paisagem em no máximo frente e verso: diurno na frente, noturno no verso.
 - Reserva técnica, folgas, férias, cursos, atestados/licenças, banco de horas e trocas incluídos no PDF.
+
+## Roadmap priorizado — próxima etapa
+
+### Fase 1 — correções de contexto, ordem e carregamento
+
+- Criar um contexto global da data aberta e manter a data na URL durante toda a navegação. Ao entrar em Movimentações, HE, Folgas, Cadastros, Padrões ou PDF e voltar, restaurar exatamente a mesma escala, sem retornar automaticamente para 12/08/2026.
+- Remover datas fixas das telas e APIs. Usar a data da URL, a última data consultada ou a data atual como alternativa segura.
+- Unificar o carregamento de todos os módulos com skeleton/overlay, nome da área sendo aberta e bloqueio contra cliques repetidos. Substituir textos isolados como “Carregando folgas mensais…”.
+- Corrigir a configuração “Ordem na escala e no PDF”: a mesma lista ordenada de seções deve alimentar a escala operacional e o documento impresso.
+- Substituir o botão Editar quebrado das seções por um editor em painel/modal, corrigir sobreposição do texto e mostrar confirmação imediata após renomear ou reordenar.
+- Criar testes de regressão para data preservada, ordem das seções e geração do PDF.
+- Corrigir os fluxos de retirada e recolocação de GMs, especialmente quando uma viatura é removida, desativada, colocada em FA ou disponibilizada novamente. As operações devem ser transacionais, sem duplicar designações, perder horários ou deixar GMs invisíveis.
+- Criar testes específicos para o ciclo completo `VTR ativa → FA/remoção → equipe à disposição → remanejamento ou retorno da VTR`, garantindo que todos os integrantes continuem localizáveis em cada etapa.
+
+### Fase 2 — desempenho e experiência da escala
+
+- Indexar previamente as designações por recurso e turno, evitando filtrar todos os GMs repetidamente em cada célula da tabela.
+- Renderizar somente as linhas próximas da área visível, ou aplicar contenção de renderização, mantendo cabeçalhos e primeira coluna fixos. A impressão continuará usando uma visualização própria, sem virtualização.
+- Permitir recolher/expandir seções, saltar diretamente para uma área e filtrar por posto, VTR, zona, GM, furo ou remanejamento.
+- Tornar a rolagem horizontal e vertical mais previsível, com cabeçalhos fixos, indicador do turno atual e atalhos “Diurno”, “Noturno” e “Pendências”.
+- Melhorar a separação visual entre guarnições/viaturas com divisores consistentes, alternância sutil de fundo, cabeçalho compacto por VTR e agrupamento inequívoco de motorista, patrulheiro, demais integrantes e zona de atuação.
+- Melhorar a troca de GM com busca por nome/matrícula, destaque animado do registro selecionado, resumo “GM anterior → novo GM”, confirmação visual forte, opção de desfazer e bloqueio enquanto salva.
+- Incluir o botão “Adicionar GM à escala” diretamente na tela operacional. O fluxo deverá permitir escolher GM, turno, horário, função e destino, exibindo conflitos antes de confirmar.
+- Adotar como regra permanente de negócio que nenhum GM pode desaparecer da escala. Ao remover uma designação, posto ou viatura, o sistema deverá exigir um novo destino ou enviar o GM para uma área visível de “À disposição / aguardando remanejamento”.
+- Permitir criar, editar, renomear, reordenar e desativar postos diretamente na escala, usando um painel lateral compacto. A área de Cadastros continuará disponível para manutenção em massa.
+- Ao excluir ou desativar um posto com GMs escalados, mostrar os envolvidos, oferecer transferência coletiva e impedir que as designações fiquem sem representação visual.
+- Transformar remanejamentos em uma fila operacional compacta: origem, destino sugerido, horário, motivo, requerimento, situação de aviso e ação direta para escolher uma vaga.
+- Quando uma VTR entrar em FA, permitir arrastar cada GM da fila de remanejamento diretamente até a célula de um posto/turno. Os destinos válidos deverão ser destacados durante o arraste e a mudança deverá preservar horário, situação e referência original.
+- Como alternativa ao arrastar, disponibilizar no próprio card do GM o botão “Escolher posto”, abrindo uma caixa compacta com busca e seleção de seção, posto, turno e função, sem encaminhar o usuário ao painel lateral da direita.
+- Confirmar o remanejamento nessa caixa compacta, atualizar escala e fila imediatamente e oferecer “Desfazer”. Se houver conflito, afastamento ou incompatibilidade de horário, manter o GM na fila e explicar o impedimento sem perder os dados.
+- Ao clicar em um furo, abrir um preenchimento rápido junto à própria célula, sem exigir o painel lateral completo. A tela mostrará o destino, turno, horário, função necessária e uma busca curta de GMs elegíveis.
+- Incluir “Sugerir GM para HE”. A primeira preferência será um GM da equipe/padrão do dia contrário que normalmente trabalhe no mesmo posto ou viatura e esteja de folga naquele dia. Depois, ordenar os demais elegíveis por menor quantidade de HE, maior intervalo desde a última HE e compatibilidade de função.
+- Antes de sugerir ou confirmar, excluir automaticamente quem estiver escalado, afastado, em férias, curso, licença, folga registrada, descanso incompatível ou com conflito de horário. A sugestão nunca será aplicada sem confirmação do escalante.
+- Permitir confirmar o GM sugerido em poucos passos, já marcando `HE`, função, horário e origem da sugestão; manter uma opção “Ver outros GMs” para seleção manual.
+- Tornar “Efetivo retirado automaticamente” compacto e agrupado por Reserva técnica, Folgas, Férias, Cursos, Licenças/atestados, Banco de horas e Trocas. Cada grupo terá contador e lista densa de nomes, preservando período e requerimento.
+- Padronizar durações de HE semanal em formato legível, como `2h` ou `2h30`, sem casas decimais desnecessárias. Aplicar o mesmo formato na escala, controle de HE e PDF.
+
+### Fase 3 — módulo exclusivo de viaturas
+
+- Criar a aba “Viaturas” e transferir para ela cadastro, edição, desativação, tipo, zona, histórico e registros de FA.
+- Exibir um panorama esquemático da frota com contadores e grupos: Disponíveis, Em serviço, Em FA, Reserva e Retorno previsto.
+- Representar sedan, caminhonete, SUV, furgão e moto com ícones consistentes; incluir busca por prefixo/zona e filtros por tipo e disponibilidade.
+- Mostrar em cada VTR a situação atual, zona, equipe escalada, início do FA, retorno previsto e motivo.
+- Permitir registrar FA por período ou prazo indeterminado. Os GMs retirados da VTR devem permanecer na fila de remanejamento.
+- Na própria escala, adicionar edição rápida ao cabeçalho da viatura para trocar a VTR física, alterar a zona de atuação ou mover a equipe completa, preservando motorista/patrulheiro e verificando conflitos.
+- Essa edição rápida deverá usar um seletor simples com todas as viaturas, agrupadas e sinalizadas como “Disponível”, “Em serviço” ou “Em FA”. Viaturas em FA permanecerão visíveis para consulta, com motivo e retorno previsto; sua seleção exigirá regularização ou confirmação administrativa explícita.
+- Permitir alterar a área/zona de atuação no mesmo painel da viatura, sem acessar Cadastros, mostrando imediatamente a nova identificação na escala.
+- Quando uma VTR for trocada, removida ou colocada em FA, preservar motorista, patrulheiro e demais integrantes na escala: transferir a equipe para a nova VTR ou colocá-la integralmente em “À disposição / aguardando remanejamento”.
+- Registrar essas alterações no histórico e refletir imediatamente a nova VTR/zona no PDF.
+
+### Fase 4 — completar o roadmap funcional existente
+
+- Reformular a edição detalhada dos padrões 12x36 e semanais para usar uma matriz semelhante à escala diária: seções, postos, VTRs, zonas e posições de motorista/patrulheiro claramente alinhadas.
+- Permitir localizar, adicionar, mover e retirar GMs do padrão pela própria matriz, com arrastar/soltar e edição rápida, mostrando sempre em qual equipe, posto, viatura e função cada GM ficará.
+- Exibir uma prévia do dia que o padrão geraria antes de salvar/aplicar, com validação de duplicidades, posições vazias e GMs sem destino.
+- Revisar autenticação e compartilhamento para acesso confiável pelo Chrome e Edge, mantendo o aplicativo privado.
+- Completar Alterações diversas com edição do registro, além de conferir, reabrir, excluir e manter histórico.
+- Fortalecer campanhas de folgas: limites por data/equipe/turno, lista de espera, publicação e integração automática com as escalas futuras.
+- Refinar validação e publicação: pendências por gravidade, atalhos para corrigir o furo e confirmação da data/padrão antes de publicar.
+- Validar o PDF com volume real de mais de 200 GMs, garantindo ordem das seções, frente/verso, ícones discretos e textos legíveis.
+- Ampliar permissões por perfil, auditoria, recuperação de alterações e testes automatizados dos fluxos críticos.
+
+### Ordem recomendada de execução
+
+1. Data persistente, carregamentos e correção da ordem/edição das seções.
+2. Integridade ao retirar/recolocar GMs e viaturas, seguida da otimização da tabela e separação visual das guarnições.
+3. Preenchimento rápido de furos, sugestão segura de HE e troca de GMs.
+4. Efetivo retirado compacto, agrupamentos e formatação da HE semanal.
+5. Nova aba Viaturas e edição rápida de VTR/zona dentro da escala.
+6. Edição visual dos padrões, folgas, validação/PDF, acesso externo e controles administrativos.

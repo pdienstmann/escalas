@@ -1,8 +1,10 @@
 import { env } from "cloudflare:workers";
 import { writeAudit } from "../../../lib/audit";
+import { permitted } from "../../../lib/access";
 
 export const dynamic="force-dynamic";
-function permitted(request:Request){const host=new URL(request.url).hostname;return host==="localhost"||host==="127.0.0.1"||Boolean(request.headers.get("oai-authenticated-user-id"))}
+
+
 
 export async function GET(request:Request){
   if(!permitted(request))return Response.json({error:"Não autorizado"},{status:401});

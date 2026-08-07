@@ -36,6 +36,13 @@
       "when": 1786122000000,
       "tag": "0004_work_regimes_and_fleet",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786125000000,
+      "tag": "0005_weekly_details_and_sections",
+      "breakpoints": true
     }
   ]
 }

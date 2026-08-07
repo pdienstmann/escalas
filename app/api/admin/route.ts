@@ -1,16 +1,9 @@
 import { env } from "cloudflare:workers";
 import { writeAudit } from "../../../lib/audit";
+import { permitted } from "../../../lib/access";
 
 export const dynamic = "force-dynamic";
 
-function permitted(request: Request) {
-  const host = new URL(request.url).hostname;
-  return (
-    host === "localhost" ||
-    host === "127.0.0.1" ||
-    Boolean(request.headers.get("oai-authenticated-user-id"))
-  );
-}
 
 async function seed() {
   const count = await env.DB.prepare(
@@ -90,13 +83,20 @@ async function syncConfirmedLeaves(choiceId?: number) {
     AND NOT EXISTS (SELECT 1 FROM movements m WHERE m.request_ref='FOLGA-'||c.id)`);
   await (choiceId ? statement.bind(choiceId) : statement).run();
 }
+async function ensureSections(){
+  const groups=(await env.DB.prepare("SELECT group_name,MIN(sort_order) sort_order FROM posts WHERE active=1 GROUP BY group_name").all<{group_name:string;sort_order:number}>()).results;
+  const commands=[env.DB.prepare("INSERT OR IGNORE INTO schedule_sections (section_key,label,sort_order) VALUES ('VEHICLES','VIATURAS E ZONAS',0)")];
+  for(const group of groups)commands.push(env.DB.prepare("INSERT OR IGNORE INTO schedule_sections (section_key,label,sort_order) VALUES (?,?,?)").bind(`POST:${group.group_name}`,group.group_name,Number(group.sort_order||0)+10));
+  await env.DB.batch(commands);
+}
 
 export async function GET(request: Request) {
   if (!permitted(request))
     return Response.json({ error: "Não autorizado" }, { status: 401 });
   await seed();
   await syncConfirmedLeaves();
-  const [guards, posts, vehicles, movements, campaign, days, choices, vehicleOutages] =
+  await ensureSections();
+  const [guards, posts, vehicles, movements, campaign, days, choices, vehicleOutages, sections] =
     await Promise.all([
       env.DB.prepare(
         "SELECT * FROM guards WHERE active = 1 ORDER BY name",
@@ -120,6 +120,7 @@ export async function GET(request: Request) {
         "SELECT c.*,g.name AS guard_name FROM leave_choices c JOIN guards g ON g.id=c.guard_id WHERE c.status!='cancelled' ORDER BY c.date",
       ).all(),
       env.DB.prepare("SELECT o.*,v.prefix,v.type FROM vehicle_outages o JOIN vehicles v ON v.id=o.vehicle_id WHERE o.active=1 ORDER BY o.starts_on DESC").all(),
+      env.DB.prepare("SELECT section_key,label,sort_order FROM schedule_sections ORDER BY sort_order,label").all(),
     ]);
   return Response.json({
     guards: guards.results,
@@ -130,6 +131,7 @@ export async function GET(request: Request) {
     days: days.results,
     choices: choices.results,
     vehicleOutages: vehicleOutages.results,
+    sections: sections.results,
   });
 }
 
@@ -222,18 +224,22 @@ export async function POST(request: Request) {
       const after = await env.DB.prepare("SELECT * FROM posts WHERE id=?").bind(body.id).first();
       await writeAudit(request,{action:"reorder",entityType:"post",entityId:body.id,summary:`Reordenou o posto ${before?.name}`,before,after:after as Record<string,unknown>,undoable:true});
     } else if (body.action === "section_reorder") {
-      const groups = (await env.DB.prepare("SELECT group_name,MIN(sort_order) min_order FROM posts WHERE active=1 GROUP BY group_name ORDER BY min_order,group_name").all<{group_name:string;min_order:number}>()).results;
-      const index = groups.findIndex(group=>group.group_name===String(body.groupName));
+      await ensureSections();
+      const groups=(await env.DB.prepare("SELECT section_key,label,sort_order FROM schedule_sections ORDER BY sort_order,label").all<{section_key:string;label:string;sort_order:number}>()).results;
+      const index = groups.findIndex(group=>group.section_key===String(body.sectionKey));
       const targetIndex = index + (body.direction === "up" ? -1 : 1);
       if(index<0||targetIndex<0||targetIndex>=groups.length) return Response.json({error:"A seção já está no limite da lista."},{status:409});
       const current=groups[index],target=groups[targetIndex];
-      const beforeRows=(await env.DB.prepare("SELECT id,sort_order FROM posts WHERE group_name IN (?,?) ORDER BY id").bind(current.group_name,target.group_name).all()).results;
+      const before={current,target};
       await env.DB.batch([
-        env.DB.prepare("UPDATE posts SET sort_order=sort_order+?,updated_at=CURRENT_TIMESTAMP WHERE group_name=?").bind(Number(target.min_order)-Number(current.min_order),current.group_name),
-        env.DB.prepare("UPDATE posts SET sort_order=sort_order+?,updated_at=CURRENT_TIMESTAMP WHERE group_name=?").bind(Number(current.min_order)-Number(target.min_order),target.group_name),
+        env.DB.prepare("UPDATE schedule_sections SET sort_order=?,updated_at=CURRENT_TIMESTAMP WHERE section_key=?").bind(target.sort_order,current.section_key),
+        env.DB.prepare("UPDATE schedule_sections SET sort_order=?,updated_at=CURRENT_TIMESTAMP WHERE section_key=?").bind(current.sort_order,target.section_key),
       ]);
-      const afterRows=(await env.DB.prepare("SELECT id,sort_order FROM posts WHERE group_name IN (?,?) ORDER BY id").bind(current.group_name,target.group_name).all()).results;
-      await writeAudit(request,{action:"reorder",entityType:"section",entityId:current.group_name,summary:`Moveu a seção ${current.group_name} para ${body.direction==="up"?"cima":"baixo"}`,before:{orders:beforeRows},after:{orders:afterRows},undoable:true});
+      await writeAudit(request,{action:"reorder",entityType:"section_config",entityId:current.section_key,summary:`Moveu a seção ${current.label} para ${body.direction==="up"?"cima":"baixo"}`,before,after:{current:{...current,sort_order:target.sort_order},target:{...target,sort_order:current.sort_order}},undoable:false});
+    } else if (body.action === "section_update") {
+      const before=await env.DB.prepare("SELECT * FROM schedule_sections WHERE section_key=?").bind(body.sectionKey).first<Record<string,unknown>>();
+      await env.DB.prepare("UPDATE schedule_sections SET label=?,updated_at=CURRENT_TIMESTAMP WHERE section_key=?").bind(body.label,body.sectionKey).run();
+      await writeAudit(request,{action:"update",entityType:"section_config",entityId:String(body.sectionKey),summary:`Renomeou a seção para ${body.label}`,before,after:{label:body.label},undoable:false});
     } else if (body.action === "catalog_deactivate") {
       const table =
         body.entity === "guard"

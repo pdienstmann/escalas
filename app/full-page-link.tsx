@@ -14,6 +14,6 @@ export function FullPageLink({ href, children, ...props }: FullPageLinkProps) {
     if (event.defaultPrevented) return;
     event.preventDefault();
     const overlay=document.createElement("div");overlay.className="route-transition";overlay.textContent="Abrindo módulo…";document.body.appendChild(overlay);
-    window.location.assign(href);
+    requestAnimationFrame(()=>window.location.assign(href));
   }} onPointerEnter={(event)=>{props.onPointerEnter?.(event);prefetch()}} onFocus={(event)=>{props.onFocus?.(event);prefetch()}}>{children}</a>;
 }

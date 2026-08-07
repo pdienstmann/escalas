@@ -6,15 +6,9 @@ import {
   resolvePatternCodes,
 } from "../../../lib/pattern-engine";
 import { writeAudit } from "../../../lib/audit";
+import { permitted } from "../../../lib/access";
 export const dynamic = "force-dynamic";
-function permitted(r: Request) {
-  const h = new URL(r.url).hostname;
-  return (
-    h === "localhost" ||
-    h === "127.0.0.1" ||
-    Boolean(r.headers.get("oai-authenticated-user-id"))
-  );
-}
+
 function destination(body: Record<string, string | number | boolean | null>) {
   const [type, id] = String(body.destination || "").split(":");
   return {

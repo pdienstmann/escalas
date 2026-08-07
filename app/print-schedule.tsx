@@ -112,12 +112,11 @@ function PrintPage({
                         )}
                         <b>{a.guard_name}</b>
                         {a.status !== "normal" && (
-                          <em>{status(String(a.status))}</em>
+                          <em>{String(a.work_kind)==="weekly"&&String(a.regular_ends_at||"")!==String(a.ends_at)?weeklyHeShort(a):status(String(a.status))}</em>
                         )}
                         {Number(a.is_reassigned)===1&&<em className="print-rem">REM</em>}
                         <small>
-                          {String(a.starts_at).slice(11, 16)}–
-                          {String(a.ends_at).slice(11, 16)}
+                          {weeklyDisplay(a)}
                         </small>
                       </div>
                     ))}
@@ -195,7 +194,9 @@ function movementDetail(m: Rec) {
 }
 const status = (s: string) =>
   s === "overtime" ? "HE" : s === "time_bank" ? "BH" : "TROCA";
-const vehicleIcon=(type:string)=>type==="moto"?"●":type==="pickup"?"▰":type==="van"?"▣":type==="suv"?"◆":"▱";
+const vehicleIcon=(type:string)=>type==="moto"?"🏍️":type==="pickup"?"🛻":type==="van"?"🚐":type==="suv"?"🚙":"🚓";
+function weeklyDisplay(a:Rec){const start=String(a.starts_at).slice(11,16),regular=String(a.regular_ends_at||"").slice(11,16),end=String(a.ends_at).slice(11,16),breakStart=String(a.break_starts_at||"").slice(11,16),breakEnd=String(a.break_ends_at||"").slice(11,16);if(String(a.work_kind)!=="weekly")return `${start}–${end}`;const base=breakStart&&breakEnd?`${start}–${breakStart}/${breakEnd}–${regular}`:`${start}–${regular}`;return end!==regular?`${base} + HE ${regular}–${end}`:base}
+function weeklyHeShort(a:Rec){const regular=String(a.regular_ends_at).slice(11,16),end=String(a.ends_at).slice(11,16);const minutes=(value:string)=>Number(value.slice(0,2))*60+Number(value.slice(3,5));return `HE semanal ${Math.max(0,(minutes(end)-minutes(regular))/60)}h`}
 function belongsToShift(a:Rec,shift:string){if(String(a.shift)===shift)return true;if(String(a.shift)!=="W")return false;const start=String(a.starts_at).slice(11,16),end=String(a.ends_at).slice(11,16);if(shift==="2")return start<"13:00"&&end>"07:00";if(shift==="3")return start<"19:00"&&end>"13:00";return false}
 
 function makeVolumeData(data: State): State {

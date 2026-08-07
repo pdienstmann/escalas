@@ -11,6 +11,7 @@ type Data = {
   days: Item[];
   choices: Item[];
   vehicleOutages: Item[];
+  sections: Item[];
 };
 const empty: Data = {
   guards: [],
@@ -21,6 +22,7 @@ const empty: Data = {
   days: [],
   choices: [],
   vehicleOutages: [],
+  sections: [],
 };
 
 export function GestaoClient({
@@ -148,17 +150,18 @@ export function GestaoClient({
     setMessage(r.ok ? "Ordem da escala atualizada." : j.error);
     if (r.ok) await load();
   }
-  async function reorderSection(groupName: string, direction: "up" | "down") {
+  async function reorderSection(sectionKey: string, direction: "up" | "down") {
     setMessage("");
     const r = await fetch("/api/admin", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "section_reorder", groupName, direction }),
+      body: JSON.stringify({ action: "section_reorder", sectionKey, direction }),
     });
     const j = await r.json();
-    setMessage(r.ok ? `Seção ${groupName} movida com sucesso.` : j.error);
+    setMessage(r.ok ? "Ordem das seções atualizada." : j.error);
     if (r.ok) await load();
   }
+  async function renameSection(section:Item){const label=prompt("Nome exibido da seção:",String(section.label||""));if(!label?.trim())return;const r=await fetch("/api/admin",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"section_update",sectionKey:section.section_key,label:label.trim()})});const j=await r.json();setMessage(r.ok?"Seção atualizada.":j.error);if(r.ok)await load()}
   async function importGuards(rows: Array<{ registration: string; name: string; platoon: string; baseShift: string }>) {
     setMessage("");
     const r = await fetch("/api/admin", {
@@ -246,7 +249,7 @@ export function GestaoClient({
           </Form>
         </div>
         <div className="catalog-tools">
-          <SectionOrder posts={data.posts} onReorder={(group, direction) => void reorderSection(group, direction)} />
+          <SectionOrder sections={data.sections} onReorder={(key, direction) => void reorderSection(key, direction)} onRename={(section)=>void renameSection(section)} />
           <GuardImport onImport={(rows) => void importGuards(rows)} />
         </div>
         <FleetAvailability vehicles={data.vehicles} outages={data.vehicleOutages} onSubmit={(e)=>submit(e,"vehicle_outage")} onDelete={(id)=>void deleteOutage(id)}/>
@@ -381,19 +384,16 @@ export function GestaoClient({
   );
 }
 
-function SectionOrder({posts,onReorder}:{posts:Item[];onReorder:(group:string,direction:"up"|"down")=>void}) {
-  const sections=useMemo(()=>{
-    const seen=new Set<string>();
-    return posts.map(post=>String(post.group_name||"SEM SEÇÃO")).filter(group=>!seen.has(group)&&Boolean(seen.add(group)));
-  },[posts]);
+function SectionOrder({sections,onReorder,onRename}:{sections:Item[];onReorder:(key:string,direction:"up"|"down")=>void;onRename:(section:Item)=>void}) {
   return <section className="section-order">
     <header><div><small>ORDEM NA ESCALA E NO PDF</small><h3>Seções operacionais</h3></div><span>{sections.length}</span></header>
     <p>Reposicione áreas inteiras. A ordem dos postos dentro de cada área continua ajustável na lista abaixo.</p>
-    <div className="section-order-list">{sections.map((group,index)=><div key={group}>
-      <b><span>{index+1}</span>{group}</b>
+    <div className="section-order-list">{sections.map((section,index)=><div key={String(section.section_key)}>
+      <b><span>{index+1}</span>{String(section.label)}</b>
       <span className="record-actions">
-        <button disabled={index===0} aria-label={`Mover ${group} para cima`} onClick={()=>onReorder(group,"up")}>↑</button>
-        <button disabled={index===sections.length-1} aria-label={`Mover ${group} para baixo`} onClick={()=>onReorder(group,"down")}>↓</button>
+        <button aria-label={`Renomear ${section.label}`} onClick={()=>onRename(section)}>Editar</button>
+        <button disabled={index===0} aria-label={`Mover ${section.label} para cima`} onClick={()=>onReorder(String(section.section_key),"up")}>↑</button>
+        <button disabled={index===sections.length-1} aria-label={`Mover ${section.label} para baixo`} onClick={()=>onReorder(String(section.section_key),"down")}>↓</button>
       </span>
     </div>)}</div>
   </section>
@@ -659,7 +659,7 @@ function movementPeriod(item: Item) {
 function FleetAvailability({vehicles,outages,onSubmit,onDelete}:{vehicles:Item[];outages:Item[];onSubmit:(e:FormEvent<HTMLFormElement>)=>void;onDelete:(id:Item["id"])=>void}){
   return <section className="fleet-status"><header><div><small>DISPONIBILIDADE EM TEMPO REAL</small><h3>Viaturas em funcionamento / FA</h3></div><span>{outages.length} em FA</span></header><div className="fleet-layout"><form className="data-form" onSubmit={onSubmit}><select name="vehicleId" required defaultValue=""><option value="">Selecionar viatura</option>{vehicles.map(v=><option key={String(v.id)} value={String(v.id)}>{String(v.prefix)} · {String(v.type)}</option>)}</select><label>Início do FA<input name="startsOn" type="date" required/></label><label>Retorno previsto — opcional<input name="endsOn" type="date"/></label><input name="reason" placeholder="Motivo / observação"/><button className="save">Registrar em FA</button></form><div className="fleet-list">{outages.length?outages.map(o=><article key={String(o.id)}><span className="fleet-icon">{vehicleIconLabel(String(o.type))}</span><div><b>{String(o.prefix)}</b><small>FA desde {formatDate(o.starts_on)}{o.ends_on?` até ${formatDate(o.ends_on)}`:" · prazo indeterminado"}</small>{o.reason&&<em>{String(o.reason)}</em>}</div><button onClick={()=>onDelete(o.id)}>Disponibilizar</button></article>):<p>Todas as viaturas estão disponíveis.</p>}</div></div></section>
 }
-const vehicleIconLabel=(type:string)=>type==="moto"?"MOTO":type==="pickup"?"CAM":type==="van"?"FUR":type==="suv"?"SUV":"SED";
+const vehicleIconLabel=(type:string)=>type==="moto"?"🏍️":type==="pickup"?"🛻":type==="van"?"🚐":type==="suv"?"🚙":"🚓";
 function CatalogEditor({
   editing,
   onClose,
