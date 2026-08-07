@@ -34,7 +34,7 @@ export function GestaoClient({
       item: Item;
     } | null>(null);
   const load = useCallback(async () => {
-    const r = await fetch("/api/admin");
+    const r = await fetch(`/api/admin?_=${Date.now()}`, { cache: "no-store" });
     setData(await r.json());
     setBusy(false);
   }, []);

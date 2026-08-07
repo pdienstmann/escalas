@@ -21,7 +21,9 @@ export function PatternsDashboard() {
     [message, setMessage] = useState(""),
     [busy, setBusy] = useState(false);
   const load = useCallback(async () => {
-    const r = await fetch(`/api/patterns?date=${date}`),
+    const r = await fetch(`/api/patterns?date=${date}&_=${Date.now()}`, {
+        cache: "no-store",
+      }),
       j = await r.json();
     setData(j);
     setSelected((current) => current || Number(j.patterns?.[0]?.id || 0));

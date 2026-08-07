@@ -25,7 +25,7 @@ export function PrintSchedule() {
   useEffect(() => {
     const date =
       new URLSearchParams(location.search).get("date") || "2026-08-12";
-    fetch(`/api/schedule?date=${date}`)
+    fetch(`/api/schedule?date=${date}&_=${Date.now()}`, { cache: "no-store" })
       .then((r) => {
         if (!r.ok) throw new Error();
         return r.json();

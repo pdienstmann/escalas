@@ -52,7 +52,9 @@ export function LiveSchedule() {
   const load = useCallback(async () => {
     try {
       setPick(null);
-      const r = await fetch(`/api/schedule?date=${date}`);
+      const r = await fetch(`/api/schedule?date=${date}&_=${Date.now()}`, {
+        cache: "no-store",
+      });
       if (!r.ok) throw new Error();
       setData(await r.json());
     } catch {
@@ -653,6 +655,7 @@ const labelStatus = (s: string) =>
     vacation: "Férias",
     course: "Curso",
     medical_leave: "Licença",
+    technical_reserve: "Reserva técnica",
     time_bank: "Banco de horas",
     swap: "Troca",
   })[s] || s;
