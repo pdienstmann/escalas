@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { EscalaApp } from "./escala-app";
+import { LiveSchedule } from "./live-schedule";
 
 export const metadata: Metadata = {
   title: "Escala GMNH",
@@ -7,5 +7,5 @@ export const metadata: Metadata = {
 };
 
 export default function Home() {
-  return <EscalaApp />;
+  return <LiveSchedule />;
 }
