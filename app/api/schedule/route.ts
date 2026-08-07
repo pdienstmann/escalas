@@ -135,7 +135,7 @@ async function ensureCatalog() {
 async function ensureDemoMovements() {
   const samples = [
     [
-      "F009",
+      "CAMARGO",
       "technical_reserve",
       "2026-08-12T00:00",
       "2026-08-13T00:00",
@@ -143,7 +143,7 @@ async function ensureDemoMovements() {
       "Reserva técnica para conferência da escala",
     ],
     [
-      "F010",
+      "CARLOS",
       "day_off",
       "2026-08-12T00:00",
       "2026-08-13T00:00",
@@ -151,7 +151,7 @@ async function ensureDemoMovements() {
       "Folga mensal",
     ],
     [
-      "F011",
+      "CAVALHEIRO",
       "vacation",
       "2026-08-10T00:00",
       "2026-08-22T00:00",
@@ -159,7 +159,7 @@ async function ensureDemoMovements() {
       "Período de férias",
     ],
     [
-      "F012",
+      "CIECHORSKI",
       "course",
       "2026-08-12T00:00",
       "2026-08-16T00:00",
@@ -167,7 +167,7 @@ async function ensureDemoMovements() {
       "Curso de atualização",
     ],
     [
-      "F013",
+      "EDERSON",
       "medical_leave",
       "2026-08-11T00:00",
       "2026-08-15T00:00",
@@ -175,7 +175,7 @@ async function ensureDemoMovements() {
       "Afastamento médico",
     ],
     [
-      "F014",
+      "EDINEI",
       "time_bank",
       "2026-08-12T07:00",
       "2026-08-12T13:00",
@@ -183,7 +183,7 @@ async function ensureDemoMovements() {
       "Compensação de banco de horas",
     ],
     [
-      "F015",
+      "EVERTON",
       "swap",
       "2026-08-12T13:00",
       "2026-08-12T19:00",
@@ -192,16 +192,16 @@ async function ensureDemoMovements() {
     ],
   ];
   await env.DB.batch(
-    samples.map(([registration, type, startsAt, endsAt, requestRef, notes]) =>
+    samples.map(([guardName, type, startsAt, endsAt, requestRef, notes]) =>
       env.DB.prepare(
-        "INSERT INTO movements (guard_id,type,starts_at,ends_at,request_ref,notes,status) SELECT id,?,?,?,?,?,'approved' FROM guards WHERE registration=? AND NOT EXISTS (SELECT 1 FROM movements WHERE request_ref=?)",
+        "INSERT INTO movements (guard_id,type,starts_at,ends_at,request_ref,notes,status) SELECT id,?,?,?,?,?,'approved' FROM guards WHERE name=? AND NOT EXISTS (SELECT 1 FROM movements WHERE request_ref=?) LIMIT 1",
       ).bind(
         type,
         startsAt,
         endsAt,
         requestRef,
         notes,
-        registration,
+        guardName,
         requestRef,
       ),
     ),
