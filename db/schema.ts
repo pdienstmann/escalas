@@ -38,3 +38,12 @@ export const leaveDayLimits = sqliteTable("leave_day_limits", {
 export const leaveChoices = sqliteTable("leave_choices", {
  id:integer("id").primaryKey({autoIncrement:true}), campaignId:integer("campaign_id").notNull().references(()=>leaveCampaigns.id), guardId:integer("guard_id").notNull().references(()=>guards.id), date:text("date").notNull(), category:text("category",{enum:["weekday","weekend"]}).notNull(), status:text("status",{enum:["confirmed","waitlist","cancelled"]}).notNull(), position:integer("position"), ...audit,
 },t=>[uniqueIndex("idx_leave_choices_campaign_guard_category").on(t.campaignId,t.guardId,t.category)]);
+export const shiftPatterns = sqliteTable("shift_patterns", {
+ id:integer("id").primaryKey({autoIncrement:true}), code:text("code").notNull().unique(), name:text("name").notNull(), period:text("period",{enum:["day","night"]}).notNull(), parity:integer("parity").notNull(), anchorDate:text("anchor_date").notNull(), active:integer("active",{mode:"boolean"}).notNull().default(true), ...audit,
+});
+export const patternSlots = sqliteTable("pattern_slots", {
+ id:integer("id").primaryKey({autoIncrement:true}), patternId:integer("pattern_id").notNull().references(()=>shiftPatterns.id), guardId:integer("guard_id").notNull().references(()=>guards.id), postId:integer("post_id").references(()=>posts.id), vehicleId:integer("vehicle_id").references(()=>vehicles.id), role:text("role",{enum:["guard","driver","patrol","third"]}).notNull(), ...audit,
+},t=>[uniqueIndex("idx_pattern_slots_pattern_guard").on(t.patternId,t.guardId)]);
+export const schedulePatterns = sqliteTable("schedule_patterns", {
+ id:integer("id").primaryKey({autoIncrement:true}), scheduleId:integer("schedule_id").notNull().references(()=>schedules.id), dayPatternId:integer("day_pattern_id").notNull().references(()=>shiftPatterns.id), nightPatternId:integer("night_pattern_id").notNull().references(()=>shiftPatterns.id), appliedAt:text("applied_at").notNull().default("CURRENT_TIMESTAMP"),
+},t=>[uniqueIndex("idx_schedule_patterns_schedule").on(t.scheduleId)]);

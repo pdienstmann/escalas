@@ -8,6 +8,13 @@
       "when": 1786107000000,
       "tag": "0000_escala_gmnh",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1786111000000,
+      "tag": "0001_shift_patterns",
+      "breakpoints": true
     }
   ]
 }

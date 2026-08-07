@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 
 export const dynamic = "force-dynamic";
-const demoGuards = ["ALMEIDA","ANDRADE","AZAMBUJA","BATISTA","BERNARDI","BITTENCOURT","BORGES","BRUNO","CAMARGO","CARLOS","CAVALHEIRO","CIECHORSKI","EDERSON","EDINEI","EVERTON","FIUZA","FONToura","GABRIEL","GARCIA","GUILHERME","JAIR","JONATAS","MARIEL","MATHEUS","MOISES","NATAN","PASQUALI","RANIEL","SANTOS","SCHUQUEL","SOBUCKI","WILLYAM"];
+const demoGuards = ["ALMEIDA","ANDRADE","AZAMBUJA","BATISTA","BERNARDI","BITTENCOURT","BORGES","BRUNO","CAMARGO","CARLOS","CAVALHEIRO","CIECHORSKI","EDERSON","EDINEI","EVERTON","FIUZA","FONTOURA","GABRIEL","GARCIA","GUILHERME","JAIR","JONATAS","MARIEL","MATHEUS","MOISES","NATAN","PASQUALI","RANIEL","SANTOS","SCHUQUEL","SOBUCKI","WILLYAM","XAVIER","VILSON","VIEIRA","VIGANON","ULISSES","ROCKEMBACH","ROBERTO","POHLMANN","PEDROSA","MIRANDA","MARQUES","MARINES","MAIQUEL","LUIZ","KIRSCH","JOHANN","GRENDELE","EDUARDO","DOUGLAS","DE ALMEIDA"];
 
 function permitted(request: Request) {
   const host = new URL(request.url).hostname;
@@ -9,7 +9,7 @@ function permitted(request: Request) {
 }
 
 async function ensureCatalog() {
-  await env.DB.batch(demoGuards.map((name,index)=>env.DB.prepare("INSERT OR IGNORE INTO guards (registration,name,platoon,base_shift) VALUES (?,?,?,?)").bind(`F${String(index+1).padStart(3,"0")}`,name,index<16?"D1":"N1",index<16?"12x36 dia":"12x36 noite")));
+  await env.DB.batch(demoGuards.map((name,index)=>{const team=["D1","D2","N1","N2"][Math.min(3,Math.floor(index/13))];return env.DB.prepare("INSERT INTO guards (registration,name,platoon,base_shift) VALUES (?,?,?,?) ON CONFLICT(registration) DO UPDATE SET name=excluded.name,platoon=excluded.platoon,base_shift=excluded.base_shift").bind(`F${String(index+1).padStart(3,"0")}`,name,team,team.startsWith("D")?"12x36 dia":"12x36 noite")}));
   const postNames = new Set((await env.DB.prepare("SELECT name FROM posts").all<{name:string}>()).results.map(p=>p.name));
   const newPosts = [["Sala de Operações","COMANDO E OPERAÇÕES",1],["Reserva de Armamento","COMANDO E OPERAÇÕES",2],["Centro Administrativo","POSTOS FIXOS",10],["Praça da Juventude","PRAÇAS E PARQUES",20],["Rodoviária","POSTOS DIVERSOS",30]].filter(p=>!postNames.has(String(p[0])));
   if(newPosts.length) await env.DB.batch(newPosts.map(p=>env.DB.prepare("INSERT INTO posts (name,group_name,sort_order) VALUES (?,?,?)").bind(...p)));
