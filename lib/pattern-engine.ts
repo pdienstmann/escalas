@@ -22,6 +22,8 @@ function times(date: string, shift: string) {
 }
 
 export async function ensurePatterns(db: D1Database) {
+  const ready=await db.prepare("SELECT (SELECT COUNT(*) FROM shift_patterns WHERE active=1) patterns,(SELECT COUNT(DISTINCT pattern_id) FROM pattern_slots) populated").first<{patterns:number;populated:number}>();
+  if(Number(ready?.patterns||0)>=4&&Number(ready?.populated||0)>=4)return;
   await db.batch(
     patternDefs.map((d) =>
       db

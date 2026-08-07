@@ -3,6 +3,7 @@ import {
   applyPatternsToSchedule,
   applyWeeklyToSchedule,
   ensurePatterns,
+  resolvePatternCodes,
 } from "../../../lib/pattern-engine";
 import { writeAudit } from "../../../lib/audit";
 
@@ -135,6 +136,8 @@ async function ensureCatalog() {
 }
 
 async function ensureDemoMovements() {
+  const existing=await env.DB.prepare("SELECT COUNT(*) total FROM movements WHERE request_ref IN ('DEMO-RT-01','DEMO-FOLGA-01','DEMO-FERIAS-01','DEMO-CURSO-01','DEMO-ATESTADO-01','REQ-BH-0826','TROCA-115/2026')").first<{total:number}>();
+  if(Number(existing?.total||0)>=7)return;
   const samples = [
     [
       "CAMARGO",
@@ -364,6 +367,7 @@ export async function GET(request: Request) {
       (a) => !blocked.has(Number(a.guard_id)),
     );
   const appliedPattern=await env.DB.prepare("SELECT dp.code day_code,np.code night_code FROM schedule_patterns sp JOIN shift_patterns dp ON dp.id=sp.day_pattern_id JOIN shift_patterns np ON np.id=sp.night_pattern_id WHERE sp.schedule_id=?").bind(schedule?.id).first<Record<string,unknown>>();
+  const suggested=appliedPattern?null:await resolvePatternCodes(env.DB,date);
   return Response.json({
     date,
     schedule,
@@ -374,7 +378,7 @@ export async function GET(request: Request) {
     removed: assignments.results.filter((a) => blocked.has(Number(a.guard_id))),
     movements: movements.results,
     notices: notices.results,
-    patternLabel: appliedPattern?`${appliedPattern.day_code} + ${appliedPattern.night_code} + SEMANAL`:"SEMANAL / AJUSTE MANUAL",
+    patternLabel: appliedPattern?`${appliedPattern.day_code} + ${appliedPattern.night_code} + SEMANAL`:`${suggested?.dayCode} + ${suggested?.nightCode} + SEMANAL · AJUSTES`,
   });
 }
 
