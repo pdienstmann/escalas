@@ -230,6 +230,7 @@ export function LiveSchedule() {
         <Link href="/alteracoes">Alterações diversas</Link>
         <Link href="/folgas">Folgas mensais</Link>
         <Link href="/cadastros">Cadastros</Link>
+        <Link href="/historico">Histórico</Link>
       </nav>
       <section className="toolbar">
         <strong>Dados reais</strong>

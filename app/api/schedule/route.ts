@@ -3,6 +3,7 @@ import {
   applyPatternsToSchedule,
   ensurePatterns,
 } from "../../../lib/pattern-engine";
+import { writeAudit } from "../../../lib/audit";
 
 export const dynamic = "force-dynamic";
 const demoGuards = [
@@ -378,7 +379,20 @@ export async function POST(request: Request) {
     return Response.json({ error: "Não autorizado" }, { status: 401 });
   const b = (await request.json()) as Record<string, string | number | null>;
   if (b.action === "delete") {
+    const before = await env.DB.prepare(
+      "SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id=?",
+    ).bind(b.id).first<Record<string,unknown>>();
+    if (!before)
+      return Response.json({ error: "Designação não encontrada." }, { status: 404 });
     await env.DB.prepare("DELETE FROM assignments WHERE id=?").bind(b.id).run();
+    await writeAudit(request, {
+      action: "delete",
+      entityType: "assignment",
+      entityId: Number(b.id),
+      summary: `Removeu ${before.guard_name} do ${before.shift}º turno`,
+      before,
+      undoable: true,
+    });
     return Response.json({ ok: true, deletedId: Number(b.id) });
   }
   const id = Number(b.id || 0),
@@ -406,6 +420,11 @@ export async function POST(request: Request) {
       { error: `GM indisponível por ${movement.type}.` },
       { status: 409 },
     );
+  const before = id
+    ? await env.DB.prepare(
+        "SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id=?",
+      ).bind(id).first<Record<string,unknown>>()
+    : null;
   let assignmentId = id;
   if (id)
     await env.DB.prepare(
@@ -448,5 +467,16 @@ export async function POST(request: Request) {
   )
     .bind(assignmentId)
     .first();
+  await writeAudit(request, {
+    action: id ? "update" : "create",
+    entityType: "assignment",
+    entityId: assignmentId,
+    summary: id
+      ? `Alterou a escala de ${assignment?.guard_name}`
+      : `Escalou ${assignment?.guard_name} no ${assignment?.shift}º turno`,
+    before,
+    after: assignment as Record<string, unknown>,
+    undoable: true,
+  });
   return Response.json({ ok: true, assignment });
 }

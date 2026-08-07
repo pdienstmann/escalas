@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { writeAudit } from "../../../lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -135,25 +136,32 @@ export async function POST(request: Request) {
     return Response.json({ error: "Não autorizado" }, { status: 401 });
   const body = (await request.json()) as Record<string, string | number>;
   try {
-    if (body.action === "guard")
-      await env.DB.prepare(
+    if (body.action === "guard") {
+      const created = await env.DB.prepare(
         "INSERT INTO guards (registration,name,platoon,base_shift) VALUES (?,?,?,?)",
       )
         .bind(body.registration, body.name, body.platoon, body.baseShift)
         .run();
-    else if (body.action === "post")
-      await env.DB.prepare(
+      const after = await env.DB.prepare("SELECT * FROM guards WHERE id=?").bind(created.meta.last_row_id).first();
+      await writeAudit(request,{action:"create",entityType:"guard",entityId:Number(created.meta.last_row_id),summary:`Cadastrou o GM ${body.name}`,after:after as Record<string,unknown>});
+    } else if (body.action === "post") {
+      const created = await env.DB.prepare(
         "INSERT INTO posts (name,group_name,sort_order) VALUES (?,?,?)",
       )
         .bind(body.name, body.groupName, body.sortOrder || 99)
         .run();
-    else if (body.action === "vehicle")
-      await env.DB.prepare(
+      const after = await env.DB.prepare("SELECT * FROM posts WHERE id=?").bind(created.meta.last_row_id).first();
+      await writeAudit(request,{action:"create",entityType:"post",entityId:Number(created.meta.last_row_id),summary:`Cadastrou o posto ${body.name}`,after:after as Record<string,unknown>});
+    } else if (body.action === "vehicle") {
+      const created = await env.DB.prepare(
         "INSERT INTO vehicles (prefix,type,zone) VALUES (?,?,?)",
       )
         .bind(body.prefix, body.type, body.zone)
         .run();
-    else if (body.action === "catalog_update" && body.entity === "guard")
+      const after = await env.DB.prepare("SELECT * FROM vehicles WHERE id=?").bind(created.meta.last_row_id).first();
+      await writeAudit(request,{action:"create",entityType:"vehicle",entityId:Number(created.meta.last_row_id),summary:`Cadastrou a viatura ${body.prefix}`,after:after as Record<string,unknown>});
+    } else if (body.action === "catalog_update" && body.entity === "guard") {
+      const before = await env.DB.prepare("SELECT * FROM guards WHERE id=?").bind(body.id).first<Record<string,unknown>>();
       await env.DB.prepare(
         "UPDATE guards SET registration=?,name=?,platoon=?,base_shift=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
       )
@@ -165,25 +173,36 @@ export async function POST(request: Request) {
           body.id,
         )
         .run();
-    else if (body.action === "catalog_update" && body.entity === "post")
+      const after = await env.DB.prepare("SELECT * FROM guards WHERE id=?").bind(body.id).first();
+      await writeAudit(request,{action:"update",entityType:"guard",entityId:body.id,summary:`Alterou o cadastro de ${body.name}`,before,after:after as Record<string,unknown>,undoable:true});
+    } else if (body.action === "catalog_update" && body.entity === "post") {
+      const before = await env.DB.prepare("SELECT * FROM posts WHERE id=?").bind(body.id).first<Record<string,unknown>>();
       await env.DB.prepare(
         "UPDATE posts SET name=?,group_name=?,sort_order=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
       )
         .bind(body.name, body.groupName, body.sortOrder || 99, body.id)
         .run();
-    else if (body.action === "catalog_update" && body.entity === "vehicle")
+      const after = await env.DB.prepare("SELECT * FROM posts WHERE id=?").bind(body.id).first();
+      await writeAudit(request,{action:"update",entityType:"post",entityId:body.id,summary:`Alterou o posto ${body.name}`,before,after:after as Record<string,unknown>,undoable:true});
+    } else if (body.action === "catalog_update" && body.entity === "vehicle") {
+      const before = await env.DB.prepare("SELECT * FROM vehicles WHERE id=?").bind(body.id).first<Record<string,unknown>>();
       await env.DB.prepare(
         "UPDATE vehicles SET prefix=?,type=?,zone=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
       )
         .bind(body.prefix, body.type, body.zone, body.id)
         .run();
-    else if (body.action === "post_reorder")
+      const after = await env.DB.prepare("SELECT * FROM vehicles WHERE id=?").bind(body.id).first();
+      await writeAudit(request,{action:"update",entityType:"vehicle",entityId:body.id,summary:`Alterou a viatura ${body.prefix}`,before,after:after as Record<string,unknown>,undoable:true});
+    } else if (body.action === "post_reorder") {
+      const before = await env.DB.prepare("SELECT * FROM posts WHERE id=?").bind(body.id).first<Record<string,unknown>>();
       await env.DB.prepare(
         "UPDATE posts SET sort_order=MAX(0,sort_order+?),updated_at=CURRENT_TIMESTAMP WHERE id=?",
-      )
+        )
         .bind(body.direction === "up" ? -1 : 1, body.id)
         .run();
-    else if (body.action === "catalog_deactivate") {
+      const after = await env.DB.prepare("SELECT * FROM posts WHERE id=?").bind(body.id).first();
+      await writeAudit(request,{action:"reorder",entityType:"post",entityId:body.id,summary:`Reordenou o posto ${before?.name}`,before,after:after as Record<string,unknown>,undoable:true});
+    } else if (body.action === "catalog_deactivate") {
       const table =
         body.entity === "guard"
           ? "guards"
@@ -215,11 +234,14 @@ export async function POST(request: Request) {
           },
           { status: 409 },
         );
+      const before = await env.DB.prepare(`SELECT * FROM ${table} WHERE id=?`).bind(body.id).first<Record<string,unknown>>();
       await env.DB.prepare(
         `UPDATE ${table} SET active=0,updated_at=CURRENT_TIMESTAMP WHERE id=?`,
       )
         .bind(body.id)
         .run();
+      const after = await env.DB.prepare(`SELECT * FROM ${table} WHERE id=?`).bind(body.id).first();
+      await writeAudit(request,{action:"deactivate",entityType:String(body.entity),entityId:body.id,summary:`Desativou ${before?.name||before?.prefix}`,before,after:after as Record<string,unknown>,undoable:true});
     } else if (body.action === "movement") {
       const created = await env.DB.prepare(
         "INSERT INTO movements (guard_id,type,starts_at,ends_at,request_ref,notes) VALUES (?,?,?,?,?,?)",
@@ -236,6 +258,7 @@ export async function POST(request: Request) {
       const movement = await env.DB.prepare(
         "SELECT m.*,g.name guard_name FROM movements m JOIN guards g ON g.id=m.guard_id WHERE m.id=?",
       ).bind(created.meta.last_row_id).first();
+      await writeAudit(request,{action:"create",entityType:"movement",entityId:Number(created.meta.last_row_id),summary:`Registrou ${body.type} para ${movement?.guard_name}`,after:movement as Record<string,unknown>,undoable:true});
       return Response.json({ ok: true, movement });
     } else if (body.action === "leave") {
       const date = String(body.date),
@@ -273,6 +296,8 @@ export async function POST(request: Request) {
         .run();
       if (status === "confirmed")
         await syncConfirmedLeaves(Number(created.meta.last_row_id));
+      const choice = await env.DB.prepare("SELECT c.*,g.name guard_name FROM leave_choices c JOIN guards g ON g.id=c.guard_id WHERE c.id=?").bind(created.meta.last_row_id).first();
+      await writeAudit(request,{action:"create",entityType:"leave_choice",entityId:Number(created.meta.last_row_id),summary:`Registrou folga de ${choice?.guard_name} em ${date}`,after:choice as Record<string,unknown>,undoable:true});
       return Response.json({
         ok: true,
         status,
@@ -305,8 +330,11 @@ export async function POST(request: Request) {
         .bind(choice.id)
         .run();
       await syncConfirmedLeaves(choice.id);
+      const after = await env.DB.prepare("SELECT c.*,g.name guard_name FROM leave_choices c JOIN guards g ON g.id=c.guard_id WHERE c.id=?").bind(choice.id).first();
+      await writeAudit(request,{action:"approve",entityType:"leave_choice",entityId:choice.id,summary:`Aprovou a folga de ${after?.guard_name} em ${choice.date}`,before:choice as unknown as Record<string,unknown>,after:after as Record<string,unknown>});
       return Response.json({ ok: true });
     } else if (body.action === "leave_cancel") {
+      const before = await env.DB.prepare("SELECT c.*,g.name guard_name FROM leave_choices c JOIN guards g ON g.id=c.guard_id WHERE c.id=?").bind(body.id).first<Record<string,unknown>>();
       await env.DB.batch([
         env.DB.prepare(
           "UPDATE leave_choices SET status='cancelled',updated_at=CURRENT_TIMESTAMP WHERE id=?",
@@ -315,6 +343,8 @@ export async function POST(request: Request) {
           `FOLGA-${body.id}`,
         ),
       ]);
+      const after = await env.DB.prepare("SELECT * FROM leave_choices WHERE id=?").bind(body.id).first();
+      await writeAudit(request,{action:"cancel",entityType:"leave_choice",entityId:body.id,summary:`Cancelou a folga de ${before?.guard_name}`,before,after:after as Record<string,unknown>});
       return Response.json({ ok: true });
     } else return Response.json({ error: "Ação inválida" }, { status: 400 });
     return Response.json({ ok: true });

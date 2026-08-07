@@ -51,3 +51,8 @@ export const operationalNotices = sqliteTable("operational_notices", {
  id:integer("id").primaryKey({autoIncrement:true}), effectiveDate:text("effective_date").notNull(), title:text("title").notNull(), details:text("details"),
  status:text("status",{enum:["pending","acknowledged"]}).notNull().default("pending"), acknowledgedAt:text("acknowledged_at"), ...audit,
 });
+export const auditEvents = sqliteTable("audit_events", {
+ id:integer("id").primaryKey({autoIncrement:true}), action:text("action").notNull(), entityType:text("entity_type").notNull(), entityId:text("entity_id"), summary:text("summary").notNull(),
+ beforeJson:text("before_json"), afterJson:text("after_json"), actorId:text("actor_id").notNull(), actorEmail:text("actor_email").notNull(), actorName:text("actor_name").notNull(),
+ undoable:integer("undoable",{mode:"boolean"}).notNull().default(false), undoneAt:text("undone_at"), undoneById:text("undone_by_id"), undoneByEmail:text("undone_by_email"), createdAt:text("created_at").notNull().default("CURRENT_TIMESTAMP"),
+});
