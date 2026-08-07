@@ -1,6 +1,6 @@
 "use client";
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import Link from "next/link";
+import { FullPageLink as Link } from "./full-page-link";
 type Item=Record<string,string|number|null>; type Data={guards:Item[];posts:Item[];vehicles:Item[];movements:Item[];campaign:Item|null;days:Item[];choices:Item[]};
 const empty:Data={guards:[],posts:[],vehicles:[],movements:[],campaign:null,days:[],choices:[]};
 

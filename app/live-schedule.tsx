@@ -1,5 +1,5 @@
 "use client";
-import Link from "next/link";
+import { FullPageLink as Link } from "./full-page-link";
 import { DragEvent, FormEvent, Fragment, useCallback, useEffect, useMemo, useState } from "react";
 type Rec=Record<string,string|number|null>;type State={date:string;schedule:Rec;guards:Rec[];posts:Rec[];vehicles:Rec[];assignments:Rec[];removed:Rec[];movements:Rec[]};type Pick={kind:"post"|"vehicle";resource:Rec;shift:string;assignment?:Rec};
 const shifts=[{id:"2",label:"2º TURNO",time:"07:00–13:00"},{id:"3",label:"3º TURNO",time:"13:00–19:00"},{id:"4",label:"4º TURNO",time:"19:00–01:00"},{id:"1",label:"1º TURNO",time:"01:00–07:00"}];

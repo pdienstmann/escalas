@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
-import Link from "next/link";
+import { FullPageLink as Link } from "./full-page-link";
 
 type Status = "normal" | "he" | "bh" | "troca" | "furo";
 type Cell = { people: string[]; times: string[]; status?: Status };
