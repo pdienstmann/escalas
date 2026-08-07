@@ -136,7 +136,13 @@ export async function POST(request: Request) {
     return Response.json({ error: "Não autorizado" }, { status: 401 });
   const body = (await request.json()) as Record<string, string | number>;
   try {
-    if (body.action === "guard") {
+    if (body.action === "guard_import") {
+      const rows = ((body as unknown as {rows?:Array<{registration?:string;name?:string;platoon?:string;baseShift?:string}>}).rows || []).slice(0,500).filter(row=>row.registration?.trim()&&row.name?.trim());
+      if (!rows.length) return Response.json({error:"Nenhuma linha válida para importar."},{status:400});
+      await env.DB.batch(rows.map(row=>env.DB.prepare("INSERT INTO guards (registration,name,platoon,base_shift) VALUES (?,?,?,?) ON CONFLICT(registration) DO UPDATE SET name=excluded.name,platoon=excluded.platoon,base_shift=excluded.base_shift,active=1,updated_at=CURRENT_TIMESTAMP").bind(row.registration!.trim(),row.name!.trim(),row.platoon?.trim()||null,row.baseShift?.trim()||"12x36 dia")));
+      await writeAudit(request,{action:"import",entityType:"guard_import",entityId:String(Date.now()),summary:`Importou ou atualizou ${rows.length} GMs`,after:{count:rows.length}});
+      return Response.json({ok:true,count:rows.length});
+    } else if (body.action === "guard") {
       const created = await env.DB.prepare(
         "INSERT INTO guards (registration,name,platoon,base_shift) VALUES (?,?,?,?)",
       )
@@ -202,6 +208,19 @@ export async function POST(request: Request) {
         .run();
       const after = await env.DB.prepare("SELECT * FROM posts WHERE id=?").bind(body.id).first();
       await writeAudit(request,{action:"reorder",entityType:"post",entityId:body.id,summary:`Reordenou o posto ${before?.name}`,before,after:after as Record<string,unknown>,undoable:true});
+    } else if (body.action === "section_reorder") {
+      const groups = (await env.DB.prepare("SELECT group_name,MIN(sort_order) min_order FROM posts WHERE active=1 GROUP BY group_name ORDER BY min_order,group_name").all<{group_name:string;min_order:number}>()).results;
+      const index = groups.findIndex(group=>group.group_name===String(body.groupName));
+      const targetIndex = index + (body.direction === "up" ? -1 : 1);
+      if(index<0||targetIndex<0||targetIndex>=groups.length) return Response.json({error:"A seção já está no limite da lista."},{status:409});
+      const current=groups[index],target=groups[targetIndex];
+      const beforeRows=(await env.DB.prepare("SELECT id,sort_order FROM posts WHERE group_name IN (?,?) ORDER BY id").bind(current.group_name,target.group_name).all()).results;
+      await env.DB.batch([
+        env.DB.prepare("UPDATE posts SET sort_order=sort_order+?,updated_at=CURRENT_TIMESTAMP WHERE group_name=?").bind(Number(target.min_order)-Number(current.min_order),current.group_name),
+        env.DB.prepare("UPDATE posts SET sort_order=sort_order+?,updated_at=CURRENT_TIMESTAMP WHERE group_name=?").bind(Number(current.min_order)-Number(target.min_order),target.group_name),
+      ]);
+      const afterRows=(await env.DB.prepare("SELECT id,sort_order FROM posts WHERE group_name IN (?,?) ORDER BY id").bind(current.group_name,target.group_name).all()).results;
+      await writeAudit(request,{action:"reorder",entityType:"section",entityId:current.group_name,summary:`Moveu a seção ${current.group_name} para ${body.direction==="up"?"cima":"baixo"}`,before:{orders:beforeRows},after:{orders:afterRows},undoable:true});
     } else if (body.action === "catalog_deactivate") {
       const table =
         body.entity === "guard"

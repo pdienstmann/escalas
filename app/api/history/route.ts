@@ -65,6 +65,8 @@ export async function POST(request: Request) {
     else if (action === "update" && before) statements.push(noticeUpdate(before,id));
     else if (action === "delete" && before) statements.push(noticeInsert(before,id));
     else return Response.json({error:"Não foi possível reconstruir este lembrete."},{status:409});
+  } else if (type === "section" && before && Array.isArray(before.orders)) {
+    for (const row of before.orders as Array<{id:number;sort_order:number}>) statements.push(env.DB.prepare("UPDATE posts SET sort_order=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(row.sort_order,row.id));
   } else {
     return Response.json({error:"O desfazer seguro ainda não está disponível para este tipo de alteração."},{status:409});
   }

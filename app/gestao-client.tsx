@@ -1,5 +1,5 @@
 "use client";
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { FullPageLink as Link } from "./full-page-link";
 type Item = Record<string, string | number | null>;
 type Data = {
@@ -145,6 +145,28 @@ export function GestaoClient({
     setMessage(r.ok ? "Ordem da escala atualizada." : j.error);
     if (r.ok) await load();
   }
+  async function reorderSection(groupName: string, direction: "up" | "down") {
+    setMessage("");
+    const r = await fetch("/api/admin", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "section_reorder", groupName, direction }),
+    });
+    const j = await r.json();
+    setMessage(r.ok ? `Seção ${groupName} movida com sucesso.` : j.error);
+    if (r.ok) await load();
+  }
+  async function importGuards(rows: Array<{ registration: string; name: string; platoon: string; baseShift: string }>) {
+    setMessage("");
+    const r = await fetch("/api/admin", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "guard_import", rows }),
+    });
+    const j = await r.json();
+    setMessage(r.ok ? `${j.count} GMs importados ou atualizados.` : j.error);
+    if (r.ok) await load();
+  }
   async function choiceAction(
     action: "leave_approve" | "leave_cancel",
     id: Item["id"],
@@ -208,6 +230,10 @@ export function GestaoClient({
             </select>
             <input name="zone" placeholder="Zona de atuação" />
           </Form>
+        </div>
+        <div className="catalog-tools">
+          <SectionOrder posts={data.posts} onReorder={(group, direction) => void reorderSection(group, direction)} />
+          <GuardImport onImport={(rows) => void importGuards(rows)} />
         </div>
         {message && (
           <p className="notice" role="status">
@@ -335,6 +361,41 @@ export function GestaoClient({
       />
     </Module>
   );
+}
+
+function SectionOrder({posts,onReorder}:{posts:Item[];onReorder:(group:string,direction:"up"|"down")=>void}) {
+  const sections=useMemo(()=>{
+    const seen=new Set<string>();
+    return posts.map(post=>String(post.group_name||"SEM SEÇÃO")).filter(group=>!seen.has(group)&&Boolean(seen.add(group)));
+  },[posts]);
+  return <section className="section-order">
+    <header><div><small>ORDEM NA ESCALA E NO PDF</small><h3>Seções operacionais</h3></div><span>{sections.length}</span></header>
+    <p>Reposicione áreas inteiras. A ordem dos postos dentro de cada área continua ajustável na lista abaixo.</p>
+    <div className="section-order-list">{sections.map((group,index)=><div key={group}>
+      <b><span>{index+1}</span>{group}</b>
+      <span className="record-actions">
+        <button disabled={index===0} aria-label={`Mover ${group} para cima`} onClick={()=>onReorder(group,"up")}>↑</button>
+        <button disabled={index===sections.length-1} aria-label={`Mover ${group} para baixo`} onClick={()=>onReorder(group,"down")}>↓</button>
+      </span>
+    </div>)}</div>
+  </section>
+}
+
+function GuardImport({onImport}:{onImport:(rows:Array<{registration:string;name:string;platoon:string;baseShift:string}>)=>Promise<void>|void}) {
+  const [raw,setRaw]=useState("");
+  const [sending,setSending]=useState(false);
+  const rows=useMemo(()=>raw.split(/\r?\n/).map(line=>line.trim()).filter(Boolean).map((line,index)=>{
+    const parts=(line.includes("\t")?line.split("\t"):line.split(/[;,]/)).map(value=>value.trim());
+    return {registration:parts[0]||"",name:parts[1]||"",platoon:parts[2]||"",baseShift:parts[3]||"12x36 dia",index};
+  }).filter((row,index)=>!(index===0&&/matr[ií]cula|registro/i.test(`${row.registration} ${row.name}`))).filter(row=>row.registration&&row.name),[raw]);
+  async function send(){if(!rows.length)return;setSending(true);await onImport(rows.map(({registration,name,platoon,baseShift})=>({registration,name,platoon,baseShift})));setSending(false);setRaw("")}
+  return <section className="import-panel">
+    <header><div><small>SUBSTITUIÇÃO GRADUAL DOS DADOS</small><h3>Importar GMs</h3></div><span>{rows.length} válidos</span></header>
+    <p>Cole diretamente do Excel ou Google Planilhas: matrícula, nome, equipe e regime. A matrícula identifica e atualiza um cadastro existente.</p>
+    <textarea value={raw} onChange={event=>setRaw(event.target.value)} rows={6} placeholder={"Matrícula\tNome de escala\tEquipe\t12x36 dia\n12345\tSILVA\tD1\t12x36 dia"}/>
+    {rows.length>0&&<div className="import-preview"><b>Pré-visualização</b>{rows.slice(0,3).map(row=><span key={`${row.registration}-${row.index}`}><strong>{row.registration}</strong>{row.name}<small>{row.platoon||"Sem equipe"} · {row.baseShift}</small></span>)}{rows.length>3&&<em>+ {rows.length-3} linhas</em>}</div>}
+    <button className="save" disabled={!rows.length||sending} onClick={()=>void send()}>{sending?"Importando…":`Confirmar importação${rows.length?` (${rows.length})`:""}`}</button>
+  </section>
 }
 const formatDate = (value: string | number | null) =>
   new Date(String(value) + "T12:00:00").toLocaleDateString("pt-BR", {
