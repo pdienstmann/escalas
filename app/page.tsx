@@ -7,5 +7,5 @@ export const metadata: Metadata = {
 };
 
 export default function Home() {
-  return <><LiveSchedule /><a className="pattern-shortcut" href="/padroes">Padrões 12x36</a></>;
+  return <LiveSchedule />;
 }
