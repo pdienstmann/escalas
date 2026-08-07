@@ -9,11 +9,16 @@ function permitted(request: Request) {
 }
 
 async function ensureCatalog() {
-  await env.DB.batch(demoGuards.map((name,index)=>{const team=["D1","D2","N1","N2"][Math.min(3,Math.floor(index/13))];return env.DB.prepare("INSERT INTO guards (registration,name,platoon,base_shift) VALUES (?,?,?,?) ON CONFLICT(registration) DO UPDATE SET name=excluded.name,platoon=excluded.platoon,base_shift=excluded.base_shift").bind(`F${String(index+1).padStart(3,"0")}`,name,team,team.startsWith("D")?"12x36 dia":"12x36 noite")}));
-  const postNames = new Set((await env.DB.prepare("SELECT name FROM posts").all<{name:string}>()).results.map(p=>p.name));
-  const newPosts = [["Sala de Operações","COMANDO E OPERAÇÕES",1],["Reserva de Armamento","COMANDO E OPERAÇÕES",2],["Centro Administrativo","POSTOS FIXOS",10],["Praça da Juventude","PRAÇAS E PARQUES",20],["Rodoviária","POSTOS DIVERSOS",30]].filter(p=>!postNames.has(String(p[0])));
+  const [guardCount,vehicleCount,postRows]=await Promise.all([
+    env.DB.prepare("SELECT COUNT(*) total FROM guards").first<{total:number}>(),
+    env.DB.prepare("SELECT COUNT(*) total FROM vehicles").first<{total:number}>(),
+    env.DB.prepare("SELECT name FROM posts").all<{name:string}>(),
+  ]);
+  if(Number(guardCount?.total||0)<demoGuards.length) await env.DB.batch(demoGuards.map((name,index)=>{const team=["D1","D2","N1","N2"][Math.min(3,Math.floor(index/13))];return env.DB.prepare("INSERT OR IGNORE INTO guards (registration,name,platoon,base_shift) VALUES (?,?,?,?)").bind(`F${String(index+1).padStart(3,"0")}`,name,team,team.startsWith("D")?"12x36 dia":"12x36 noite")}));
+  const postNames = new Set(postRows.results.map(p=>p.name));
+  const newPosts = [["Sala de Operações","SEDE DA GM",1],["Reserva de Armamento","SEDE DA GM",2],["Departamento de Trânsito","SEDE DA GM",3],["DALSeg","SEDE DA GM",4],["DEGESP","SEDE DA GM",5],["Acesso principal","SEDE DA GM",6],["Centro Administrativo","POSTOS FIXOS",10],["Praça da Juventude","PRAÇAS E PARQUES",20],["Rodoviária","POSTOS DIVERSOS",30]].filter(p=>!postNames.has(String(p[0])));
   if(newPosts.length) await env.DB.batch(newPosts.map(p=>env.DB.prepare("INSERT INTO posts (name,group_name,sort_order) VALUES (?,?,?)").bind(...p)));
-  await env.DB.batch([
+  if(Number(vehicleCount?.total||0)<4) await env.DB.batch([
     env.DB.prepare("INSERT OR IGNORE INTO vehicles (prefix,type,zone) VALUES (?,?,?)").bind("VTR 1337","sedan","Zona B3 Dia"),
     env.DB.prepare("INSERT OR IGNORE INTO vehicles (prefix,type,zone) VALUES (?,?,?)").bind("VTR 1302","pickup","Lomba Grande"),
     env.DB.prepare("INSERT OR IGNORE INTO vehicles (prefix,type,zone) VALUES (?,?,?)").bind("VTR 522","van","Pontos Base"),
@@ -58,27 +63,30 @@ export async function GET(request:Request) {
   if(!permitted(request)) return Response.json({error:"Não autorizado"},{status:401});
   const date=new URL(request.url).searchParams.get("date")||"2026-08-12"; await ensureBase(date);
   const schedule=await env.DB.prepare("SELECT * FROM schedules WHERE date=?").bind(date).first<Record<string,unknown>>();
-  const [guards,posts,vehicles,assignments,movements]=await Promise.all([
+  const [guards,posts,vehicles,assignments,movements,notices]=await Promise.all([
     env.DB.prepare("SELECT id,name,registration,platoon FROM guards WHERE active=1 ORDER BY name").all(),
     env.DB.prepare("SELECT id,name,group_name FROM posts WHERE active=1 ORDER BY sort_order,name").all(),
     env.DB.prepare("SELECT id,prefix,type,zone FROM vehicles WHERE active=1 ORDER BY prefix").all(),
     env.DB.prepare("SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.schedule_id=? ORDER BY a.shift,a.role,g.name").bind(schedule?.id).all(),
     env.DB.prepare("SELECT m.*,g.name guard_name FROM movements m JOIN guards g ON g.id=m.guard_id WHERE m.status='approved' AND m.starts_at<? AND m.ends_at>?").bind(`${date}T23:59`,`${date}T00:00`).all(),
+    env.DB.prepare("SELECT * FROM operational_notices WHERE effective_date=? ORDER BY status,title").bind(date).all(),
   ]);
   const blocked=new Set(movements.results.map(m=>Number(m.guard_id))),active=assignments.results.filter(a=>!blocked.has(Number(a.guard_id)));
-  return Response.json({date,schedule,guards:guards.results,posts:posts.results,vehicles:vehicles.results,assignments:active,removed:assignments.results.filter(a=>blocked.has(Number(a.guard_id))),movements:movements.results});
+  return Response.json({date,schedule,guards:guards.results,posts:posts.results,vehicles:vehicles.results,assignments:active,removed:assignments.results.filter(a=>blocked.has(Number(a.guard_id))),movements:movements.results,notices:notices.results});
 }
 
 export async function POST(request:Request) {
   if(!permitted(request)) return Response.json({error:"Não autorizado"},{status:401});
   const b=await request.json() as Record<string,string|number|null>;
-  if(b.action==="delete") {await env.DB.prepare("DELETE FROM assignments WHERE id=?").bind(b.id).run();return Response.json({ok:true});}
+  if(b.action==="delete") {await env.DB.prepare("DELETE FROM assignments WHERE id=?").bind(b.id).run();return Response.json({ok:true,deletedId:Number(b.id)});}
   const id=Number(b.id||0),guardId=Number(b.guardId),scheduleId=Number(b.scheduleId),start=String(b.startsAt),end=String(b.endsAt);
   const conflict=await env.DB.prepare("SELECT id FROM assignments WHERE schedule_id=? AND guard_id=? AND id!=? AND starts_at<? AND ends_at>? LIMIT 1").bind(scheduleId,guardId,id,end,start).first();
   if(conflict) return Response.json({error:"Conflito: este GM já está escalado nesse horário."},{status:409});
   const movement=await env.DB.prepare("SELECT type FROM movements WHERE guard_id=? AND status='approved' AND starts_at<? AND ends_at>? LIMIT 1").bind(guardId,end,start).first<{type:string}>();
   if(movement) return Response.json({error:`GM indisponível por ${movement.type}.`},{status:409});
+  let assignmentId=id;
   if(id) await env.DB.prepare("UPDATE assignments SET guard_id=?,post_id=?,vehicle_id=?,shift=?,role=?,starts_at=?,ends_at=?,status=?,request_ref=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(guardId,b.postId||null,b.vehicleId||null,b.shift,b.role,start,end,b.status,b.requestRef||null,id).run();
-  else await env.DB.prepare("INSERT INTO assignments (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,status,request_ref) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(scheduleId,guardId,b.postId||null,b.vehicleId||null,b.shift,b.role,start,end,b.status,b.requestRef||null).run();
-  return Response.json({ok:true});
+  else {const created=await env.DB.prepare("INSERT INTO assignments (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,status,request_ref) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(scheduleId,guardId,b.postId||null,b.vehicleId||null,b.shift,b.role,start,end,b.status,b.requestRef||null).run();assignmentId=Number(created.meta.last_row_id);}
+  const assignment=await env.DB.prepare("SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id=?").bind(assignmentId).first();
+  return Response.json({ok:true,assignment});
 }

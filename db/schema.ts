@@ -47,3 +47,7 @@ export const patternSlots = sqliteTable("pattern_slots", {
 export const schedulePatterns = sqliteTable("schedule_patterns", {
  id:integer("id").primaryKey({autoIncrement:true}), scheduleId:integer("schedule_id").notNull().references(()=>schedules.id), dayPatternId:integer("day_pattern_id").notNull().references(()=>shiftPatterns.id), nightPatternId:integer("night_pattern_id").notNull().references(()=>shiftPatterns.id), appliedAt:text("applied_at").notNull().default("CURRENT_TIMESTAMP"),
 },t=>[uniqueIndex("idx_schedule_patterns_schedule").on(t.scheduleId)]);
+export const operationalNotices = sqliteTable("operational_notices", {
+ id:integer("id").primaryKey({autoIncrement:true}), effectiveDate:text("effective_date").notNull(), title:text("title").notNull(), details:text("details"),
+ status:text("status",{enum:["pending","acknowledged"]}).notNull().default("pending"), acknowledgedAt:text("acknowledged_at"), ...audit,
+});

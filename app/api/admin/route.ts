@@ -50,6 +50,17 @@ export async function POST(request: Request) {
     if (body.action === "guard") await env.DB.prepare("INSERT INTO guards (registration,name,platoon,base_shift) VALUES (?,?,?,?)").bind(body.registration,body.name,body.platoon,body.baseShift).run();
     else if (body.action === "post") await env.DB.prepare("INSERT INTO posts (name,group_name,sort_order) VALUES (?,?,?)").bind(body.name,body.groupName,body.sortOrder||99).run();
     else if (body.action === "vehicle") await env.DB.prepare("INSERT INTO vehicles (prefix,type,zone) VALUES (?,?,?)").bind(body.prefix,body.type,body.zone).run();
+    else if (body.action === "catalog_update" && body.entity === "guard") await env.DB.prepare("UPDATE guards SET registration=?,name=?,platoon=?,base_shift=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(body.registration,body.name,body.platoon,body.baseShift,body.id).run();
+    else if (body.action === "catalog_update" && body.entity === "post") await env.DB.prepare("UPDATE posts SET name=?,group_name=?,sort_order=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(body.name,body.groupName,body.sortOrder||99,body.id).run();
+    else if (body.action === "catalog_update" && body.entity === "vehicle") await env.DB.prepare("UPDATE vehicles SET prefix=?,type=?,zone=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(body.prefix,body.type,body.zone,body.id).run();
+    else if (body.action === "catalog_deactivate") {
+      const table=body.entity==="guard"?"guards":body.entity==="post"?"posts":body.entity==="vehicle"?"vehicles":null;
+      const foreign=body.entity==="guard"?"guard_id":body.entity==="post"?"post_id":body.entity==="vehicle"?"vehicle_id":null;
+      if(!table||!foreign) return Response.json({error:"Cadastro inválido."},{status:400});
+      const used=await env.DB.prepare(`SELECT COUNT(*) total FROM assignments WHERE ${foreign}=?`).bind(body.id).first<{total:number}>();
+      if(Number(used?.total||0)>0) return Response.json({error:"Este item ainda possui escalas vinculadas. Remova ou mova essas designações antes de desativá-lo."},{status:409});
+      await env.DB.prepare(`UPDATE ${table} SET active=0,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(body.id).run();
+    }
     else if (body.action === "movement") await env.DB.prepare("INSERT INTO movements (guard_id,type,starts_at,ends_at,request_ref,notes) VALUES (?,?,?,?,?,?)").bind(body.guardId,body.type,body.startsAt,body.endsAt,body.requestRef||null,body.notes||null).run();
     else if (body.action === "leave") {
       const date=String(body.date), category=String(body.category), guardId=Number(body.guardId), campaignId=Number(body.campaignId);
