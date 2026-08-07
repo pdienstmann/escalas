@@ -63,6 +63,39 @@ export function GestaoClient({
     );
     if (r.ok) {
       form.reset();
+      if (action === "movement" && j.movement) {
+        setData((current) => ({
+          ...current,
+          movements: [j.movement, ...current.movements].slice(0, 30),
+        }));
+        return;
+      }
+      if (action === "leave") {
+        const date = String(body.date);
+        const guard = data.guards.find(
+          (item) => Number(item.id) === Number(body.guardId),
+        );
+        setData((current) => ({
+          ...current,
+          choices: [
+            ...current.choices,
+            {
+              id: Number(j.choiceId),
+              guard_id: Number(body.guardId),
+              guard_name: String(guard?.name || "GM"),
+              date,
+              category: String(body.category),
+              status: String(j.status),
+            },
+          ],
+          days: current.days.map((day) =>
+            day.date === date && j.status === "confirmed"
+              ? { ...day, used: Number(day.used) + 1 }
+              : day,
+          ),
+        }));
+        return;
+      }
       await load();
     }
   }

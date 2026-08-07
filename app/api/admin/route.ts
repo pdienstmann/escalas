@@ -220,8 +220,8 @@ export async function POST(request: Request) {
       )
         .bind(body.id)
         .run();
-    } else if (body.action === "movement")
-      await env.DB.prepare(
+    } else if (body.action === "movement") {
+      const created = await env.DB.prepare(
         "INSERT INTO movements (guard_id,type,starts_at,ends_at,request_ref,notes) VALUES (?,?,?,?,?,?)",
       )
         .bind(
@@ -233,7 +233,11 @@ export async function POST(request: Request) {
           body.notes || null,
         )
         .run();
-    else if (body.action === "leave") {
+      const movement = await env.DB.prepare(
+        "SELECT m.*,g.name guard_name FROM movements m JOIN guards g ON g.id=m.guard_id WHERE m.id=?",
+      ).bind(created.meta.last_row_id).first();
+      return Response.json({ ok: true, movement });
+    } else if (body.action === "leave") {
       const date = String(body.date),
         category = String(body.category),
         guardId = Number(body.guardId),
@@ -269,7 +273,11 @@ export async function POST(request: Request) {
         .run();
       if (status === "confirmed")
         await syncConfirmedLeaves(Number(created.meta.last_row_id));
-      return Response.json({ ok: true, status });
+      return Response.json({
+        ok: true,
+        status,
+        choiceId: Number(created.meta.last_row_id),
+      });
     } else if (body.action === "leave_approve") {
       const choice = await env.DB.prepare(
         "SELECT * FROM leave_choices WHERE id=?",
