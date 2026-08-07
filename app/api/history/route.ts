@@ -46,8 +46,11 @@ export async function POST(request: Request) {
     else if (action === "update" && before) statements.push(assignmentUpdate(before,id));
     else if (action === "delete" && before) statements.push(assignmentInsert(before,id));
     else return Response.json({error:"Não foi possível reconstruir esta designação."},{status:409});
-  } else if (type === "movement" && action === "create") {
-    statements.push(env.DB.prepare("DELETE FROM movements WHERE id=?").bind(id));
+  } else if (type === "movement") {
+    if (action === "create") statements.push(env.DB.prepare("DELETE FROM movements WHERE id=?").bind(id));
+    else if (action === "update" && before) statements.push(movementUpdate(before,id));
+    else if (action === "delete" && before) statements.push(movementInsert(before,id));
+    else return Response.json({error:"Não foi possível reconstruir esta movimentação."},{status:409});
   } else if (["guard","post","vehicle"].includes(type) && before) {
     statements.push(catalogRestore(type,before,id));
   } else if (type === "leave_choice" && action === "create") {
@@ -84,6 +87,8 @@ function assignmentUpdate(row: Row, id: number) {
 function assignmentInsert(row: Row, id: number) {
   return env.DB.prepare("INSERT INTO assignments (id,schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,status,request_ref) VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(id,row.schedule_id,row.guard_id,row.post_id,row.vehicle_id,row.shift,row.role,row.starts_at,row.ends_at,row.status,row.request_ref);
 }
+function movementUpdate(row:Row,id:number){return env.DB.prepare("UPDATE movements SET guard_id=?,type=?,starts_at=?,ends_at=?,request_ref=?,notes=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(row.guard_id,row.type,row.starts_at,row.ends_at,row.request_ref,row.notes,row.status,id)}
+function movementInsert(row:Row,id:number){return env.DB.prepare("INSERT INTO movements (id,guard_id,type,starts_at,ends_at,request_ref,notes,status) VALUES (?,?,?,?,?,?,?,?)").bind(id,row.guard_id,row.type,row.starts_at,row.ends_at,row.request_ref,row.notes,row.status)}
 function catalogRestore(type:string,row:Row,id:number) {
   if(type==="guard") return env.DB.prepare("UPDATE guards SET registration=?,name=?,platoon=?,base_shift=?,active=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(row.registration,row.name,row.platoon,row.base_shift,row.active,id);
   if(type==="post") return env.DB.prepare("UPDATE posts SET name=?,group_name=?,sort_order=?,active=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(row.name,row.group_name,row.sort_order,row.active,id);

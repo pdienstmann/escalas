@@ -29,6 +29,7 @@ export function GestaoClient({
   const [data, setData] = useState<Data>(empty),
     [busy, setBusy] = useState(true),
     [message, setMessage] = useState(""),
+    [movementEditing,setMovementEditing]=useState<Item|null>(null),
     [editing, setEditing] = useState<{
       kind: "guard" | "post" | "vehicle";
       item: Item;
@@ -187,6 +188,14 @@ export function GestaoClient({
     );
     if (r.ok) await load();
   }
+  async function movementAction(action:"movement_update"|"movement_delete",body:Record<string,string|number|null>) {
+    if(action==="movement_delete"&&!confirm("Remover esta movimentação? A escala será recalculada imediatamente."))return;
+    setMessage("");
+    const r=await fetch("/api/admin",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({...body,action})});
+    const j=await r.json();
+    setMessage(r.ok?(action==="movement_delete"?"Movimentação removida.":"Movimentação atualizada."):j.error);
+    if(r.ok){setMovementEditing(null);await load()}
+  }
   if (busy)
     return (
       <div className="module-shell">
@@ -310,7 +319,10 @@ export function GestaoClient({
           items={data.movements}
           main="guard_name"
           detail="type"
+          onEdit={setMovementEditing}
+          onDelete={(item)=>void movementAction("movement_delete",{id:item.id})}
         />
+        {movementEditing&&<MovementEditor item={movementEditing} guards={data.guards} onClose={()=>setMovementEditing(null)} onSubmit={(body)=>void movementAction("movement_update",body)}/>}
       </Module>
     );
   const campaign = data.campaign;
@@ -523,11 +535,15 @@ function SimpleRecords({
   items,
   main,
   detail,
+  onEdit,
+  onDelete,
 }: {
   title: string;
   items: Item[];
   main: string;
   detail: string;
+  onEdit?:(item:Item)=>void;
+  onDelete?:(item:Item)=>void;
 }) {
   return (
     <section className="record-list">
@@ -546,12 +562,28 @@ function SimpleRecords({
               {movementPeriod(item)}
               {item.request_ref ? ` · Req. ${item.request_ref}` : ""}
             </small>
+            {(onEdit||onDelete)&&<span className="record-actions">{onEdit&&<button onClick={()=>onEdit(item)}>Editar</button>}{onDelete&&<button className="danger-link" onClick={()=>onDelete(item)}>Remover</button>}</span>}
           </div>
         ))
       )}
     </section>
   );
 }
+
+function MovementEditor({item,guards,onClose,onSubmit}:{item:Item;guards:Item[];onClose:()=>void;onSubmit:(body:Record<string,string|number|null>)=>void}) {
+  function send(e:FormEvent<HTMLFormElement>){e.preventDefault();onSubmit({id:item.id,...Object.fromEntries(new FormData(e.currentTarget))} as Record<string,string|number|null>)}
+  return <div className="catalog-backdrop" role="presentation"><form className="catalog-editor" onSubmit={send}>
+    <header><div><small>EDITAR MOVIMENTAÇÃO</small><h2>{String(item.guard_name)}</h2></div><button type="button" onClick={onClose} aria-label="Fechar">×</button></header>
+    <label>GM<select name="guardId" defaultValue={String(item.guard_id)} required>{guards.map(g=><option key={String(g.id)} value={String(g.id)}>{String(g.name)}</option>)}</select></label>
+    <label>Tipo<select name="type" defaultValue={String(item.type)}><option value="day_off">Folga</option><option value="vacation">Férias</option><option value="course">Curso</option><option value="medical_leave">Atestado / licença</option><option value="technical_reserve">Reserva técnica</option><option value="time_bank">Banco de horas</option><option value="swap">Troca de serviço</option></select></label>
+    <label>Início<input name="startsAt" type="datetime-local" defaultValue={toLocalInput(item.starts_at)} required/></label>
+    <label>Fim<input name="endsAt" type="datetime-local" defaultValue={toLocalInput(item.ends_at)} required/></label>
+    <label>Nº do requerimento<input name="requestRef" defaultValue={String(item.request_ref||"")}/></label>
+    <label>Observação<input name="notes" defaultValue={String(item.notes||"")}/></label>
+    <button className="save">Salvar alteração</button>
+  </form></div>
+}
+function toLocalInput(value:Item[string]){const text=String(value||"");return text.length>=16?text.slice(0,16):text}
 
 function LeaveRecords({
   items,

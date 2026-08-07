@@ -279,6 +279,20 @@ export async function POST(request: Request) {
       ).bind(created.meta.last_row_id).first();
       await writeAudit(request,{action:"create",entityType:"movement",entityId:Number(created.meta.last_row_id),summary:`Registrou ${body.type} para ${movement?.guard_name}`,after:movement as Record<string,unknown>,undoable:true});
       return Response.json({ ok: true, movement });
+    } else if (body.action === "movement_update") {
+      const before = await env.DB.prepare("SELECT m.*,g.name guard_name FROM movements m JOIN guards g ON g.id=m.guard_id WHERE m.id=?").bind(body.id).first<Record<string,unknown>>();
+      if (!before) return Response.json({error:"Movimentação não encontrada."},{status:404});
+      await env.DB.prepare("UPDATE movements SET guard_id=?,type=?,starts_at=?,ends_at=?,request_ref=?,notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+        .bind(body.guardId,body.type,body.startsAt,body.endsAt,body.requestRef||null,body.notes||null,body.id).run();
+      const after = await env.DB.prepare("SELECT m.*,g.name guard_name FROM movements m JOIN guards g ON g.id=m.guard_id WHERE m.id=?").bind(body.id).first();
+      await writeAudit(request,{action:"update",entityType:"movement",entityId:body.id,summary:`Alterou ${body.type} de ${after?.guard_name}`,before,after:after as Record<string,unknown>,undoable:true});
+      return Response.json({ok:true,movement:after});
+    } else if (body.action === "movement_delete") {
+      const before = await env.DB.prepare("SELECT m.*,g.name guard_name FROM movements m JOIN guards g ON g.id=m.guard_id WHERE m.id=?").bind(body.id).first<Record<string,unknown>>();
+      if (!before) return Response.json({error:"Movimentação não encontrada."},{status:404});
+      await env.DB.prepare("DELETE FROM movements WHERE id=?").bind(body.id).run();
+      await writeAudit(request,{action:"delete",entityType:"movement",entityId:body.id,summary:`Removeu ${before.type} de ${before.guard_name}`,before,undoable:true});
+      return Response.json({ok:true});
     } else if (body.action === "leave") {
       const date = String(body.date),
         category = String(body.category),
