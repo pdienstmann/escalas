@@ -23,22 +23,24 @@ export function PrintSchedule() {
   const [data, setData] = useState<State | null>(null),
     [error, setError] = useState("");
   useEffect(() => {
-    const date =
-      new URLSearchParams(location.search).get("date") || "2026-08-12";
+    const params = new URLSearchParams(location.search);
+    const date = params.get("date") || "2026-08-12";
+    const volumeTest = params.get("teste") === "200";
     fetch(`/api/schedule?date=${date}&_=${Date.now()}`, { cache: "no-store" })
       .then((r) => {
         if (!r.ok) throw new Error();
         return r.json();
       })
-      .then(setData)
+      .then((value) => setData(volumeTest ? makeVolumeData(value) : value))
       .catch(() => setError("Não foi possível preparar a impressão."));
   }, []);
   if (error) return <main className="print-error">{error}</main>;
   if (!data) return <main className="print-error">Preparando documento…</main>;
   return (
-    <main className="print-document">
+    <main className={`print-document ${data.assignments.length >= 180 ? "print-dense" : ""}`}>
       <div className="print-actions">
         <a href="/">← Voltar</a>
+        {data.assignments.length >= 180 && <span className="print-volume-badge">Compactação automática · {data.assignments.length} designações</span>}
         <button onClick={() => window.print()}>Imprimir / salvar PDF</button>
       </div>
       <PrintPage data={data} period="day" title="ESCALA DIURNA" />
@@ -191,3 +193,23 @@ function movementDetail(m: Rec) {
 }
 const status = (s: string) =>
   s === "overtime" ? "HE" : s === "time_bank" ? "BH" : "TROCA";
+
+function makeVolumeData(data: State): State {
+  const vehicles = data.vehicles.slice(0, 4);
+  const posts: Rec[] = Array.from({ length: 42 }, (_, index) => ({
+    id: 9000 + index,
+    name: `POSTO OPERACIONAL ${String(index + 1).padStart(2, "0")}`,
+    group_name: index < 8 ? "SEDE DA GM" : index < 24 ? "POSTOS FIXOS" : "POSTOS DIVERSOS",
+  }));
+  const assignments: Rec[] = [];
+  let guardNumber = 1;
+  for (const shift of ["2", "3", "4", "1"]) {
+    const start = shift === "2" ? "07:00" : shift === "3" ? "13:00" : shift === "4" ? "19:00" : "01:00";
+    const end = shift === "2" ? "13:00" : shift === "3" ? "19:00" : shift === "4" ? "01:00" : "07:00";
+    for (const vehicle of vehicles) {
+      for (const role of ["driver", "patrol"]) assignments.push({id:100000+guardNumber,vehicle_id:vehicle.id,post_id:null,shift,role,status:guardNumber%17===0?"overtime":"normal",guard_name:`GM TESTE ${String(guardNumber++).padStart(3,"0")}`,starts_at:`${data.date}T${start}`,ends_at:`${data.date}T${end}`});
+    }
+    for (const post of posts) assignments.push({id:100000+guardNumber,vehicle_id:null,post_id:post.id,shift,role:"guard",status:guardNumber%23===0?"time_bank":"normal",guard_name:`GM TESTE ${String(guardNumber++).padStart(3,"0")}`,starts_at:`${data.date}T${start}`,ends_at:`${data.date}T${end}`});
+  }
+  return {...data,posts,vehicles,assignments};
+}
