@@ -1,4 +1,307 @@
 "use client";
-/* eslint-disable jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions */
-import{FullPageLink as Link}from"./full-page-link";import{useEffect,useMemo,useState}from"react";type Rec=Record<string,string|number|null>;type Data={patterns:Rec[];slots:Rec[];anchorDate:string};
-export function PatternsDashboard(){const[data,setData]=useState<Data|null>(null),[selected,setSelected]=useState<number|null>(null),[date,setDate]=useState("2026-08-12"),[message,setMessage]=useState("");useEffect(()=>{fetch("/api/patterns").then(r=>r.json()).then(setData)},[]);const parity=useMemo(()=>Math.abs(Math.round((new Date(`${date}T12:00:00Z`).getTime()-new Date("2026-08-12T12:00:00Z").getTime())/86400000))%2,[date]);async function apply(){if(!confirm(`Aplicar os padrões ${parity===0?"D1/N1":"D2/N2"} em ${new Date(date+"T12:00:00").toLocaleDateString("pt-BR")}? A escala existente dessa data será substituída.`))return;const r=await fetch("/api/patterns",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({date,confirm:true})});const j=await r.json();setMessage(r.ok?`Escala gerada com ${j.dayCode} e ${j.nightCode}.`:j.error)}if(!data)return <main className="patterns-page">Carregando padrões 12x36…</main>;return <main className="patterns-page"><header><Link href="/">← Voltar à escala</Link><div><span>BASE DA ESCALA 12x36</span><h1>Padrões de equipes</h1><p>O padrão correto é escolhido automaticamente pela distância em dias da data-base.</p></div></header><section className="pattern-apply"><div><label>Data da escala<input type="date" value={date} onChange={e=>setDate(e.target.value)}/></label><p>Será aplicado: <b>{parity===0?"Diurno 1 + Noturno 1":"Diurno 2 + Noturno 2"}</b></p></div><button onClick={apply}>Aplicar padrões à escala</button></section>{message&&<p className="pattern-message">{message} <Link href={`/?date=${date}`}>Abrir escala →</Link></p>}<section className="pattern-grid">{data.patterns.map(p=>{const members=data.slots.filter(s=>s.pattern_id===p.id);return <article className={selected===p.id?"selected":""} key={p.id} onClick={()=>setSelected(Number(p.id))}><span className={`pattern-code ${p.period}`}>{p.code}</span><div><h2>{p.name}</h2><p>{p.period==="day"?"07:00–19:00":"19:00–07:00"} · paridade {Number(p.parity)+1}</p></div><strong>{members.length}<small>posições</small></strong><ul>{members.slice(0,6).map(m=><li key={m.id}><b>{m.guard_name}</b><span>{m.prefix||m.post_name} {m.role==="driver"?"· M":m.role==="patrol"?"· P":""}</span></li>)}</ul>{members.length>6&&<button>Ver todos os {members.length} integrantes</button>}</article>})}</section><aside className="pattern-note"><b>Como funcionará no uso diário</b><p>O aplicativo cria a escala pelo padrão. Em seguida, folgas, férias, cursos, licenças e ajustes daquele dia retiram ou substituem pessoas sem alterar o padrão original.</p></aside></main>}
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FullPageLink as Link } from "./full-page-link";
+type Rec = Record<string, string | number | null>;
+type Data = {
+  patterns: Rec[];
+  slots: Rec[];
+  guards: Rec[];
+  posts: Rec[];
+  vehicles: Rec[];
+  anchorDate: string;
+  dayCode: string;
+  nightCode: string;
+};
+export function PatternsDashboard() {
+  const [data, setData] = useState<Data | null>(null),
+    [selected, setSelected] = useState<number | null>(null),
+    [date, setDate] = useState("2026-08-12"),
+    [dayCode, setDayCode] = useState("D1"),
+    [nightCode, setNightCode] = useState("N1"),
+    [message, setMessage] = useState(""),
+    [busy, setBusy] = useState(false);
+  const load = useCallback(async () => {
+    const r = await fetch(`/api/patterns?date=${date}`),
+      j = await r.json();
+    setData(j);
+    setSelected((current) => current || Number(j.patterns?.[0]?.id || 0));
+    setDayCode(j.dayCode || "D1");
+    setNightCode(j.nightCode || "N1");
+  }, [date]);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void load();
+  }, [load]);
+  async function action(body: Record<string, unknown>) {
+    setBusy(true);
+    try {
+      const r = await fetch("/api/patterns", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+        j = await r.json();
+      setMessage(
+        r.ok ? j.message || "Padrão atualizado com sucesso." : j.error,
+      );
+      if (r.ok) await load();
+      return r.ok;
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function saveSlot(e: FormEvent<HTMLFormElement>, id: number) {
+    e.preventDefault();
+    await action({
+      ...Object.fromEntries(new FormData(e.currentTarget)),
+      action: "update_slot",
+      id,
+    });
+  }
+  async function addSlot(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!selected) return;
+    const form = e.currentTarget;
+    if (
+      await action({
+        ...Object.fromEntries(new FormData(form)),
+        action: "add_slot",
+        patternId: selected,
+      })
+    )
+      form.reset();
+  }
+  async function apply() {
+    if (
+      !confirm(
+        `Substituir a escala de ${new Date(date + "T12:00:00").toLocaleDateString("pt-BR")} pelos padrões ${dayCode}/${nightCode}?`,
+      )
+    )
+      return;
+    await action({ action: "apply", date, dayCode, nightCode, confirm: true });
+  }
+  const current = useMemo(
+      () => data?.patterns.find((p) => Number(p.id) === selected),
+      [data, selected],
+    ),
+    members = useMemo(
+      () => data?.slots.filter((s) => Number(s.pattern_id) === selected) || [],
+      [data, selected],
+    );
+  if (!data)
+    return <main className="patterns-page">Carregando padrões 12x36…</main>;
+  return (
+    <main className="patterns-page">
+      <header>
+        <Link href="/">← Voltar à escala</Link>
+        <div>
+          <span>BASE CONFIGURÁVEL DA ESCALA 12x36</span>
+          <h1>Editor dos padrões</h1>
+          <p>
+            Defina a composição fixa e escolha qual padrão deve gerar cada data.
+          </p>
+        </div>
+      </header>
+      <section className="pattern-config">
+        <div>
+          <label>
+            Data-base do Padrão 1
+            <input
+              id="anchor-date"
+              type="date"
+              defaultValue={data.anchorDate}
+            />
+          </label>
+          <small>Nesta data trabalham D1 e N1; no dia seguinte, D2 e N2.</small>
+        </div>
+        <button
+          disabled={busy}
+          onClick={() =>
+            action({
+              action: "anchor",
+              anchorDate: (
+                document.getElementById("anchor-date") as HTMLInputElement
+              ).value,
+            })
+          }
+        >
+          Salvar data-base
+        </button>
+      </section>
+      <section className="pattern-apply">
+        <div>
+          <label>
+            Data da escala
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+            />
+          </label>
+          <p>
+            Sugestão automática:{" "}
+            <b>
+              {data.dayCode} + {data.nightCode}
+            </b>
+          </p>
+        </div>
+        <label>
+          Diurno
+          <select value={dayCode} onChange={(e) => setDayCode(e.target.value)}>
+            {data.patterns
+              .filter((p) => p.period === "day")
+              .map((p) => (
+                <option key={p.id} value={String(p.code)}>
+                  {p.code} · {p.name}
+                </option>
+              ))}
+          </select>
+        </label>
+        <label>
+          Noturno
+          <select
+            value={nightCode}
+            onChange={(e) => setNightCode(e.target.value)}
+          >
+            {data.patterns
+              .filter((p) => p.period === "night")
+              .map((p) => (
+                <option key={p.id} value={String(p.code)}>
+                  {p.code} · {p.name}
+                </option>
+              ))}
+          </select>
+        </label>
+        <button disabled={busy} onClick={apply}>
+          Gerar escala desta data
+        </button>
+      </section>
+      {message && (
+        <p className="pattern-message" role="status">
+          {message} <Link href={`/?date=${date}`}>Abrir escala →</Link>
+        </p>
+      )}
+      <section className="pattern-tabs" aria-label="Equipes-base">
+        {data.patterns.map((p) => (
+          <button
+            className={selected === Number(p.id) ? "active" : ""}
+            key={p.id}
+            onClick={() => setSelected(Number(p.id))}
+          >
+            <span className={`pattern-code ${p.period}`}>{p.code}</span>
+            <b>{p.name}</b>
+            <small>{p.member_count} posições</small>
+          </button>
+        ))}
+      </section>
+      <section className="pattern-editor">
+        <header>
+          <div>
+            <span>{current?.code}</span>
+            <h2>Composição de {current?.name}</h2>
+            <p>
+              Altere GM, destino e função. O padrão original permanece separado
+              das escalas diárias já ajustadas.
+            </p>
+          </div>
+          <b>{members.length} integrantes</b>
+        </header>
+        <div className="pattern-members">
+          {members.map((member) => (
+            <form
+              key={member.id}
+              onSubmit={(e) => saveSlot(e, Number(member.id))}
+            >
+              <select
+                name="guardId"
+                defaultValue={String(member.guard_id)}
+                aria-label="GM"
+              >
+                {data.guards.map((g) => (
+                  <option key={g.id} value={String(g.id)}>
+                    {g.name} · {g.platoon}
+                  </option>
+                ))}
+              </select>
+              <select
+                name="destination"
+                defaultValue={
+                  member.vehicle_id
+                    ? `vehicle:${member.vehicle_id}`
+                    : `post:${member.post_id}`
+                }
+                aria-label="Destino"
+              >
+                {data.posts.map((p) => (
+                  <option key={`p${p.id}`} value={`post:${p.id}`}>
+                    {p.group_name} · {p.name}
+                  </option>
+                ))}
+                {data.vehicles.map((v) => (
+                  <option key={`v${v.id}`} value={`vehicle:${v.id}`}>
+                    {v.prefix} · {v.zone}
+                  </option>
+                ))}
+              </select>
+              <select
+                name="role"
+                defaultValue={String(member.role)}
+                aria-label="Função"
+              >
+                <option value="guard">GM do posto</option>
+                <option value="driver">Motorista</option>
+                <option value="patrol">Patrulheiro</option>
+                <option value="third">3º integrante</option>
+              </select>
+              <button disabled={busy}>Salvar</button>
+              <button
+                type="button"
+                className="remove-slot"
+                disabled={busy}
+                onClick={() =>
+                  confirm(`Remover ${member.guard_name} deste padrão?`) &&
+                  action({ action: "delete_slot", id: member.id })
+                }
+              >
+                Remover
+              </button>
+            </form>
+          ))}
+        </div>
+        <form className="pattern-add" onSubmit={addSlot}>
+          <b>Adicionar integrante</b>
+          <select name="guardId" required defaultValue="">
+            <option value="">Selecione o GM</option>
+            {data.guards.map((g) => (
+              <option key={g.id} value={String(g.id)}>
+                {g.name} · {g.platoon}
+              </option>
+            ))}
+          </select>
+          <select name="destination" required defaultValue="">
+            <option value="">Selecione o destino</option>
+            {data.posts.map((p) => (
+              <option key={`p${p.id}`} value={`post:${p.id}`}>
+                {p.group_name} · {p.name}
+              </option>
+            ))}
+            {data.vehicles.map((v) => (
+              <option key={`v${v.id}`} value={`vehicle:${v.id}`}>
+                {v.prefix} · {v.zone}
+              </option>
+            ))}
+          </select>
+          <select name="role" defaultValue="guard">
+            <option value="guard">GM do posto</option>
+            <option value="driver">Motorista</option>
+            <option value="patrol">Patrulheiro</option>
+            <option value="third">3º integrante</option>
+          </select>
+          <button className="save" disabled={busy}>
+            Adicionar
+          </button>
+        </form>
+      </section>
+    </main>
+  );
+}

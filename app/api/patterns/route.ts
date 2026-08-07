@@ -1,8 +1,141 @@
 import { env } from "cloudflare:workers";
-export const dynamic="force-dynamic";
-function permitted(r:Request){const h=new URL(r.url).hostname;return h==="localhost"||h==="127.0.0.1"||Boolean(r.headers.get("oai-authenticated-user-id"))}
-const defs=[{code:"D1",name:"Diurno · Padrão 1",period:"day",parity:0},{code:"D2",name:"Diurno · Padrão 2",period:"day",parity:1},{code:"N1",name:"Noturno · Padrão 1",period:"night",parity:0},{code:"N2",name:"Noturno · Padrão 2",period:"night",parity:1}];
-function times(date:string,shift:string){const map:Record<string,[string,string]>={"2":["07:00","13:00"],"3":["13:00","19:00"],"4":["19:00","01:00"],"1":["01:00","07:00"]},next=new Date(`${date}T12:00:00Z`);next.setUTCDate(next.getUTCDate()+1);const[start,end]=map[shift];return{start:`${date}T${start}`,end:`${shift==="4"?next.toISOString().slice(0,10):date}T${end}`}}
-async function ensurePatterns(){await env.DB.batch(defs.map(d=>env.DB.prepare("INSERT OR IGNORE INTO shift_patterns (code,name,period,parity,anchor_date) VALUES (?,?,?,?,?)").bind(d.code,d.name,d.period,d.parity,"2026-08-12")));const patterns=(await env.DB.prepare("SELECT * FROM shift_patterns WHERE active=1 ORDER BY period,parity").all<Record<string,unknown>>()).results,posts=(await env.DB.prepare("SELECT id FROM posts WHERE active=1 ORDER BY sort_order,id").all<{id:number}>()).results,vehicles=(await env.DB.prepare("SELECT id FROM vehicles WHERE active=1 ORDER BY prefix").all<{id:number}>()).results,slots=[...posts.map(p=>({postId:p.id,vehicleId:null,role:"guard"})),...vehicles.flatMap(v=>[{postId:null,vehicleId:v.id,role:"driver"},{postId:null,vehicleId:v.id,role:"patrol"}])];for(const p of patterns){const count=await env.DB.prepare("SELECT COUNT(*) total FROM pattern_slots WHERE pattern_id=?").bind(p.id).first<{total:number}>();if(count?.total)continue;const guards=(await env.DB.prepare("SELECT id FROM guards WHERE active=1 AND platoon=? ORDER BY name").bind(p.code).all<{id:number}>()).results;if(guards.length<slots.length)continue;await env.DB.batch(slots.map((s,i)=>env.DB.prepare("INSERT INTO pattern_slots (pattern_id,guard_id,post_id,vehicle_id,role) VALUES (?,?,?,?,?)").bind(p.id,guards[i].id,s.postId,s.vehicleId,s.role)))}}
-export async function GET(request:Request){if(!permitted(request))return Response.json({error:"Não autorizado"},{status:401});await ensurePatterns();const patterns=await env.DB.prepare("SELECT p.*,COUNT(s.id) member_count FROM shift_patterns p LEFT JOIN pattern_slots s ON s.pattern_id=p.id WHERE p.active=1 GROUP BY p.id ORDER BY p.period,p.parity").all(),slots=await env.DB.prepare("SELECT s.*,g.name guard_name,g.registration,p.name post_name,v.prefix,v.zone FROM pattern_slots s JOIN guards g ON g.id=s.guard_id LEFT JOIN posts p ON p.id=s.post_id LEFT JOIN vehicles v ON v.id=s.vehicle_id ORDER BY s.pattern_id,p.name,v.prefix,s.role").all();return Response.json({patterns:patterns.results,slots:slots.results,anchorDate:"2026-08-12"})}
-export async function POST(request:Request){if(!permitted(request))return Response.json({error:"Não autorizado"},{status:401});const b=await request.json()as{date:string;confirm:boolean};if(!b.confirm)return Response.json({error:"Confirmação necessária."},{status:400});await ensurePatterns();const anchor=new Date("2026-08-12T12:00:00Z"),target=new Date(`${b.date}T12:00:00Z`),parity=Math.abs(Math.round((target.getTime()-anchor.getTime())/86400000))%2,dayCode=parity===0?"D1":"D2",nightCode=parity===0?"N1":"N2",patterns=(await env.DB.prepare("SELECT id,code,period FROM shift_patterns WHERE code IN (?,?)").bind(dayCode,nightCode).all<Record<string,unknown>>()).results;await env.DB.prepare("INSERT OR IGNORE INTO schedules (date,status) VALUES (?,'draft')").bind(b.date).run();const schedule=await env.DB.prepare("SELECT id FROM schedules WHERE date=?").bind(b.date).first<{id:number}>();if(!schedule)return Response.json({error:"Não foi possível criar a escala."},{status:500});await env.DB.prepare("DELETE FROM assignments WHERE schedule_id=?").bind(schedule.id).run();const commands:D1PreparedStatement[]=[];for(const p of patterns){const slots=(await env.DB.prepare("SELECT * FROM pattern_slots WHERE pattern_id=?").bind(p.id).all<Record<string,unknown>>()).results,shifts=p.period==="day"?["2","3"]:["4","1"];for(const s of slots)for(const shift of shifts){const t=times(b.date,shift);commands.push(env.DB.prepare("INSERT INTO assignments (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,status) VALUES (?,?,?,?,?,?,?,?,?)").bind(schedule.id,s.guard_id,s.post_id,s.vehicle_id,shift,s.role,t.start,t.end,"normal"))}}if(commands.length)await env.DB.batch(commands);const day=patterns.find(p=>p.code===dayCode),night=patterns.find(p=>p.code===nightCode);await env.DB.prepare("INSERT INTO schedule_patterns (schedule_id,day_pattern_id,night_pattern_id,applied_at) VALUES (?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(schedule_id) DO UPDATE SET day_pattern_id=excluded.day_pattern_id,night_pattern_id=excluded.night_pattern_id,applied_at=CURRENT_TIMESTAMP").bind(schedule.id,day?.id,night?.id).run();return Response.json({ok:true,dayCode,nightCode,date:b.date})}
+import {
+  applyPatternsToSchedule,
+  ensurePatterns,
+  resolvePatternCodes,
+} from "../../../lib/pattern-engine";
+export const dynamic = "force-dynamic";
+function permitted(r: Request) {
+  const h = new URL(r.url).hostname;
+  return (
+    h === "localhost" ||
+    h === "127.0.0.1" ||
+    Boolean(r.headers.get("oai-authenticated-user-id"))
+  );
+}
+function destination(body: Record<string, string | number | boolean | null>) {
+  const [type, id] = String(body.destination || "").split(":");
+  return {
+    postId: type === "post" ? Number(id) : null,
+    vehicleId: type === "vehicle" ? Number(id) : null,
+  };
+}
+export async function GET(request: Request) {
+  if (!permitted(request))
+    return Response.json({ error: "Não autorizado" }, { status: 401 });
+  await ensurePatterns(env.DB);
+  const previewDate =
+    new URL(request.url).searchParams.get("date") ||
+    new Date().toISOString().slice(0, 10);
+  const [patterns, slots, guards, posts, vehicles, preview] = await Promise.all(
+    [
+      env.DB.prepare(
+        "SELECT p.*,COUNT(s.id) member_count FROM shift_patterns p LEFT JOIN pattern_slots s ON s.pattern_id=p.id WHERE p.active=1 GROUP BY p.id ORDER BY p.period,p.parity",
+      ).all(),
+      env.DB.prepare(
+        "SELECT s.*,g.name guard_name,g.registration,p.name post_name,p.group_name,v.prefix,v.zone FROM pattern_slots s JOIN guards g ON g.id=s.guard_id LEFT JOIN posts p ON p.id=s.post_id LEFT JOIN vehicles v ON v.id=s.vehicle_id ORDER BY s.pattern_id,p.group_name,p.name,v.prefix,s.role",
+      ).all(),
+      env.DB.prepare(
+        "SELECT id,name,registration,platoon FROM guards WHERE active=1 ORDER BY name",
+      ).all(),
+      env.DB.prepare(
+        "SELECT id,name,group_name FROM posts WHERE active=1 ORDER BY sort_order,name",
+      ).all(),
+      env.DB.prepare(
+        "SELECT id,prefix,zone FROM vehicles WHERE active=1 ORDER BY prefix",
+      ).all(),
+      resolvePatternCodes(env.DB, previewDate),
+    ],
+  );
+  return Response.json({
+    patterns: patterns.results,
+    slots: slots.results,
+    guards: guards.results,
+    posts: posts.results,
+    vehicles: vehicles.results,
+    ...preview,
+  });
+}
+export async function POST(request: Request) {
+  if (!permitted(request))
+    return Response.json({ error: "Não autorizado" }, { status: 401 });
+  const body = (await request.json()) as Record<
+    string,
+    string | number | boolean | null
+  >;
+  await ensurePatterns(env.DB);
+  try {
+    if (body.action === "anchor") {
+      await env.DB.prepare(
+        "UPDATE shift_patterns SET anchor_date=?,updated_at=CURRENT_TIMESTAMP WHERE active=1",
+      )
+        .bind(body.anchorDate)
+        .run();
+      return Response.json({ ok: true, message: "Data-base atualizada." });
+    }
+    if (body.action === "update_slot") {
+      const d = destination(body);
+      await env.DB.prepare(
+        "UPDATE pattern_slots SET guard_id=?,post_id=?,vehicle_id=?,role=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+      )
+        .bind(body.guardId, d.postId, d.vehicleId, body.role, body.id)
+        .run();
+      return Response.json({ ok: true });
+    }
+    if (body.action === "add_slot") {
+      const d = destination(body);
+      await env.DB.prepare(
+        "INSERT INTO pattern_slots (pattern_id,guard_id,post_id,vehicle_id,role) VALUES (?,?,?,?,?)",
+      )
+        .bind(body.patternId, body.guardId, d.postId, d.vehicleId, body.role)
+        .run();
+      return Response.json({ ok: true });
+    }
+    if (body.action === "delete_slot") {
+      await env.DB.prepare("DELETE FROM pattern_slots WHERE id=?")
+        .bind(body.id)
+        .run();
+      return Response.json({ ok: true });
+    }
+    if (body.action === "apply") {
+      if (!body.confirm)
+        return Response.json(
+          { error: "Confirmação necessária." },
+          { status: 400 },
+        );
+      const date = String(body.date);
+      await env.DB.prepare(
+        "INSERT OR IGNORE INTO schedules (date,status) VALUES (?,'draft')",
+      )
+        .bind(date)
+        .run();
+      const schedule = await env.DB.prepare(
+        "SELECT id FROM schedules WHERE date=?",
+      )
+        .bind(date)
+        .first<{ id: number }>();
+      if (!schedule)
+        return Response.json(
+          { error: "Não foi possível criar a escala." },
+          { status: 500 },
+        );
+      const result = await applyPatternsToSchedule(env.DB, date, schedule.id, {
+        replace: true,
+        dayCode: body.dayCode ? String(body.dayCode) : undefined,
+        nightCode: body.nightCode ? String(body.nightCode) : undefined,
+      });
+      return Response.json({ ok: true, ...result, date });
+    }
+    return Response.json({ error: "Ação inválida." }, { status: 400 });
+  } catch (error) {
+    return Response.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Não foi possível atualizar o padrão.",
+      },
+      { status: 400 },
+    );
+  }
+}
