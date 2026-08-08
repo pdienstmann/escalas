@@ -18,6 +18,7 @@ import {
   DragEvent,
   FormEvent,
   Fragment,
+  MouseEvent as ReactMouseEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -178,6 +179,7 @@ export function LiveSchedule() {
           );
         }
         setPick(null);
+        setHolePick(null);
       }
       return r.ok;
     } finally {
@@ -228,12 +230,11 @@ export function LiveSchedule() {
     kind: "post" | "vehicle",
     resource: Rec,
     shift: string,
-    event: React.MouseEvent<HTMLButtonElement>,
+    event: ReactMouseEvent<HTMLButtonElement>,
   ) {
     if (!data) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const list = assignmentIndex.get(assignmentKey(kind, Number(resource.id), shift)) || [];
-    const need = kind === "vehicle" ? 2 : 1;
     const missingRole =
       kind === "vehicle" ? (list.length === 0 ? "driver" : "patrol") : "guard";
     setHolePick({
@@ -242,8 +243,8 @@ export function LiveSchedule() {
       shift,
       role: missingRole,
       position: {
-        top: Math.min(window.innerHeight - 380, rect.bottom + window.scrollY + 4),
-        left: Math.min(window.innerWidth - 360, rect.left + window.scrollX),
+        top: Math.max(8, Math.min(window.innerHeight - 420, rect.bottom + 6)),
+        left: Math.max(8, Math.min(window.innerWidth - 356, rect.left)),
       },
     });
     setPick(null);
@@ -288,6 +289,24 @@ export function LiveSchedule() {
       reassignmentNote: assignment.reassignment_note || "Remanejamento na escala",
     });
   }
+  // Hooks must stay above any early return.
+  const movementGroups = useMemo(() => {
+    const groups = [
+      { key: "technical_reserve", label: "Reserva técnica", types: ["technical_reserve"] },
+      { key: "day_off", label: "Folgas", types: ["day_off"] },
+      { key: "vacation", label: "Férias", types: ["vacation"] },
+      { key: "course", label: "Cursos", types: ["course"] },
+      { key: "medical_leave", label: "Licenças/atestados", types: ["medical_leave"] },
+      { key: "adjustments", label: "Banco de horas / Trocas", types: ["time_bank", "swap"] },
+    ];
+    if (!data) return [];
+    return groups
+      .map((g) => ({
+        ...g,
+        items: data.movements.filter((m) => g.types.includes(String(m.type))),
+      }))
+      .filter((g) => g.items.length > 0);
+  }, [data]);
   if (!data)
     return (
       <ModuleLoading
@@ -318,22 +337,6 @@ export function LiveSchedule() {
       tableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   }
-  const movementGroups = useMemo(() => {
-    const groups = [
-      { key: "technical_reserve", label: "Reserva técnica", types: ["technical_reserve"] },
-      { key: "day_off", label: "Folgas", types: ["day_off"] },
-      { key: "vacation", label: "Férias", types: ["vacation"] },
-      { key: "course", label: "Cursos", types: ["course"] },
-      { key: "medical_leave", label: "Licenças/atestados", types: ["medical_leave"] },
-      { key: "adjustments", label: "Banco de horas / Trocas", types: ["time_bank", "swap"] },
-    ];
-    return groups
-      .map((g) => ({
-        ...g,
-        items: data.movements.filter((m) => g.types.includes(String(m.type))),
-      }))
-      .filter((g) => g.items.length > 0);
-  }, [data]);
   const showRedeploy = view === "all" || view === "redeploy";
   const showTable = view !== "redeploy";
 
@@ -523,11 +526,14 @@ export function LiveSchedule() {
       </div>
       {holePick && (
         <>
-          <div
+          <button
+            type="button"
             className="hole-suggest-backdrop"
+            aria-label="Fechar sugestões"
             onClick={() => setHolePick(null)}
           />
           <HoleSuggestBox
+            key={`${holePick.kind}-${holePick.resource.id}-${holePick.shift}-${holePick.role}`}
             date={data.date}
             shift={holePick.shift}
             postId={holePick.kind === "post" ? Number(holePick.resource.id) : null}
@@ -540,7 +546,7 @@ export function LiveSchedule() {
             }
             position={holePick.position}
             busy={saving}
-            onPick={(guardId) => void confirmHoleSuggestion(guardId)}
+            onPick={confirmHoleSuggestion}
             onManual={jumpToManualEditor}
             onClose={() => setHolePick(null)}
           />
@@ -575,6 +581,7 @@ function Row({
   selectedId,
   onPick,
   onMove,
+  onHolePick,
 }: {
   kind: "post" | "vehicle";
   resource: Rec;
@@ -591,7 +598,7 @@ function Row({
     kind: "post" | "vehicle",
     resource: Rec,
     shift: string,
-    event: React.MouseEvent<HTMLButtonElement>,
+    event: ReactMouseEvent<HTMLButtonElement>,
   ) => void;
 }) {
   function drop(e: DragEvent, shift: string) {
@@ -911,14 +918,3 @@ function weeklyHeShort(a:Rec){
   return `HE SEMANAL · ${formatHoursDuration(hours)}`;
 }
 function belongsToShift(a:Rec,shift:string){if(String(a.shift)===shift)return true;if(String(a.shift)!=="W")return false;const start=String(a.starts_at).slice(11,16),end=String(a.ends_at).slice(11,16);if(shift==="2")return start<"13:00"&&end>"07:00";if(shift==="3")return start<"19:00"&&end>"13:00";return false}
-
-const labelStatus = (s: string) =>
-  ({
-    day_off: "Folga",
-    vacation: "Férias",
-    course: "Curso",
-    medical_leave: "Licença",
-    technical_reserve: "Reserva técnica",
-    time_bank: "Banco de horas",
-    swap: "Troca",
-  })[s] || s;

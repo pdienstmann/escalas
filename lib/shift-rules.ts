@@ -30,12 +30,6 @@ export function shiftTimes(date: string, shift: string) {
   const tomorrow = new Date(`${date}T12:00:00Z`);
   tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
   const [start, end] = values[shift] || ["07:00", "13:00"];
-  const endDate =
-    shift === "4" || (shift === "1" && end < start)
-      ? tomorrow.toISOString().slice(0, 10)
-      : shift === "1"
-        ? date
-        : date;
   // shift 1 ends same calendar morning; shift 4 crosses midnight
   const resolvedEndDate = shift === "4" ? tomorrow.toISOString().slice(0, 10) : date;
   return {

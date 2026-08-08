@@ -13,8 +13,8 @@
 .print-section td{background:#eef4fa;color:#17476f;font-size:11px;letter-spacing:.04em}
 .section-toggle{background:none;border:0;color:#fff;font-weight:700;font-size:13px;cursor:pointer;padding:0;text-align:left}
 .toolbar-seg button{min-width:auto;padding:6px 12px}
-.hole-suggest-backdrop{position:fixed;inset:0;z-index:96;background:transparent}
-.hole-suggest-card{position:absolute;z-index:97;width:340px;max-height:calc(100vh - 32px);overflow:auto;display:grid;gap:10px;padding:14px;border-radius:10px;background:#fff;border:1px solid #c9d4df;box-shadow:0 18px 50px #082d5544}
+.hole-suggest-backdrop{position:fixed;inset:0;z-index:96;background:transparent;border:0;padding:0}
+.hole-suggest-card{position:fixed;z-index:97;width:min(340px,calc(100vw - 16px));max-height:calc(100vh - 16px);overflow:auto;display:grid;gap:10px;padding:14px;border-radius:10px;background:#fff;border:1px solid #c9d4df;box-shadow:0 18px 50px #082d5544}
 .hole-suggest-card header{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
 .hole-suggest-card header small{display:block;color:#54708b;font-size:10px;font-weight:800;letter-spacing:.06em}
 .hole-suggest-card header strong{display:block;font-size:13px}

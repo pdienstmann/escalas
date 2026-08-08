@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { formatHoursDuration } from "../lib/shift-rules";
-import { fullPeriodLabel } from "../lib/shift-rules";
+import { CSSProperties, useEffect, useMemo, useState } from "react";
+import { formatHoursDuration, fullPeriodLabel } from "../lib/shift-rules";
 
 type Suggested = {
   id: number;
@@ -56,12 +55,8 @@ export function HoleSuggestBox({
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const cardRef = useRef<HTMLDivElement | null>(null);
-
   useEffect(() => {
-    let cancelled = false;
-    setData(null);
-    setError("");
+    const controller = new AbortController();
     const params = new URLSearchParams({
       date,
       shift,
@@ -71,20 +66,20 @@ export function HoleSuggestBox({
     if (postId) params.set("postId", String(postId));
     if (vehicleId) params.set("vehicleId", String(vehicleId));
     if (role) params.set("role", role);
-    fetch(`/api/schedule?${params}`, { cache: "no-store" })
+    fetch(`/api/schedule?${params}`, { cache: "no-store", signal: controller.signal })
       .then((r) => {
         if (!r.ok) throw new Error();
         return r.json();
       })
       .then((value) => {
-        if (!cancelled) setData(value);
+        setData(value);
       })
-      .catch(() => {
-        if (!cancelled) setError("Não foi possível carregar as sugestões.");
+      .catch((reason: unknown) => {
+        if (!(reason instanceof DOMException && reason.name === "AbortError")) {
+          setError("Não foi possível carregar as sugestões.");
+        }
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => controller.abort();
   }, [date, shift, postId, vehicleId, role]);
 
   const filtered = useMemo(() => {
@@ -96,9 +91,9 @@ export function HoleSuggestBox({
     );
   }, [data, query]);
 
-  useEffect(() => {
-    setSelectedId(filtered[0]?.id ?? null);
-  }, [filtered]);
+  const effectiveSelectedId = filtered.some((guard) => guard.id === selectedId)
+    ? selectedId
+    : (filtered[0]?.id ?? null);
 
   function confirmSuggestion(guard: Suggested) {
     return async () => {
@@ -128,8 +123,7 @@ export function HoleSuggestBox({
   return (
     <div
       className="hole-suggest-card"
-      ref={cardRef}
-      style={style as React.CSSProperties}
+      style={style as CSSProperties}
       role="dialog"
       aria-label="Sugestões de GM para o furo"
     >
@@ -172,7 +166,7 @@ export function HoleSuggestBox({
                 <SuggestionRow
                   key={guard.id}
                   guard={guard}
-                  selected={selectedId === guard.id}
+                  selected={effectiveSelectedId === guard.id}
                   onSelect={() => setSelectedId(guard.id)}
                   onConfirm={confirmSuggestion(guard)}
                   busy={busy}
@@ -188,7 +182,7 @@ export function HoleSuggestBox({
                 <SuggestionRow
                   key={guard.id}
                   guard={guard}
-                  selected={selectedId === guard.id}
+                  selected={effectiveSelectedId === guard.id}
                   onSelect={() => setSelectedId(guard.id)}
                   onConfirm={confirmSuggestion(guard)}
                   busy={busy}

@@ -145,4 +145,22 @@ test("rankGuardSuggestions prioritizes opposite-team GM from same spot", () => {
   assert.ok(ranked[0].reasons.includes("opposite_day"));
   const labels = describeReasons(ranked[0].reasons, ranked[0]);
   assert.ok(labels.some((l) => /dia oposto/.test(l)));
+  assert.equal(ranked.find((g) => g.id === 1).reasons.includes("opposite_day"), false);
+});
+
+test("rankGuardSuggestions orders otherwise equal GMs by the lowest monthly HE", () => {
+  const guards = [
+    { id: 1, name: "MAIOR HE", registration: "F001", platoon: "D2", base_shift: "12x36 dia", work_regime: "12x36" },
+    { id: 2, name: "MENOR HE", registration: "F002", platoon: "D2", base_shift: "12x36 dia", work_regime: "12x36" },
+  ];
+  const ranked = rankGuardSuggestions(
+    guards,
+    { date: "2026-08-12", shift: "2", postId: 10, vehicleId: null, role: "guard" },
+    {
+      guardHeHours: new Map([[1, 24], [2, 4]]),
+      appliedDayCodes: new Set(["D1"]),
+    },
+  );
+  assert.equal(ranked[0].id, 2);
+  assert.equal(ranked[0].currentHeHours, 4);
 });

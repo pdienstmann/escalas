@@ -42,18 +42,6 @@ function sameResource(
   return false;
 }
 
-function oppositeTeamPlatoon(platoon: string | null, period: "day" | "night") {
-  if (period === "day") {
-    if (platoon === "D1") return "D2";
-    if (platoon === "D2") return "D1";
-  }
-  if (period === "night") {
-    if (platoon === "N1") return "N2";
-    if (platoon === "N2") return "N1";
-  }
-  return null;
-}
-
 export function rankGuardSuggestions(
   guards: {
     id: number;
@@ -83,20 +71,6 @@ export function rankGuardSuggestions(
   const dayCodes = options.appliedDayCodes || new Set<string>();
   const nightCodes = options.appliedNightCodes || new Set<string>();
 
-  // Determine which 12x36 teams are working the OPPOSITE period that day:
-  // If filling a day hole → suggest GMs whose team is at NIGHT today (resting in the day) → they would do day HE.
-  // If filling a night hole → suggest GMs whose team is at DAY today (resting at night).
-  const oppositePeriodTeams = new Set<string>();
-  if (period === "day") {
-    // People working night today = the same parity as the night pattern applied today.
-    [...nightCodes].forEach((c) => oppositePeriodTeams.add(c));
-    // People whose team is the OTHER day team (so off today) AND working night today → unavailable at day
-    // We want: GM whose 'platoon' is the OPPOSITE day team (so off today by 12x36 rotation) AND they are not
-    // scheduled today on any assignment (their next shift is the following night block).
-  } else {
-    [...dayCodes].forEach((c) => oppositePeriodTeams.add(c));
-  }
-
   const eligible: SuggestedGM[] = [];
   const now = new Date(`${ctx.date}T12:00:00Z`).getTime();
   const targetRole = ctx.role || null;
@@ -110,13 +84,6 @@ export function rankGuardSuggestions(
 
     // Prefer 12x36 GMs for fill-in HE (NOT weekly regime).
     if (g.work_regime && g.work_regime !== "12x36") continue;
-
-    const sameSpot = sameResource(guardHistory, ctx);
-    const oppositeTeam = oppositeTeamPlatoon(g.platoon, period);
-    if (oppositeTeam && sameSpot) {
-      // Strong signal: GM from opposite team who usually works this spot.
-      reasons.push("opposite_day");
-    }
 
     const isOffToday = (() => {
       if (period === "day") {
@@ -139,6 +106,11 @@ export function rankGuardSuggestions(
       return false;
     })();
 
+    const sameSpot = sameResource(guardHistory, ctx);
+    if (isOffToday && sameSpot) {
+      // Strongest signal: actually off today and normally works at this resource.
+      reasons.push("opposite_day");
+    }
     if (isOffToday) reasons.push("off_today");
 
     if (targetRole) {
@@ -152,13 +124,8 @@ export function rankGuardSuggestions(
       ? Math.round((now - new Date(`${String(last).slice(0, 10)}T12:00:00Z`).getTime()) / 86400000)
       : null;
 
-    if (currentHe === 0) reasons.push("fewest_he");
+    reasons.push("fewest_he");
     if (daysSince !== null && daysSince >= 14) reasons.push("longest_gap");
-
-    if (reasons.length === 0) {
-      // Still eligible, just no special signal — rank by currentHe then gap.
-      reasons.push("fewest_he");
-    }
 
     eligible.push({
       id: g.id,
@@ -174,17 +141,19 @@ export function rankGuardSuggestions(
     });
   }
 
-  const SCORE = (s: SuggestedGM) => {
-    let score = 0;
-    if (s.reasons.includes("opposite_day")) score -= 1000;
-    if (s.reasons.includes("off_today")) score -= 250;
-    if (s.reasons.includes("function_fit")) score -= 80;
-    if (s.reasons.includes("fewest_he")) score -= s.currentHeHours * 5;
-    if (s.reasons.includes("longest_gap") && s.daysSinceLastHe !== null) score -= Math.min(40, s.daysSinceLastHe);
-    return score;
-  };
-
-  eligible.sort((a, b) => SCORE(a) - SCORE(b));
+  eligible.sort((a, b) => {
+    const signal = (item: SuggestedGM, reason: string) =>
+      item.reasons.includes(reason) ? 0 : 1;
+    return (
+      signal(a, "opposite_day") - signal(b, "opposite_day") ||
+      signal(a, "off_today") - signal(b, "off_today") ||
+      signal(a, "function_fit") - signal(b, "function_fit") ||
+      a.currentHeHours - b.currentHeHours ||
+      (b.daysSinceLastHe ?? Number.MAX_SAFE_INTEGER) -
+        (a.daysSinceLastHe ?? Number.MAX_SAFE_INTEGER) ||
+      a.name.localeCompare(b.name, "pt-BR")
+    );
+  });
   eligible.forEach((item, index) => (item.rank = index + 1));
   return eligible.slice(0, 8);
 }

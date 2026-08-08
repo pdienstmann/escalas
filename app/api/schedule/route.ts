@@ -619,10 +619,10 @@ async function buildSuggestions(request: Request, date: string) {
   const period = isDayShift(shift) ? "day" : "night";
 
   const monthStart = `${date.slice(0, 7)}-01`;
-  const [nextMonthDate, monthEnd] = (() => {
+  const monthEnd = (() => {
     const [y, m] = date.slice(0, 7).split("-").map(Number);
     const end = new Date(Date.UTC(y, m, 1));
-    return [end.toISOString().slice(0, 10), end.toISOString().slice(0, 10)];
+    return end.toISOString().slice(0, 10);
   })();
 
   await ensureBase(date);
