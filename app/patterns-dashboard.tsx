@@ -1,6 +1,9 @@
 "use client";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { FullPageLink as Link } from "./full-page-link";
+import { ModuleBusyOverlay, ModuleLoading } from "./module-loading";
+import { BackToSchedule } from "./schedule-nav";
+import { useScheduleDate } from "./use-schedule-date";
 type Rec = Record<string, string | number | null>;
 type Data = {
   patterns: Rec[];
@@ -14,28 +17,35 @@ type Data = {
   nightCode: string;
 };
 export function PatternsDashboard() {
+  const { date, setDate, hrefFor } = useScheduleDate();
   const [data, setData] = useState<Data | null>(null),
     [selected, setSelected] = useState<number | null>(null),
-    [date, setDate] = useState("2026-08-12"),
     [dayCode, setDayCode] = useState("D1"),
     [nightCode, setNightCode] = useState("N1"),
     [message, setMessage] = useState(""),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(false),
+    [loading, setLoading] = useState(true);
   const load = useCallback(async () => {
-    const r = await fetch(`/api/patterns?date=${date}&_=${Date.now()}`, {
-        cache: "no-store",
-      }),
-      j = await r.json();
-    setData(j);
-    setSelected((current) => current || Number(j.patterns?.[0]?.id || 0));
-    setDayCode(j.dayCode || "D1");
-    setNightCode(j.nightCode || "N1");
+    setLoading(true);
+    try {
+      const r = await fetch(`/api/patterns?date=${date}&_=${Date.now()}`, {
+          cache: "no-store",
+        }),
+        j = await r.json();
+      setData(j);
+      setSelected((current) => current || Number(j.patterns?.[0]?.id || 0));
+      setDayCode(j.dayCode || "D1");
+      setNightCode(j.nightCode || "N1");
+    } finally {
+      setLoading(false);
+    }
   }, [date]);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
   async function action(body: Record<string, unknown>) {
+    if (busy) return;
     setBusy(true);
     try {
       const r = await fetch("/api/patterns", {
@@ -92,12 +102,14 @@ export function PatternsDashboard() {
       () => data?.slots.filter((s) => Number(s.pattern_id) === selected) || [],
       [data, selected],
     );
-  if (!data)
-    return <main className="patterns-page">Carregando padrões 12x36…</main>;
+  if (!data || loading)
+    return <ModuleLoading area="padrões 12x36" detail="Carregando equipes-base e composição…" />;
   return (
     <main className="patterns-page">
+      <ModuleBusyOverlay area="padrões 12x36" active={busy} />
       <header>
-        <Link href="/">← Voltar à escala</Link>
+        <BackToSchedule date={date} />
+
         <div>
           <span>BASE CONFIGURÁVEL DA ESCALA 12x36</span>
           <h1>Editor dos padrões</h1>
@@ -182,7 +194,7 @@ export function PatternsDashboard() {
       </section>
       {message && (
         <p className="pattern-message" role="status">
-          {message} <Link href={`/?date=${date}`}>Abrir escala →</Link>
+          {message} <Link href={hrefFor("/")}>Abrir escala →</Link>
         </p>
       )}
       <section className="pattern-tabs" aria-label="Equipes-base">

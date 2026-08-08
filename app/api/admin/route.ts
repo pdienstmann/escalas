@@ -171,15 +171,49 @@ export async function POST(request: Request) {
       const after = await env.DB.prepare("SELECT * FROM vehicles WHERE id=?").bind(created.meta.last_row_id).first();
       await writeAudit(request,{action:"create",entityType:"vehicle",entityId:Number(created.meta.last_row_id),summary:`Cadastrou a viatura ${body.prefix}`,after:after as Record<string,unknown>});
     } else if (body.action === "vehicle_outage") {
-      const created=await env.DB.prepare("INSERT INTO vehicle_outages (vehicle_id,starts_on,ends_on,reason) VALUES (?,?,?,?)").bind(body.vehicleId,body.startsOn,body.endsOn||null,body.reason||null).run();
+      const vehicleId = Number(body.vehicleId);
+      const startsOn = String(body.startsOn);
+      const endsOn = body.endsOn ? String(body.endsOn) : null;
+      const created=await env.DB.prepare("INSERT INTO vehicle_outages (vehicle_id,starts_on,ends_on,reason) VALUES (?,?,?,?)").bind(vehicleId,startsOn,endsOn,body.reason||null).run();
       const after=await env.DB.prepare("SELECT o.*,v.prefix FROM vehicle_outages o JOIN vehicles v ON v.id=o.vehicle_id WHERE o.id=?").bind(created.meta.last_row_id).first();
+      // Keep GMs visible: mark affected assignments as awaiting redeployment without deleting them.
+      await env.DB.prepare(
+        `UPDATE assignments
+         SET is_reassigned=1,
+             reassignment_note=COALESCE(reassignment_note,'VTR em FA — aguardando remanejamento'),
+             updated_at=CURRENT_TIMESTAMP
+         WHERE vehicle_id=?
+           AND date(starts_at)<=?
+           AND date(ends_at)>=?
+           AND EXISTS (
+             SELECT 1 FROM schedules s
+             WHERE s.id=assignments.schedule_id
+               AND s.date>=?
+               AND (? IS NULL OR s.date<=?)
+           )`,
+      ).bind(vehicleId, endsOn || "9999-12-31", startsOn, startsOn, endsOn, endsOn || "9999-12-31").run();
       await writeAudit(request,{action:"create",entityType:"vehicle_outage",entityId:Number(created.meta.last_row_id),summary:`Registrou ${after?.prefix} em FA`,after:after as Record<string,unknown>,undoable:true});
-      return Response.json({ok:true});
+      return Response.json({ok:true,message:`${after?.prefix} em FA. GMs mantidos à disposição para remanejamento.`});
     } else if (body.action === "vehicle_outage_delete") {
       const before=await env.DB.prepare("SELECT o.*,v.prefix FROM vehicle_outages o JOIN vehicles v ON v.id=o.vehicle_id WHERE o.id=?").bind(body.id).first<Record<string,unknown>>();
       await env.DB.prepare("DELETE FROM vehicle_outages WHERE id=?").bind(body.id).run();
+      if (before?.vehicle_id) {
+        await env.DB.prepare(
+          `UPDATE assignments
+           SET is_reassigned=CASE
+             WHEN reassignment_note LIKE 'VTR em FA%' THEN 0
+             ELSE is_reassigned
+           END,
+           reassignment_note=CASE
+             WHEN reassignment_note LIKE 'VTR em FA%' THEN NULL
+             ELSE reassignment_note
+           END,
+           updated_at=CURRENT_TIMESTAMP
+           WHERE vehicle_id=?`,
+        ).bind(before.vehicle_id).run();
+      }
       await writeAudit(request,{action:"delete",entityType:"vehicle_outage",entityId:body.id,summary:`Removeu FA de ${before?.prefix}`,before,undoable:true});
-      return Response.json({ok:true});
+      return Response.json({ok:true,message:`${before?.prefix} disponível novamente. Equipe pode retornar à VTR.`});
     } else if (body.action === "catalog_update" && body.entity === "guard") {
       const before = await env.DB.prepare("SELECT * FROM guards WHERE id=?").bind(body.id).first<Record<string,unknown>>();
       await env.DB.prepare(
@@ -259,20 +293,44 @@ export async function POST(request: Request) {
               : null;
       if (!table || !foreign)
         return Response.json({ error: "Cadastro inválido." }, { status: 400 });
-      const used = await env.DB.prepare(
-        `SELECT COUNT(*) total FROM assignments WHERE ${foreign}=?`,
-      )
-        .bind(body.id)
-        .first<{ total: number }>();
-      if (Number(used?.total || 0) > 0)
-        return Response.json(
-          {
-            error:
-              "Este item ainda possui escalas vinculadas. Remova ou mova essas designações antes de desativá-lo.",
-          },
-          { status: 409 },
-        );
       const before = await env.DB.prepare(`SELECT * FROM ${table} WHERE id=?`).bind(body.id).first<Record<string,unknown>>();
+      if (!before)
+        return Response.json({ error: "Cadastro não encontrado." }, { status: 404 });
+
+      if (body.entity === "vehicle") {
+        // Keep crew visible in redeployment pool instead of blocking deactivation.
+        await env.DB.prepare(
+          `UPDATE assignments
+           SET is_reassigned=1,
+               reassignment_note=COALESCE(reassignment_note,'VTR desativada — aguardando remanejamento'),
+               updated_at=CURRENT_TIMESTAMP
+           WHERE vehicle_id=?`,
+        ).bind(body.id).run();
+      } else if (body.entity === "post") {
+        await env.DB.prepare(
+          `UPDATE assignments
+           SET post_id=NULL,
+               is_reassigned=1,
+               reassignment_note=COALESCE(reassignment_note,'Posto desativado — aguardando remanejamento'),
+               updated_at=CURRENT_TIMESTAMP
+           WHERE post_id=?`,
+        ).bind(body.id).run();
+      } else {
+        const used = await env.DB.prepare(
+          `SELECT COUNT(*) total FROM assignments WHERE ${foreign}=?`,
+        )
+          .bind(body.id)
+          .first<{ total: number }>();
+        if (Number(used?.total || 0) > 0)
+          return Response.json(
+            {
+              error:
+                "Este GM ainda possui escalas vinculadas. Remova ou mova essas designações antes de desativá-lo.",
+            },
+            { status: 409 },
+          );
+      }
+
       await env.DB.prepare(
         `UPDATE ${table} SET active=0,updated_at=CURRENT_TIMESTAMP WHERE id=?`,
       )
@@ -280,6 +338,13 @@ export async function POST(request: Request) {
         .run();
       const after = await env.DB.prepare(`SELECT * FROM ${table} WHERE id=?`).bind(body.id).first();
       await writeAudit(request,{action:"deactivate",entityType:String(body.entity),entityId:body.id,summary:`Desativou ${before?.name||before?.prefix}`,before,after:after as Record<string,unknown>,undoable:true});
+      return Response.json({
+        ok: true,
+        message:
+          body.entity === "vehicle" || body.entity === "post"
+            ? "Cadastro desativado. Efetivo mantido à disposição para remanejamento."
+            : "Cadastro desativado.",
+      });
     } else if (body.action === "movement") {
       const created = await env.DB.prepare(
         "INSERT INTO movements (guard_id,type,starts_at,ends_at,request_ref,notes) VALUES (?,?,?,?,?,?)",

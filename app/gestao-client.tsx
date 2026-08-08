@@ -1,6 +1,8 @@
 "use client";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { FullPageLink as Link } from "./full-page-link";
+import { ModuleBusyOverlay, ModuleLoading } from "./module-loading";
+import { BackToSchedule } from "./schedule-nav";
+import { useScheduleDate } from "./use-schedule-date";
 type Item = Record<string, string | number | null>;
 type Data = {
   guards: Item[];
@@ -25,15 +27,24 @@ const empty: Data = {
   sections: [],
 };
 
+const modeLabel = {
+  cadastros: "cadastros operacionais",
+  folgas: "folgas mensais",
+  movimentos: "movimentações do efetivo",
+} as const;
+
 export function GestaoClient({
   mode,
 }: {
   mode: "cadastros" | "folgas" | "movimentos";
 }) {
+  const { date } = useScheduleDate();
   const [data, setData] = useState<Data>(empty),
     [busy, setBusy] = useState(true),
+    [saving, setSaving] = useState(false),
     [message, setMessage] = useState(""),
     [movementEditing,setMovementEditing]=useState<Item|null>(null),
+    [sectionEditor, setSectionEditor] = useState<Item | null>(null),
     [editing, setEditing] = useState<{
       kind: "guard" | "post" | "vehicle";
       item: Item;
@@ -50,58 +61,64 @@ export function GestaoClient({
   }, [load]);
   async function submit(e: FormEvent<HTMLFormElement>, action: string) {
     e.preventDefault();
+    if (saving) return;
+    setSaving(true);
     setMessage("");
     const form = e.currentTarget;
     const body = Object.fromEntries(new FormData(form));
-    const r = await fetch("/api/admin", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...body, action }),
-    });
-    const j = await r.json();
-    setMessage(
-      r.ok
-        ? j.status === "waitlist"
-          ? "Limite atingido: solicitação incluída na lista de espera."
-          : "Registro salvo com sucesso."
-        : j.error,
-    );
-    if (r.ok) {
-      form.reset();
-      if (action === "movement" && j.movement) {
-        setData((current) => ({
-          ...current,
-          movements: [j.movement, ...current.movements].slice(0, 30),
-        }));
-        return;
+    try {
+      const r = await fetch("/api/admin", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...body, action }),
+      });
+      const j = await r.json();
+      setMessage(
+        r.ok
+          ? j.status === "waitlist"
+            ? "Limite atingido: solicitação incluída na lista de espera."
+            : j.message || "Registro salvo com sucesso."
+          : j.error,
+      );
+      if (r.ok) {
+        form.reset();
+        if (action === "movement" && j.movement) {
+          setData((current) => ({
+            ...current,
+            movements: [j.movement, ...current.movements].slice(0, 30),
+          }));
+          return;
+        }
+        if (action === "leave") {
+          const leaveDate = String(body.date);
+          const guard = data.guards.find(
+            (item) => Number(item.id) === Number(body.guardId),
+          );
+          setData((current) => ({
+            ...current,
+            choices: [
+              ...current.choices,
+              {
+                id: Number(j.choiceId),
+                guard_id: Number(body.guardId),
+                guard_name: String(guard?.name || "GM"),
+                date: leaveDate,
+                category: String(body.category),
+                status: String(j.status),
+              },
+            ],
+            days: current.days.map((day) =>
+              day.date === leaveDate && j.status === "confirmed"
+                ? { ...day, used: Number(day.used) + 1 }
+                : day,
+            ),
+          }));
+          return;
+        }
+        await load();
       }
-      if (action === "leave") {
-        const date = String(body.date);
-        const guard = data.guards.find(
-          (item) => Number(item.id) === Number(body.guardId),
-        );
-        setData((current) => ({
-          ...current,
-          choices: [
-            ...current.choices,
-            {
-              id: Number(j.choiceId),
-              guard_id: Number(body.guardId),
-              guard_name: String(guard?.name || "GM"),
-              date,
-              category: String(body.category),
-              status: String(j.status),
-            },
-          ],
-          days: current.days.map((day) =>
-            day.date === date && j.status === "confirmed"
-              ? { ...day, used: Number(day.used) + 1 }
-              : day,
-          ),
-        }));
-        return;
-      }
-      await load();
+    } finally {
+      setSaving(false);
     }
   }
   async function catalogSubmit(e: FormEvent<HTMLFormElement>) {
@@ -151,17 +168,48 @@ export function GestaoClient({
     if (r.ok) await load();
   }
   async function reorderSection(sectionKey: string, direction: "up" | "down") {
+    if (saving) return;
+    setSaving(true);
     setMessage("");
-    const r = await fetch("/api/admin", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "section_reorder", sectionKey, direction }),
-    });
-    const j = await r.json();
-    setMessage(r.ok ? "Ordem das seções atualizada." : j.error);
-    if (r.ok) await load();
+    try {
+      const r = await fetch("/api/admin", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "section_reorder", sectionKey, direction }),
+      });
+      const j = await r.json();
+      setMessage(r.ok ? "Ordem das seções atualizada na escala e no PDF." : j.error);
+      if (r.ok) await load();
+    } finally {
+      setSaving(false);
+    }
   }
-  async function renameSection(section:Item){const label=prompt("Nome exibido da seção:",String(section.label||""));if(!label?.trim())return;const r=await fetch("/api/admin",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"section_update",sectionKey:section.section_key,label:label.trim()})});const j=await r.json();setMessage(r.ok?"Seção atualizada.":j.error);if(r.ok)await load()}
+  async function saveSection(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!sectionEditor || saving) return;
+    setSaving(true);
+    setMessage("");
+    const body = Object.fromEntries(new FormData(e.currentTarget));
+    try {
+      const r = await fetch("/api/admin", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "section_update",
+          sectionKey: sectionEditor.section_key,
+          label: String(body.label || "").trim(),
+        }),
+      });
+      const j = await r.json();
+      setMessage(r.ok ? "Seção renomeada. A ordem vale para a escala e o PDF." : j.error);
+      if (r.ok) {
+        setSectionEditor(null);
+        await load();
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
   async function importGuards(rows: Array<{ registration: string; name: string; platoon: string; baseShift: string }>) {
     setMessage("");
     const r = await fetch("/api/admin", {
@@ -203,16 +251,15 @@ export function GestaoClient({
     if(r.ok){setMovementEditing(null);await load()}
   }
   if (busy)
-    return (
-      <div className="module-shell">
-        <p>Carregando dados da escala…</p>
-      </div>
-    );
+    return <ModuleLoading area={modeLabel[mode]} detail="Sincronizando cadastros e regras operacionais…" />;
   if (mode === "cadastros")
     return (
       <Module
+        date={date}
         title="Cadastros operacionais"
         subtitle="Pessoas, postos e viaturas alimentam a mesma escala diária."
+        busy={saving}
+        busyArea={modeLabel[mode]}
       >
         <div className="forms-grid">
           <Form title="Novo GM" onSubmit={(e) => submit(e, "guard")}>
@@ -249,7 +296,7 @@ export function GestaoClient({
           </Form>
         </div>
         <div className="catalog-tools">
-          <SectionOrder sections={data.sections} onReorder={(key, direction) => void reorderSection(key, direction)} onRename={(section)=>void renameSection(section)} />
+          <SectionOrder sections={data.sections} onReorder={(key, direction) => void reorderSection(key, direction)} onRename={setSectionEditor} />
           <GuardImport onImport={(rows) => void importGuards(rows)} />
         </div>
         <FleetAvailability vehicles={data.vehicles} outages={data.vehicleOutages} onSubmit={(e)=>submit(e,"vehicle_outage")} onDelete={(id)=>void deleteOutage(id)}/>
@@ -258,6 +305,26 @@ export function GestaoClient({
             {message}
           </p>
         )}
+        {sectionEditor && (
+          <div className="catalog-backdrop section-editor-backdrop" onClick={() => setSectionEditor(null)}>
+            <form className="catalog-editor section-editor" onClick={(e) => e.stopPropagation()} onSubmit={(e) => void saveSection(e)}>
+              <header>
+                <div>
+                  <small>ORDEM NA ESCALA E NO PDF</small>
+                  <h3>Editar seção</h3>
+                </div>
+                <button type="button" className="editor-close" onClick={() => setSectionEditor(null)} aria-label="Fechar">×</button>
+              </header>
+              <label>
+                Nome exibido
+                <input name="label" defaultValue={String(sectionEditor.label || "")} required autoFocus />
+              </label>
+              <p className="section-editor-help">Essa ordem e o nome valem tanto na escala operacional quanto no PDF impresso.</p>
+              <button className="save" disabled={saving}>{saving ? "Salvando…" : "Salvar seção"}</button>
+            </form>
+          </div>
+        )}
+
         <div className="records">
           <Record
             kind="guard"
@@ -300,8 +367,11 @@ export function GestaoClient({
   if (mode === "movimentos")
     return (
       <Module
+        date={date}
         title="Movimentações do efetivo"
         subtitle="Afastamentos aprovados retiram o GM da escala e abrem o furo correspondente."
+        busy={saving}
+        busyArea={modeLabel[mode]}
       >
         <Form
           title="Novo afastamento ou ajuste"
@@ -337,8 +407,11 @@ export function GestaoClient({
   const campaign = data.campaign;
   return (
     <Module
+      date={date}
       title={String(campaign?.title || "Folgas mensais")}
       subtitle="Cada GM escolhe uma data útil e uma data de fim de semana. A capacidade é atualizada automaticamente."
+      busy={saving}
+      busyArea={modeLabel[mode]}
     >
       <div className="leave-layout">
         <Form title="Registrar escolha" onSubmit={(e) => submit(e, "leave")}>
@@ -387,13 +460,13 @@ export function GestaoClient({
 function SectionOrder({sections,onReorder,onRename}:{sections:Item[];onReorder:(key:string,direction:"up"|"down")=>void;onRename:(section:Item)=>void}) {
   return <section className="section-order">
     <header><div><small>ORDEM NA ESCALA E NO PDF</small><h3>Seções operacionais</h3></div><span>{sections.length}</span></header>
-    <p>Reposicione áreas inteiras. A ordem dos postos dentro de cada área continua ajustável na lista abaixo.</p>
+    <p>A mesma lista ordenada alimenta a escala operacional e o documento impresso. Use Editar para renomear em painel.</p>
     <div className="section-order-list">{sections.map((section,index)=><div key={String(section.section_key)}>
       <b><span>{index+1}</span>{String(section.label)}</b>
       <span className="record-actions">
-        <button aria-label={`Renomear ${section.label}`} onClick={()=>onRename(section)}>Editar</button>
-        <button disabled={index===0} aria-label={`Mover ${section.label} para cima`} onClick={()=>onReorder(String(section.section_key),"up")}>↑</button>
-        <button disabled={index===sections.length-1} aria-label={`Mover ${section.label} para baixo`} onClick={()=>onReorder(String(section.section_key),"down")}>↓</button>
+        <button type="button" className="section-edit-btn" aria-label={`Renomear ${section.label}`} onClick={()=>onRename(section)}>Editar</button>
+        <button type="button" disabled={index===0} aria-label={`Mover ${section.label} para cima`} onClick={()=>onReorder(String(section.section_key),"up")}>↑</button>
+        <button type="button" disabled={index===sections.length-1} aria-label={`Mover ${section.label} para baixo`} onClick={()=>onReorder(String(section.section_key),"down")}>↓</button>
       </span>
     </div>)}</div>
   </section>
@@ -434,18 +507,25 @@ function GuardSelect({ guards }: { guards: Item[] }) {
   );
 }
 function Module({
+  date,
   title,
   subtitle,
   children,
+  busy = false,
+  busyArea = "módulo",
 }: {
+  date: string;
   title: string;
   subtitle: string;
   children: React.ReactNode;
+  busy?: boolean;
+  busyArea?: string;
 }) {
   return (
     <main className="module-shell">
+      <ModuleBusyOverlay area={busyArea} active={busy} />
       <header>
-        <Link href="/">← Voltar à escala</Link>
+        <BackToSchedule date={date} />
         <div>
           <h1>{title}</h1>
           <p>{subtitle}</p>

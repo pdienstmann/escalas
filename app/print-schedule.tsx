@@ -1,6 +1,10 @@
 "use client";
 /* eslint-disable @next/next/no-html-link-for-pages */
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
+import { ModuleLoading } from "./module-loading";
+import { useScheduleDate } from "./use-schedule-date";
+import { formatScheduleDate, withScheduleDate } from "../lib/schedule-date";
+import { orderScheduleResources } from "../lib/schedule-sections";
 type Rec = Record<string, string | number | null>;
 type State = {
   date: string;
@@ -8,6 +12,7 @@ type State = {
   vehicles: Rec[];
   assignments: Rec[];
   movements: Rec[];
+  sections?: Rec[];
   patternLabel?: string;
 };
 const shifts = {
@@ -21,12 +26,12 @@ const shifts = {
   ],
 };
 export function PrintSchedule() {
+  const { date } = useScheduleDate();
   const [data, setData] = useState<State | null>(null),
     [error, setError] = useState("");
   useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const date = params.get("date") || "2026-08-12";
-    const volumeTest = params.get("teste") === "200";
+    const volumeTest = new URLSearchParams(location.search).get("teste") === "200";
+    setData(null);
     fetch(`/api/schedule?date=${date}&_=${Date.now()}`, { cache: "no-store" })
       .then((r) => {
         if (!r.ok) throw new Error();
@@ -34,13 +39,13 @@ export function PrintSchedule() {
       })
       .then((value) => setData(volumeTest ? makeVolumeData(value) : value))
       .catch(() => setError("Não foi possível preparar a impressão."));
-  }, []);
+  }, [date]);
   if (error) return <main className="print-error">{error}</main>;
-  if (!data) return <main className="print-error">Preparando documento…</main>;
+  if (!data) return <ModuleLoading area="documento de impressão" detail={`Montando PDF da escala de ${formatScheduleDate(date)}…`} />;
   return (
     <main className={`print-document ${data.assignments.length >= 180 ? "print-dense" : ""}`}>
       <div className="print-actions">
-        <a href="/">← Voltar</a>
+        <a href={withScheduleDate("/", date)}>← Voltar</a>
         {data.assignments.length >= 180 && <span className="print-volume-badge">Compactação automática · {data.assignments.length} designações</span>}
         <button onClick={() => window.print()}>Imprimir / salvar PDF</button>
       </div>
@@ -58,10 +63,11 @@ function PrintPage({
   period: "day" | "night";
   title: string;
 }) {
-  const resources = [
-    ...data.vehicles.map((r) => ({ kind: "vehicle", r })),
-    ...data.posts.map((r) => ({ kind: "post", r })),
-  ];
+  const resources = orderScheduleResources(
+    data.vehicles,
+    data.posts,
+    data.sections || [],
+  );
   return (
     <section className="print-page">
       <header>
@@ -72,7 +78,7 @@ function PrintPage({
           <strong>{title}</strong>
         </div>
         <aside>
-          <b>{new Date(data.date + "T12:00:00").toLocaleDateString("pt-BR")}</b>
+          <b>{formatScheduleDate(data.date)}</b>
           <span>{data.patternLabel||"Escala operacional"}</span>
         </aside>
       </header>
@@ -89,47 +95,55 @@ function PrintPage({
           </tr>
         </thead>
         <tbody>
-          {resources.map(({ kind, r }) => (
-            <tr key={`${kind}-${r.id}`}>
-              <td>
-                <b>{kind === "vehicle" ? <><span className="print-vehicle-icon">{vehicleIcon(String(r.type))}</span>{r.prefix}</> : r.name}</b>
-                <small>{kind === "vehicle" ? r.zone : r.group_name}</small>
-              </td>
-              {shifts[period].map((s) => {
-                const list = data.assignments.filter(
-                    (a) =>
-                      (kind === "vehicle"
-                        ? a.vehicle_id === r.id
-                        : a.post_id === r.id) && belongsToShift(a,s.id),
-                  ),
-                  required = kind === "vehicle" ? 2 : 1;
-                return (
-                  <td key={s.id}>
-                    {list.map((a) => (
-                      <div className={`print-person ${a.status}`} key={a.id}>
-                        {kind === "vehicle" && (
-                          <span>{a.role === "driver" ? "M" : "P"}</span>
-                        )}
-                        <b>{a.guard_name}</b>
-                        {a.status !== "normal" && (
-                          <em>{String(a.work_kind)==="weekly"&&String(a.regular_ends_at||"")!==String(a.ends_at)?weeklyHeShort(a):status(String(a.status))}</em>
-                        )}
-                        {Number(a.is_reassigned)===1&&<em className="print-rem">REM</em>}
-                        <small>
-                          {weeklyDisplay(a)}
-                        </small>
-                      </div>
-                    ))}
-                    {list.length < required && (
-                      <strong className="print-hole">
-                        FURO · {required - list.length} vaga(s)
-                      </strong>
-                    )}
-                  </td>
-                );
-              })}
-            </tr>
+          {resources.map(({ kind, r, section }, index) => (
+            <Fragment key={`${kind}-${r.id}`}>
+              {(index === 0 || resources[index - 1].section !== section) && (
+                <tr className="print-section">
+                  <td colSpan={1 + shifts[period].length}><b>{section}</b></td>
+                </tr>
+              )}
+              <tr>
+                <td>
+                  <b>{kind === "vehicle" ? <><span className="print-vehicle-icon">{vehicleIcon(String(r.type))}</span>{r.prefix}</> : r.name}</b>
+                  <small>{kind === "vehicle" ? r.zone : r.group_name}</small>
+                </td>
+                {shifts[period].map((s) => {
+                  const list = data.assignments.filter(
+                      (a) =>
+                        (kind === "vehicle"
+                          ? a.vehicle_id === r.id
+                          : a.post_id === r.id) && belongsToShift(a,s.id),
+                    ),
+                    required = kind === "vehicle" ? 2 : 1;
+                  return (
+                    <td key={s.id}>
+                      {list.map((a) => (
+                        <div className={`print-person ${a.status}`} key={a.id}>
+                          {kind === "vehicle" && (
+                            <span>{a.role === "driver" ? "M" : "P"}</span>
+                          )}
+                          <b>{a.guard_name}</b>
+                          {a.status !== "normal" && (
+                            <em>{String(a.work_kind)==="weekly"&&String(a.regular_ends_at||"")!==String(a.ends_at)?weeklyHeShort(a):status(String(a.status))}</em>
+                          )}
+                          {Number(a.is_reassigned)===1&&<em className="print-rem">REM</em>}
+                          <small>
+                            {weeklyDisplay(a)}
+                          </small>
+                        </div>
+                      ))}
+                      {list.length < required && (
+                        <strong className="print-hole">
+                          FURO · {required - list.length} vaga(s)
+                        </strong>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            </Fragment>
           ))}
+
         </tbody>
       </table>
       <footer>

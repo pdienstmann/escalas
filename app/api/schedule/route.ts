@@ -7,8 +7,10 @@ import {
 } from "../../../lib/pattern-engine";
 import { writeAudit } from "../../../lib/audit";
 import { permitted } from "../../../lib/access";
+import { isScheduleDate, todayScheduleDate } from "../../../lib/schedule-date";
 
 export const dynamic = "force-dynamic";
+
 const demoGuards = [
   "ALMEIDA",
   "ANDRADE",
@@ -330,7 +332,8 @@ async function ensureBase(date: string) {
 export async function GET(request: Request) {
   if (!permitted(request))
     return Response.json({ error: "Não autorizado" }, { status: 401 });
-  const date = new URL(request.url).searchParams.get("date") || "2026-08-12";
+  const requested = new URL(request.url).searchParams.get("date");
+  const date = isScheduleDate(requested) ? requested : todayScheduleDate();
   await ensureBase(date);
   const schedule = await env.DB.prepare("SELECT * FROM schedules WHERE date=?")
     .bind(date)
@@ -366,9 +369,20 @@ export async function GET(request: Request) {
     ]);
   const blocked = new Set(movements.results.map((m) => Number(m.guard_id))),
     visibleVehicleIds=new Set(vehicles.results.map((v)=>Number(v.id))),
+    visiblePostIds=new Set(posts.results.map((p)=>Number(p.id))),
+    awaitingRedeploy = (a: Record<string, unknown>) => {
+      if (blocked.has(Number(a.guard_id))) return false;
+      const hasVehicle = Boolean(a.vehicle_id);
+      const hasPost = Boolean(a.post_id);
+      if (!hasVehicle && !hasPost) return true;
+      if (hasVehicle && !visibleVehicleIds.has(Number(a.vehicle_id))) return true;
+      if (hasPost && !visiblePostIds.has(Number(a.post_id))) return true;
+      return false;
+    },
     active = assignments.results.filter(
-      (a) => !blocked.has(Number(a.guard_id))&&(!a.vehicle_id||visibleVehicleIds.has(Number(a.vehicle_id))),
-    );
+      (a) => !blocked.has(Number(a.guard_id)) && !awaitingRedeploy(a),
+    ),
+    availableForRedeployment = assignments.results.filter((a) => awaitingRedeploy(a));
   const appliedPattern=await env.DB.prepare("SELECT dp.code day_code,np.code night_code FROM schedule_patterns sp JOIN shift_patterns dp ON dp.id=sp.day_pattern_id JOIN shift_patterns np ON np.id=sp.night_pattern_id WHERE sp.schedule_id=?").bind(schedule?.id).first<Record<string,unknown>>();
   const suggested=appliedPattern?null:await resolvePatternCodes(env.DB,date);
   return Response.json({
@@ -378,7 +392,7 @@ export async function GET(request: Request) {
     posts: posts.results,
     vehicles: vehicles.results,
     assignments: active,
-    availableForRedeployment: assignments.results.filter((a)=>!blocked.has(Number(a.guard_id))&&Boolean(a.vehicle_id)&&!visibleVehicleIds.has(Number(a.vehicle_id))),
+    availableForRedeployment,
     removed: assignments.results.filter((a) => blocked.has(Number(a.guard_id))),
     movements: movements.results,
     notices: notices.results,

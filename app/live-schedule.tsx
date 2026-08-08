@@ -1,5 +1,10 @@
 "use client";
 import { FullPageLink as Link } from "./full-page-link";
+import { ModuleLoading } from "./module-loading";
+import { ScheduleNav } from "./schedule-nav";
+import { useScheduleDate } from "./use-schedule-date";
+import { formatScheduleDate } from "../lib/schedule-date";
+import { orderScheduleResources } from "../lib/schedule-sections";
 import {
   DragEvent,
   FormEvent,
@@ -47,18 +52,20 @@ function times(date: string, shift: string) {
   };
 }
 export function LiveSchedule() {
+  const { date, setDate, hrefFor } = useScheduleDate();
   const [data, setData] = useState<State | null>(null),
     [pick, setPick] = useState<Pick | null>(null),
     [message, setMessage] = useState(""),
-    [date, setDate] = useState("2026-08-12"),
     [query, setQuery] = useState(""),
-    [saving, setSaving] = useState(false);
+    [saving, setSaving] = useState(false),
+    [loadError, setLoadError] = useState("");
   const loadSequence=useRef(0);
   const load = useCallback(async () => {
     const sequence=++loadSequence.current;
     try {
       setPick(null);
       setData(null);
+      setLoadError("");
       const r = await fetch(`/api/schedule?date=${date}&_=${Date.now()}`, {
         cache: "no-store",
       });
@@ -66,9 +73,10 @@ export function LiveSchedule() {
       const value=await r.json();
       if(sequence===loadSequence.current)setData(value);
     } catch {
-      setMessage(
-        "Não foi possível consultar a escala. Recarregue a página para tentar novamente.",
-      );
+      if(sequence===loadSequence.current){
+        setLoadError("Não foi possível consultar a escala. Recarregue a página para tentar novamente.");
+        setMessage("Não foi possível consultar a escala. Recarregue a página para tentar novamente.");
+      }
     }
   }, [date]);
   useEffect(() => {
@@ -77,22 +85,7 @@ export function LiveSchedule() {
   }, [load]);
   const resources = useMemo(() => {
     if (!data) return [];
-    const sectionMeta=new Map(data.sections.map(section=>[String(section.section_key),section]));
-    const all = [
-      ...data.vehicles.map((r) => ({
-        kind: "vehicle" as const,
-        r,
-        section: String(sectionMeta.get("VEHICLES")?.label||"VIATURAS E ZONAS"),
-        order:Number(sectionMeta.get("VEHICLES")?.sort_order||0),
-      })),
-      ...data.posts.map((r) => ({
-        kind: "post" as const,
-        r,
-        section: String(sectionMeta.get(`POST:${r.group_name}`)?.label||r.group_name||"POSTOS"),
-        order:Number(sectionMeta.get(`POST:${r.group_name}`)?.sort_order||99),
-      })),
-    ];
-    return all.sort((a,b)=>a.order-b.order||String(a.section).localeCompare(String(b.section))).filter((x) =>
+    return orderScheduleResources(data.vehicles, data.posts, data.sections).filter((x) =>
       `${x.r.name || ""} ${x.r.prefix || ""} ${x.r.zone || ""} ${x.r.group_name || ""}`
         .toLowerCase()
         .includes(query.toLowerCase()),
@@ -110,13 +103,14 @@ export function LiveSchedule() {
       const j = await r.json();
       setMessage(r.ok ? "Alteração salva e já exibida na escala." : j.error);
       if (r.ok) {
-        setData((current) =>
-          current
-            ? {
-                ...current,
-                assignments: j.deletedId
-                  ? current.assignments.filter((a) => a.id !== j.deletedId)
-                  : j.assignment
+        if (j.deletedId || j.assignment?.post_id || j.assignment?.vehicle_id === null) {
+          await load();
+        } else {
+          setData((current) =>
+            current
+              ? {
+                  ...current,
+                  assignments: j.assignment
                     ? [
                         ...current.assignments.filter(
                           (a) => a.id !== j.assignment.id,
@@ -124,12 +118,15 @@ export function LiveSchedule() {
                         j.assignment,
                       ]
                     : current.assignments,
-                availableForRedeployment: j.assignment
-                  ? current.availableForRedeployment.filter((a) => a.id !== j.assignment.id)
-                  : current.availableForRedeployment,
-              }
-            : current,
-        );
+                  availableForRedeployment: j.assignment
+                    ? current.availableForRedeployment.filter((a) => a.id !== j.assignment.id)
+                    : j.deletedId
+                      ? current.availableForRedeployment.filter((a) => a.id !== j.deletedId)
+                      : current.availableForRedeployment,
+                }
+              : current,
+          );
+        }
         setPick(null);
       }
       return r.ok;
@@ -181,15 +178,16 @@ export function LiveSchedule() {
       endsAt: t.end,
       status: assignment.status,
       requestRef: assignment.request_ref || null,
-      isReassigned: assignment.is_reassigned || 0,
-      reassignmentNote: assignment.reassignment_note || null,
+      isReassigned: 1,
+      reassignmentNote: assignment.reassignment_note || "Remanejamento na escala",
     });
   }
   if (!data)
     return (
-      <main className="live-loading">
-        <div className="loading-card"><span className="loading-spinner"/><b>Carregando escala de {new Date(date+"T12:00:00").toLocaleDateString("pt-BR")}</b><small>{message||"Aplicando padrões, afastamentos e disponibilidade das viaturas…"}</small></div>
-      </main>
+      <ModuleLoading
+        area={`escala de ${formatScheduleDate(date)}`}
+        detail={loadError || "Aplicando padrões, afastamentos e disponibilidade das viaturas…"}
+      />
     );
   const holes = resources.reduce(
     (sum, x) =>
@@ -212,7 +210,7 @@ export function LiveSchedule() {
           <span className="crest">GM</span>
           <div>
             <b>Escala diária</b>
-            <small>{new Date(data.date+"T12:00:00").toLocaleDateString("pt-BR")} · {data.patternLabel}</small>
+            <small>{formatScheduleDate(data.date)} · {data.patternLabel}</small>
           </div>
         </div>
         <div className="date">
@@ -234,22 +232,13 @@ export function LiveSchedule() {
             <b>{holes}</b> furos
           </span>
         </div>
-        <Link className="primary top-action" href={`/validacao?date=${date}`}>
+        <Link className="primary top-action" href={hrefFor("/validacao")}>
           Validar e publicar
         </Link>
       </header>
-      <nav className="tabs">
-        <b>Escala</b>
-        <Link href="/padroes">Padrões 12x36</Link>
-        <Link href="/movimentacoes">Movimentações</Link>
-        <Link href="/horas-extras">Horas extras</Link>
-        <Link href="/alteracoes">Alterações diversas</Link>
-        <Link href="/folgas">Folgas mensais</Link>
-        <Link href="/cadastros">Cadastros</Link>
-        <Link href="/historico">Histórico</Link>
-      </nav>
+      <ScheduleNav date={date} active="/" />
       <section className="toolbar">
-        <strong>Escala de {new Date(data.date+"T12:00:00").toLocaleDateString("pt-BR")}</strong>
+        <strong>Escala de {formatScheduleDate(data.date)}</strong>
         <span className="pattern-confirm">Padrão: {data.patternLabel}</span>
         <span className="sync">● sincronizado</span>
         <input
@@ -257,7 +246,7 @@ export function LiveSchedule() {
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Buscar posto, viatura ou zona…"
         />
-        <Link className="toolbar-link" href={`/impressao?date=${date}`}>
+        <Link className="toolbar-link" href={hrefFor("/impressao")}>
           Gerar PDF
         </Link>
       </section>
@@ -267,9 +256,10 @@ export function LiveSchedule() {
           {data.notices.map((n) => (
             <span key={n.id}>{n.title}</span>
           ))}
-          <Link href="/alteracoes">Conferir</Link>
+          <Link href={hrefFor("/alteracoes")}>Conferir</Link>
         </section>
       )}
+
       {message && (
         <div className="schedule-toast" role="status">
           {message}

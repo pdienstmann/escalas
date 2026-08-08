@@ -11,8 +11,9 @@
 .section-order-list b{display:flex;align-items:center;gap:8px;font-size:12px}
 .section-order-list b>span{display:grid;place-items:center;width:21px;height:21px;border-radius:50%;background:#eef4fa;color:#315675}
 .record-actions{display:flex;gap:5px}
-.section-order-list button{width:30px;height:28px;border:1px solid #bdcad8;border-radius:5px;background:#fff;color:#17476f;font-weight:800}
+.section-order-list button{min-width:30px;height:28px;border:1px solid #bdcad8;border-radius:5px;background:#fff;color:#17476f;font-weight:800}
 .section-order-list button:disabled{opacity:.3}
+.section-order-list .section-edit-btn{padding:0 8px;font-size:11px}
 .import-panel{display:flex;flex-direction:column}
 .import-panel textarea{width:100%;resize:vertical;min-height:105px;padding:10px;border:1px solid #b9c8d7;border-radius:6px;font:12px/1.45 ui-monospace,monospace}
 .import-preview{display:grid;gap:2px;margin:9px 0;padding:8px;background:#f3f7fb;border-radius:6px;font-size:11px}
