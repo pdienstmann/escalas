@@ -6,6 +6,15 @@ import { useScheduleDate } from "./use-schedule-date";
 import { formatScheduleDate } from "../lib/schedule-date";
 import { orderScheduleResources } from "../lib/schedule-sections";
 import {
+  formatHoursDuration,
+  fullPeriodLabel,
+  fullPeriodWindow,
+  isDayShift,
+  shiftTimes,
+  SHIFT_DEFS,
+} from "../lib/shift-rules";
+import { HoleSuggestBox } from "./hole-suggest-box";
+import {
   DragEvent,
   FormEvent,
   Fragment,
@@ -36,30 +45,34 @@ type Pick = {
   shift: string;
   assignment?: Rec;
 };
-const shifts = [
-  { id: "2", label: "2º TURNO", time: "07:00–13:00" },
-  { id: "3", label: "3º TURNO", time: "13:00–19:00" },
-  { id: "4", label: "4º TURNO", time: "19:00–01:00" },
-  { id: "1", label: "1º TURNO", time: "01:00–07:00" },
-];
+type HolePick = {
+  kind: "post" | "vehicle";
+  resource: Rec;
+  shift: string;
+  role: string | null;
+  position: { top: number; left: number } | null;
+};
+type ViewFilter = "all" | "day" | "night" | "holes" | "redeploy";
+const shifts = SHIFT_DEFS;
 function times(date: string, shift: string) {
-  const s = shifts.find((x) => x.id === shift)!;
-  const next = new Date(`${date}T12:00:00Z`);
-  next.setUTCDate(next.getUTCDate() + 1);
-  return {
-    start: `${date}T${s.time.slice(0, 5)}`,
-    end: `${shift === "4" ? next.toISOString().slice(0, 10) : date}T${s.time.slice(6, 11)}`,
-  };
+  return shiftTimes(date, shift);
+}
+function assignmentKey(kind: "post" | "vehicle", resourceId: string | number, shift: string) {
+  return `${kind}:${resourceId}:${shift}`;
 }
 export function LiveSchedule() {
   const { date, setDate, hrefFor } = useScheduleDate();
   const [data, setData] = useState<State | null>(null),
     [pick, setPick] = useState<Pick | null>(null),
+    [holePick, setHolePick] = useState<HolePick | null>(null),
     [message, setMessage] = useState(""),
     [query, setQuery] = useState(""),
+    [view, setView] = useState<ViewFilter>("all"),
+    [collapsed, setCollapsed] = useState<Record<string, boolean>>({}),
     [saving, setSaving] = useState(false),
     [loadError, setLoadError] = useState("");
   const loadSequence=useRef(0);
+  const tableRef = useRef<HTMLTableElement | null>(null);
   const load = useCallback(async () => {
     const sequence=++loadSequence.current;
     try {
@@ -83,14 +96,51 @@ export function LiveSchedule() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
+  const assignmentIndex = useMemo(() => {
+    const map = new Map<string, Rec[]>();
+    if (!data) return map;
+    for (const a of data.assignments) {
+      for (const s of shifts) {
+        if (!belongsToShift(a, s.id)) continue;
+        if (a.post_id != null) {
+          const key = assignmentKey("post", Number(a.post_id), s.id);
+          const list = map.get(key) || [];
+          list.push(a);
+          map.set(key, list);
+        }
+        if (a.vehicle_id != null) {
+          const key = assignmentKey("vehicle", Number(a.vehicle_id), s.id);
+          const list = map.get(key) || [];
+          list.push(a);
+          map.set(key, list);
+        }
+      }
+    }
+    return map;
+  }, [data]);
   const resources = useMemo(() => {
     if (!data) return [];
-    return orderScheduleResources(data.vehicles, data.posts, data.sections).filter((x) =>
-      `${x.r.name || ""} ${x.r.prefix || ""} ${x.r.zone || ""} ${x.r.group_name || ""}`
-        .toLowerCase()
-        .includes(query.toLowerCase()),
-    );
-  }, [data, query]);
+    const q = query.toLowerCase().trim();
+    return orderScheduleResources(data.vehicles, data.posts, data.sections).filter((x) => {
+      const text = `${x.r.name || ""} ${x.r.prefix || ""} ${x.r.zone || ""} ${x.r.group_name || ""} ${x.section}`
+        .toLowerCase();
+      if (q && !text.includes(q)) {
+        const hasGuard = shifts.some((s) =>
+          (assignmentIndex.get(assignmentKey(x.kind, Number(x.r.id), s.id)) || []).some((a) =>
+            String(a.guard_name || "").toLowerCase().includes(q),
+          ),
+        );
+        if (!hasGuard) return false;
+      }
+      if (view === "holes") {
+        return shifts.some((s) => {
+          const list = assignmentIndex.get(assignmentKey(x.kind, Number(x.r.id), s.id)) || [];
+          return list.length < (x.kind === "vehicle" ? 2 : 1);
+        });
+      }
+      return true;
+    });
+  }, [assignmentIndex, data, query, view]);
   async function postAssignment(body: Record<string, unknown>) {
     if (saving) return false;
     setSaving(true);
@@ -101,9 +151,9 @@ export function LiveSchedule() {
         body: JSON.stringify(body),
       });
       const j = await r.json();
-      setMessage(r.ok ? "Alteração salva e já exibida na escala." : j.error);
+      setMessage(r.ok ? (j.message || "Alteração salva e já exibida na escala.") : j.error);
       if (r.ok) {
-        if (j.deletedId || j.assignment?.post_id || j.assignment?.vehicle_id === null) {
+        if (j.reload || j.deletedId || j.assignments || j.assignment?.post_id || j.assignment?.vehicle_id === null) {
           await load();
         } else {
           setData((current) =>
@@ -139,17 +189,73 @@ export function LiveSchedule() {
     if (!data || !pick) return;
     const body = Object.fromEntries(new FormData(e.currentTarget)),
       [destination, id] = String(body.destination).split(":");
+    const fillingHole = !pick.assignment;
+    const t = fillingHole
+      ? fullPeriodWindow(data.date, String(body.shift || pick.shift))
+      : { start: String(body.startsAt), end: String(body.endsAt) };
     await postAssignment({
       ...body,
+      startsAt: fillingHole ? t.start : body.startsAt,
+      endsAt: fillingHole ? t.end : body.endsAt,
+      fillFullPeriod: fillingHole,
       id: pick.assignment?.id || null,
       scheduleId: data.schedule.id,
       postId: destination === "post" ? Number(id) : null,
       vehicleId: destination === "vehicle" ? Number(id) : null,
     });
   }
-  async function remove() {
-    if (pick?.assignment)
-      await postAssignment({ action: "delete", id: pick.assignment.id });
+  async function confirmHoleSuggestion(guardId: number) {
+    if (!data || !holePick) return;
+    const t = fullPeriodWindow(data.date, holePick.shift);
+    const role =
+      holePick.role ||
+      (holePick.kind === "vehicle" ? "driver" : "guard");
+    await postAssignment({
+      fillFullPeriod: true,
+      scheduleId: data.schedule.id,
+      guardId,
+      postId: holePick.kind === "post" ? Number(holePick.resource.id) : null,
+      vehicleId: holePick.kind === "vehicle" ? Number(holePick.resource.id) : null,
+      shift: holePick.shift,
+      role,
+      startsAt: t.start,
+      endsAt: t.end,
+      status: "overtime",
+      reassignmentNote: "Sugestão inteligente para preenchimento de furo",
+    });
+  }
+  function openHoleSuggest(
+    kind: "post" | "vehicle",
+    resource: Rec,
+    shift: string,
+    event: React.MouseEvent<HTMLButtonElement>,
+  ) {
+    if (!data) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const list = assignmentIndex.get(assignmentKey(kind, Number(resource.id), shift)) || [];
+    const need = kind === "vehicle" ? 2 : 1;
+    const missingRole =
+      kind === "vehicle" ? (list.length === 0 ? "driver" : "patrol") : "guard";
+    setHolePick({
+      kind,
+      resource,
+      shift,
+      role: missingRole,
+      position: {
+        top: Math.min(window.innerHeight - 380, rect.bottom + window.scrollY + 4),
+        left: Math.min(window.innerWidth - 360, rect.left + window.scrollX),
+      },
+    });
+    setPick(null);
+  }
+  function jumpToManualEditor() {
+    if (!holePick) return;
+    setPick({
+      kind: holePick.kind,
+      resource: holePick.resource,
+      shift: holePick.shift,
+    });
+    setHolePick(null);
   }
   async function move(
     assignment: Rec,
@@ -192,17 +298,45 @@ export function LiveSchedule() {
   const holes = resources.reduce(
     (sum, x) =>
       sum +
-      shifts.filter(
-        (s) =>
-          data.assignments.filter(
-            (a) =>
-              (x.kind === "post"
-                ? a.post_id === x.r.id
-                : a.vehicle_id === x.r.id) && belongsToShift(a,s.id),
-          ).length < (x.kind === "vehicle" ? 2 : 1),
-      ).length,
+      shifts.filter((s) => {
+        const list = assignmentIndex.get(assignmentKey(x.kind, Number(x.r.id), s.id)) || [];
+        return list.length < (x.kind === "vehicle" ? 2 : 1);
+      }).length,
     0,
   );
+  const visibleShifts =
+    view === "day"
+      ? shifts.filter((s) => s.period === "day")
+      : view === "night"
+        ? shifts.filter((s) => s.period === "night")
+        : shifts;
+  function jump(target: "day" | "night" | "pending") {
+    if (target === "day") setView("day");
+    if (target === "night") setView("night");
+    if (target === "pending") setView(data.availableForRedeployment.length ? "redeploy" : "holes");
+    requestAnimationFrame(() => {
+      tableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
+  const movementGroups = useMemo(() => {
+    const groups = [
+      { key: "technical_reserve", label: "Reserva técnica", types: ["technical_reserve"] },
+      { key: "day_off", label: "Folgas", types: ["day_off"] },
+      { key: "vacation", label: "Férias", types: ["vacation"] },
+      { key: "course", label: "Cursos", types: ["course"] },
+      { key: "medical_leave", label: "Licenças/atestados", types: ["medical_leave"] },
+      { key: "adjustments", label: "Banco de horas / Trocas", types: ["time_bank", "swap"] },
+    ];
+    return groups
+      .map((g) => ({
+        ...g,
+        items: data.movements.filter((m) => g.types.includes(String(m.type))),
+      }))
+      .filter((g) => g.items.length > 0);
+  }, [data]);
+  const showRedeploy = view === "all" || view === "redeploy";
+  const showTable = view !== "redeploy";
+
   return (
     <main className="app compact">
       <header className="topbar">
@@ -241,10 +375,16 @@ export function LiveSchedule() {
         <strong>Escala de {formatScheduleDate(data.date)}</strong>
         <span className="pattern-confirm">Padrão: {data.patternLabel}</span>
         <span className="sync">● sincronizado</span>
+        <div className="seg toolbar-seg" role="group" aria-label="Atalhos da escala">
+          <button type="button" className={view==="all"?"active":""} onClick={()=>setView("all")}>Tudo</button>
+          <button type="button" className={view==="day"?"active":""} onClick={()=>jump("day")}>Diurno</button>
+          <button type="button" className={view==="night"?"active":""} onClick={()=>jump("night")}>Noturno</button>
+          <button type="button" className={view==="holes"||view==="redeploy"?"active":""} onClick={()=>jump("pending")}>Pendências</button>
+        </div>
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Buscar posto, viatura ou zona…"
+          placeholder="Buscar posto, VTR, zona ou GM…"
         />
         <Link className="toolbar-link" href={hrefFor("/impressao")}>
           Gerar PDF
@@ -269,18 +409,22 @@ export function LiveSchedule() {
       <div className="workspace">
         <section className="schedule-wrap">
           <div className="drag-help">
-            Arraste um GM para outra célula ou clique para editar todos os
-            campos.
+            Arraste um GM para outra célula ou clique para editar. Ao preencher um furo diurno, o GM é escalado no turno inteiro (07:00–19:00).
           </div>
-          <table className="schedule">
+          {showTable && (
+          <table className="schedule" ref={tableRef}>
             <thead>
               <tr>
                 <th rowSpan={2}>POSTO / RECURSO</th>
-                <th colSpan={2}>DIURNO</th>
-                <th colSpan={2}>NOTURNO</th>
+                {visibleShifts.some((s)=>s.period==="day") && (
+                  <th colSpan={visibleShifts.filter((s)=>s.period==="day").length}>DIURNO</th>
+                )}
+                {visibleShifts.some((s)=>s.period==="night") && (
+                  <th colSpan={visibleShifts.filter((s)=>s.period==="night").length}>NOTURNO</th>
+                )}
               </tr>
               <tr>
-                {shifts.map((s) => (
+                {visibleShifts.map((s) => (
                   <th key={s.id}>
                     {s.label} · {s.time}
                   </th>
@@ -288,45 +432,69 @@ export function LiveSchedule() {
               </tr>
             </thead>
             <tbody>
-              {resources.map(({ kind, r, section }, index) => (
+              {resources.map(({ kind, r, section }, index) => {
+                const first = index === 0 || resources[index - 1].section !== section;
+                const isCollapsed = Boolean(collapsed[section]);
+                if (isCollapsed && !first) return null;
+                return (
                 <Row
                   key={`${kind}-${r.id}`}
                   kind={kind}
                   resource={r}
-                  assignments={data.assignments}
                   section={section}
-                  first={
-                    index === 0 || resources[index - 1].section !== section
+                  first={first}
+                  collapsed={isCollapsed}
+                  onToggleSection={() =>
+                    setCollapsed((current) => ({
+                      ...current,
+                      [section]: !current[section],
+                    }))
                   }
+                  shifts={visibleShifts}
+                  assignmentIndex={assignmentIndex}
                   selectedId={Number(pick?.assignment?.id || 0)}
                   onPick={setPick}
                   onMove={move}
+                  onHolePick={openHoleSuggest}
                 />
-              ))}
+              );
+              })}
             </tbody>
           </table>
-          <section className="movement-grid">
+          )}
+          <section className="movement-grid compact-movements">
             <h2>Efetivo retirado automaticamente</h2>
             <p>
               Movimentações aprovadas não aparecem nos postos e deixam o furo
               visível.
             </p>
-            <div>
-              {data.movements.length ? (
-                data.movements.map((m) => (
-                  <article key={m.id}>
-                    <b>{m.guard_name}</b>
-                    <strong>{labelStatus(String(m.type))}</strong>
-                    <small>{movementDetail(m)}</small>
-                    {m.request_ref && <em>Req. {m.request_ref}</em>}
+            {movementGroups.length ? (
+              <div className="movement-groups">
+                {movementGroups.map((group) => (
+                  <article key={group.key} className="movement-group">
+                    <header>
+                      <b>{group.label}</b>
+                      <span>{group.items.length}</span>
+                    </header>
+                    <div>
+                      {group.items.map((m) => (
+                        <span key={String(m.id)}>
+                          <strong>{m.guard_name}</strong>
+                          <small>
+                            {movementDetail(m)}
+                            {m.request_ref ? ` · Req. ${m.request_ref}` : ""}
+                          </small>
+                        </span>
+                      ))}
+                    </div>
                   </article>
-                ))
-              ) : (
-                <p>Nenhum afastamento nesta data.</p>
-              )}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <p>Nenhum afastamento nesta data.</p>
+            )}
           </section>
-          {data.availableForRedeployment.length>0&&<section className="redeployment-pool"><header><div><span>VIATURA INDISPONÍVEL</span><h2>GMs à disposição para remanejamento</h2><p>Estas designações foram retiradas de uma VTR em FA ou desativada; escolha um novo destino antes de fechar a escala.</p></div><b>{data.availableForRedeployment.length}</b></header><div>{data.availableForRedeployment.map(a=><article key={String(a.id)}><div><b>{String(a.guard_name)}</b><small>{String(a.starts_at).slice(11,16)}–{String(a.ends_at).slice(11,16)} · aguardando destino</small></div><button onClick={()=>data.posts[0]&&setPick({kind:"post",resource:data.posts[0],shift:String(a.shift)==="W"?"2":String(a.shift),assignment:a})}>Remanejar</button></article>)}</div></section>}
+          {showRedeploy && data.availableForRedeployment.length>0&&<section className="redeployment-pool"><header><div><span>VIATURA INDISPONÍVEL</span><h2>GMs à disposição para remanejamento</h2><p>Estas designações foram retiradas de uma VTR em FA ou desativada; escolha um novo destino antes de fechar a escala.</p></div><b>{data.availableForRedeployment.length}</b></header><div>{data.availableForRedeployment.map(a=><article key={String(a.id)}><div><b>{String(a.guard_name)}</b><small>{String(a.starts_at).slice(11,16)}–{String(a.ends_at).slice(11,16)} · aguardando destino</small></div><button onClick={()=>data.posts[0]&&setPick({kind:"post",resource:data.posts[0],shift:String(a.shift)==="W"?"2":String(a.shift),assignment:a})}>Remanejar</button></article>)}</div></section>}
         </section>
         <aside className={`editor ${pick ? "editor-active" : ""}`}>
           {pick ? (
@@ -346,13 +514,38 @@ export function LiveSchedule() {
             <div className="empty">
               <h2>Edição rápida</h2>
               <p>
-                Selecione um GM ou uma vaga. Também é possível arrastar um nome
-                para outro posto ou turno.
+                Selecione um GM ou uma vaga. Ao clicar em um furo, aparece a
+                sugestão inteligente de GMs.
               </p>
             </div>
           )}
         </aside>
       </div>
+      {holePick && (
+        <>
+          <div
+            className="hole-suggest-backdrop"
+            onClick={() => setHolePick(null)}
+          />
+          <HoleSuggestBox
+            date={data.date}
+            shift={holePick.shift}
+            postId={holePick.kind === "post" ? Number(holePick.resource.id) : null}
+            vehicleId={holePick.kind === "vehicle" ? Number(holePick.resource.id) : null}
+            role={holePick.role}
+            resourceLabel={
+              holePick.kind === "vehicle"
+                ? String(holePick.resource.prefix)
+                : String(holePick.resource.name)
+            }
+            position={holePick.position}
+            busy={saving}
+            onPick={(guardId) => void confirmHoleSuggestion(guardId)}
+            onManual={jumpToManualEditor}
+            onClose={() => setHolePick(null)}
+          />
+        </>
+      )}
     </main>
   );
 }
@@ -373,27 +566,44 @@ function movementDetail(m: Rec) {
 function Row({
   kind,
   resource,
-  assignments,
   section,
   first,
+  collapsed,
+  onToggleSection,
+  shifts: visibleShifts,
+  assignmentIndex,
   selectedId,
   onPick,
   onMove,
 }: {
   kind: "post" | "vehicle";
   resource: Rec;
-  assignments: Rec[];
   section: string;
   first: boolean;
+  collapsed: boolean;
+  onToggleSection: () => void;
+  shifts: typeof SHIFT_DEFS;
+  assignmentIndex: Map<string, Rec[]>;
   selectedId: number;
   onPick: (p: Pick) => void;
   onMove: (a: Rec, k: "post" | "vehicle", r: Rec, s: string) => void;
+  onHolePick: (
+    kind: "post" | "vehicle",
+    resource: Rec,
+    shift: string,
+    event: React.MouseEvent<HTMLButtonElement>,
+  ) => void;
 }) {
   function drop(e: DragEvent, shift: string) {
     e.preventDefault();
-    const id = Number(e.dataTransfer.getData("text/assignment")),
-      assignment = assignments.find((a) => a.id === id);
-    if (assignment) void onMove(assignment, kind, resource, shift);
+    const id = Number(e.dataTransfer.getData("text/assignment"));
+    for (const list of assignmentIndex.values()) {
+      const assignment = list.find((a) => Number(a.id) === id);
+      if (assignment) {
+        void onMove(assignment, kind, resource, shift);
+        return;
+      }
+    }
   }
   return (
     <Fragment>
@@ -401,12 +611,15 @@ function Row({
         <tr
           className={`group ${section === "SEDE DA GM" ? "headquarters" : ""}`}
         >
-          <td colSpan={5}>
-            {kind === "vehicle" ? "🚓" : "◆"} {section}
+          <td colSpan={1 + visibleShifts.length}>
+            <button type="button" className="section-toggle" onClick={onToggleSection}>
+              {collapsed ? "▸" : "▾"} {kind === "vehicle" ? "🚓" : "◆"} {section}
+            </button>
           </td>
         </tr>
       )}
-      <tr>
+      {!collapsed && (
+      <tr className={kind === "vehicle" ? "vehicle-row" : "post-row"}>
         <td className="resource">
           <span className="vehicle">
             {kind === "vehicle" ? vehicleIcon(String(resource.type)) : ""}
@@ -420,14 +633,9 @@ function Row({
             </small>
           </div>
         </td>
-        {shifts.map((s) => {
-          const list = assignments.filter(
-              (a) =>
-                (kind === "post"
-                  ? a.post_id === resource.id
-                  : a.vehicle_id === resource.id) && belongsToShift(a,s.id),
-            ),
-            need = kind === "vehicle" ? 2 : 1;
+        {visibleShifts.map((s) => {
+          const list = assignmentIndex.get(assignmentKey(kind, Number(resource.id), s.id)) || [];
+          const need = kind === "vehicle" ? 2 : 1;
           return (
             <td
               key={s.id}
@@ -468,7 +676,7 @@ function Row({
               {list.length < need && (
                 <button
                   className="live-hole"
-                  onClick={() => onPick({ kind, resource, shift: s.id })}
+                  onClick={(e) => onHolePick(kind, resource, s.id, e)}
                 >
                   <span>FURO</span>＋ Selecionar{" "}
                   {kind === "vehicle"
@@ -482,6 +690,7 @@ function Row({
           );
         })}
       </tr>
+      )}
     </Fragment>
   );
 }
@@ -501,9 +710,20 @@ function Editor({
   onRemove: () => void;
 }) {
   const a = pick.assignment,
-    t = times(data.date, pick.shift),
+    fillingHole = !a,
+    t = fillingHole ? fullPeriodWindow(data.date, pick.shift) : times(data.date, pick.shift),
     [guardId, setGuardId] = useState(String(a?.guard_id || "")),
+    [guardQuery, setGuardQuery] = useState(""),
     guard = data.guards.find((g) => String(g.id) === guardId);
+  const eligibleGuards = useMemo(() => {
+    const q = guardQuery.toLowerCase().trim();
+    return data.guards.filter((g) => {
+      if (!q) return true;
+      return `${g.name || ""} ${g.registration || ""} ${g.platoon || ""}`
+        .toLowerCase()
+        .includes(q);
+    });
+  }, [data.guards, guardQuery]);
   return (
     <form onSubmit={onSave}>
       <div className="editor-head">
@@ -528,10 +748,24 @@ function Editor({
           ×
         </button>
       </div>
+      {fillingHole && (
+        <div className="editing-alert full-period-alert">
+          <b>Regra de negócio:</b>
+          <span>{fullPeriodLabel(pick.shift)}. O GM cobrirá o bloco completo.</span>
+        </div>
+      )}
       <div className="editing-alert">
         <b>Confira antes de salvar:</b>
         <span>{guard?.name || "nenhum GM selecionado"}</span>
       </div>
+      <label>
+        Buscar GM
+        <input
+          value={guardQuery}
+          onChange={(e) => setGuardQuery(e.target.value)}
+          placeholder="Nome ou matrícula…"
+        />
+      </label>
       <label>
         Guarda
         <select
@@ -541,9 +775,9 @@ function Editor({
           required
         >
           <option value="">Selecionar GM</option>
-          {data.guards.map((g) => (
+          {eligibleGuards.map((g) => (
             <option key={g.id} value={String(g.id)}>
-              {g.name} · {g.platoon}
+              {g.name} · {g.registration} · {g.platoon}
             </option>
           ))}
         </select>
@@ -567,7 +801,7 @@ function Editor({
         </select>
       </label>
       <label>
-        Turno
+        Turno de referência
         <select name="shift" defaultValue={pick.shift}>
           {shifts.map((s) => (
             <option key={s.id} value={s.id}>
@@ -607,6 +841,7 @@ function Editor({
             type="datetime-local"
             defaultValue={String(a?.starts_at || t.start)}
             required
+            readOnly={fillingHole}
           />
         </label>
         <label>
@@ -616,9 +851,17 @@ function Editor({
             type="datetime-local"
             defaultValue={String(a?.ends_at || t.end)}
             required
+            readOnly={fillingHole}
           />
         </label>
       </div>
+      {fillingHole && (
+        <p className="full-period-note">
+          {isDayShift(pick.shift)
+            ? "Horário fixo do furo diurno: 07:00 às 19:00 (2º + 3º turnos)."
+            : "Horário fixo do furo noturno: 19:00 às 07:00 (4º + 1º turnos)."}
+        </p>
+      )}
       <label>
         Situação
         <select name="status" defaultValue={String(a?.status || "normal")}>
@@ -639,7 +882,7 @@ function Editor({
         />
       </label>
       <button className="save" disabled={saving}>
-        {saving ? "Salvando…" : "Salvar alteração"}
+        {saving ? "Salvando…" : fillingHole ? "Escalar turno inteiro" : "Salvar alteração"}
       </button>
       {a && (
         <button
@@ -661,8 +904,14 @@ const statusClass = (s: string) =>
 const statusShort = (s: string) =>
   s === "overtime" ? "HE" : s === "time_bank" ? "BH" : "TROCA";
 function weeklyDisplay(a:Rec){const start=String(a.starts_at).slice(11,16),regular=String(a.regular_ends_at||"").slice(11,16),end=String(a.ends_at).slice(11,16),breakStart=String(a.break_starts_at||"").slice(11,16),breakEnd=String(a.break_ends_at||"").slice(11,16);if(String(a.work_kind)!=="weekly")return `${start}–${end}`;const base=breakStart&&breakEnd?`${start}–${breakStart} / ${breakEnd}–${regular}`:`${start}–${regular}`;return end!==regular?`${base} + HE semanal ${regular}–${end}`:base}
-function weeklyHeShort(a:Rec){const start=String(a.regular_ends_at).slice(11,16),end=String(a.ends_at).slice(11,16);const minutes=(value:string)=>Number(value.slice(0,2))*60+Number(value.slice(3,5));return `HE SEMANAL · ${Math.max(0,(minutes(end)-minutes(start))/60)}h`}
+function weeklyHeShort(a:Rec){
+  const start=String(a.regular_ends_at).slice(11,16),end=String(a.ends_at).slice(11,16);
+  const minutes=(value:string)=>Number(value.slice(0,2))*60+Number(value.slice(3,5));
+  const hours=Math.max(0,(minutes(end)-minutes(start))/60);
+  return `HE SEMANAL · ${formatHoursDuration(hours)}`;
+}
 function belongsToShift(a:Rec,shift:string){if(String(a.shift)===shift)return true;if(String(a.shift)!=="W")return false;const start=String(a.starts_at).slice(11,16),end=String(a.ends_at).slice(11,16);if(shift==="2")return start<"13:00"&&end>"07:00";if(shift==="3")return start<"19:00"&&end>"13:00";return false}
+
 const labelStatus = (s: string) =>
   ({
     day_off: "Folga",

@@ -8,8 +8,11 @@ import {
 import { writeAudit } from "../../../lib/audit";
 import { permitted } from "../../../lib/access";
 import { isScheduleDate, todayScheduleDate } from "../../../lib/schedule-date";
+import { fullPeriodShifts, shiftTimes as periodShiftTimes, isDayShift } from "../../../lib/shift-rules";
+import { rankGuardSuggestions, describeReasons } from "../../../lib/suggest-gm";
 
 export const dynamic = "force-dynamic";
+
 
 const demoGuards = [
   "ALMEIDA",
@@ -334,6 +337,10 @@ export async function GET(request: Request) {
     return Response.json({ error: "Não autorizado" }, { status: 401 });
   const requested = new URL(request.url).searchParams.get("date");
   const date = isScheduleDate(requested) ? requested : todayScheduleDate();
+  const wantSuggestions = new URL(request.url).searchParams.get("suggest") === "1";
+  if (wantSuggestions) {
+    return await buildSuggestions(request, date);
+  }
   await ensureBase(date);
   const schedule = await env.DB.prepare("SELECT * FROM schedules WHERE date=?")
     .bind(date)
@@ -402,56 +409,49 @@ export async function GET(request: Request) {
   });
 }
 
-export async function POST(request: Request) {
-  if (!permitted(request))
-    return Response.json({ error: "Não autorizado" }, { status: 401 });
-  const b = (await request.json()) as Record<string, string | number | null>;
-  if (b.action === "delete") {
-    const before = await env.DB.prepare(
-      "SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id=?",
-    ).bind(b.id).first<Record<string,unknown>>();
-    if (!before)
-      return Response.json({ error: "Designação não encontrada." }, { status: 404 });
-    await env.DB.prepare("DELETE FROM assignments WHERE id=?").bind(b.id).run();
-    await writeAudit(request, {
-      action: "delete",
-      entityType: "assignment",
-      entityId: Number(b.id),
-      summary: `Removeu ${before.guard_name} do ${before.shift}º turno`,
-      before,
-      undoable: true,
-    });
-    return Response.json({ ok: true, deletedId: Number(b.id) });
-  }
-  const id = Number(b.id || 0),
-    guardId = Number(b.guardId),
-    scheduleId = Number(b.scheduleId),
-    start = String(b.startsAt),
-    end = String(b.endsAt);
+async function assertAssignable(
+  scheduleId: number,
+  guardId: number,
+  start: string,
+  end: string,
+  ignoreId = 0,
+) {
   const conflict = await env.DB.prepare(
     "SELECT id FROM assignments WHERE schedule_id=? AND guard_id=? AND id!=? AND starts_at<? AND ends_at>? LIMIT 1",
   )
-    .bind(scheduleId, guardId, id, end, start)
+    .bind(scheduleId, guardId, ignoreId, end, start)
     .first();
   if (conflict)
-    return Response.json(
-      { error: "Conflito: este GM já está escalado nesse horário." },
-      { status: 409 },
-    );
+    return { error: "Conflito: este GM já está escalado nesse horário.", status: 409 as const };
   const movement = await env.DB.prepare(
     "SELECT type FROM movements WHERE guard_id=? AND status='approved' AND starts_at<? AND ends_at>? LIMIT 1",
   )
     .bind(guardId, end, start)
     .first<{ type: string }>();
   if (movement)
-    return Response.json(
-      { error: `GM indisponível por ${movement.type}.` },
-      { status: 409 },
-    );
+    return { error: `GM indisponível por ${movement.type}.`, status: 409 as const };
+  return null;
+}
+
+async function upsertAssignment(
+  request: Request,
+  b: Record<string, string | number | boolean | null>,
+  opts: {
+    id?: number;
+    scheduleId: number;
+    guardId: number;
+    shift: string;
+    start: string;
+    end: string;
+  },
+) {
+  const id = Number(opts.id || 0);
+  const blocked = await assertAssignable(opts.scheduleId, opts.guardId, opts.start, opts.end, id);
+  if (blocked) return blocked;
   const before = id
     ? await env.DB.prepare(
         "SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id=?",
-      ).bind(id).first<Record<string,unknown>>()
+      ).bind(id).first<Record<string, unknown>>()
     : null;
   let assignmentId = id;
   if (id)
@@ -459,13 +459,13 @@ export async function POST(request: Request) {
       "UPDATE assignments SET guard_id=?,post_id=?,vehicle_id=?,shift=?,role=?,starts_at=?,ends_at=?,regular_ends_at=COALESCE(?,regular_ends_at),break_starts_at=COALESCE(?,break_starts_at),break_ends_at=COALESCE(?,break_ends_at),work_kind=COALESCE(?,work_kind),status=?,request_ref=?,is_reassigned=?,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
     )
       .bind(
-        guardId,
+        opts.guardId,
         b.postId || null,
         b.vehicleId || null,
-        b.shift,
+        opts.shift,
         b.role,
-        start,
-        end,
+        opts.start,
+        opts.end,
         b.regularEndsAt || null,
         b.breakStartsAt || null,
         b.breakEndsAt || null,
@@ -482,14 +482,14 @@ export async function POST(request: Request) {
       "INSERT INTO assignments (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,regular_ends_at,break_starts_at,break_ends_at,work_kind,status,request_ref,is_reassigned,reassignment_note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
     )
       .bind(
-        scheduleId,
-        guardId,
+        opts.scheduleId,
+        opts.guardId,
         b.postId || null,
         b.vehicleId || null,
-        b.shift,
+        opts.shift,
         b.role,
-        start,
-        end,
+        opts.start,
+        opts.end,
         b.regularEndsAt || null,
         b.breakStartsAt || null,
         b.breakEndsAt || null,
@@ -518,5 +518,255 @@ export async function POST(request: Request) {
     after: assignment as Record<string, unknown>,
     undoable: true,
   });
-  return Response.json({ ok: true, assignment });
+  return { ok: true as const, assignment };
+}
+
+export async function POST(request: Request) {
+  if (!permitted(request))
+    return Response.json({ error: "Não autorizado" }, { status: 401 });
+  const b = (await request.json()) as Record<string, string | number | boolean | null>;
+  if (b.action === "delete") {
+    const before = await env.DB.prepare(
+      "SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id=?",
+    ).bind(b.id).first<Record<string,unknown>>();
+    if (!before)
+      return Response.json({ error: "Designação não encontrada." }, { status: 404 });
+    await env.DB.prepare("DELETE FROM assignments WHERE id=?").bind(b.id).run();
+    await writeAudit(request, {
+      action: "delete",
+      entityType: "assignment",
+      entityId: Number(b.id),
+      summary: `Removeu ${before.guard_name} do ${before.shift}º turno`,
+      before,
+      undoable: true,
+    });
+    return Response.json({ ok: true, deletedId: Number(b.id) });
+  }
+
+  const id = Number(b.id || 0);
+  const guardId = Number(b.guardId);
+  const scheduleId = Number(b.scheduleId);
+  const schedule = await env.DB.prepare("SELECT date FROM schedules WHERE id=?")
+    .bind(scheduleId)
+    .first<{ date: string }>();
+  const date = String(schedule?.date || String(b.startsAt || "").slice(0, 10));
+  const fillFullPeriod = Boolean(b.fillFullPeriod) && !id;
+  const requestedShift = String(b.shift || "2");
+
+  if (fillFullPeriod) {
+    const periodShifts = fullPeriodShifts(requestedShift);
+    const created: Record<string, unknown>[] = [];
+    for (const shift of periodShifts) {
+      const t = periodShiftTimes(date, shift);
+      // Skip if this resource/shift/role already has the same guard covering it.
+      const existing = await env.DB.prepare(
+        `SELECT id FROM assignments
+         WHERE schedule_id=? AND guard_id=? AND shift=?
+           AND COALESCE(post_id,0)=COALESCE(?,0)
+           AND COALESCE(vehicle_id,0)=COALESCE(?,0)
+         LIMIT 1`,
+      )
+        .bind(scheduleId, guardId, shift, b.postId || null, b.vehicleId || null)
+        .first<{ id: number }>();
+      const result = await upsertAssignment(request, b, {
+        id: existing?.id,
+        scheduleId,
+        guardId,
+        shift,
+        start: t.start,
+        end: t.end,
+      });
+      if ("error" in result)
+        return Response.json({ error: result.error }, { status: result.status });
+      if (result.assignment) created.push(result.assignment);
+    }
+    const label =
+      periodShifts[0] === "2"
+        ? "turno inteiro diurno (07:00–19:00)"
+        : "turno inteiro noturno (19:00–07:00)";
+    return Response.json({
+      ok: true,
+      assignment: created[0] || null,
+      assignments: created,
+      message: `GM escalado no ${label}.`,
+      reload: true,
+    });
+  }
+
+  const start = String(b.startsAt);
+  const end = String(b.endsAt);
+  const result = await upsertAssignment(request, b, {
+    id,
+    scheduleId,
+    guardId,
+    shift: requestedShift,
+    start,
+    end,
+  });
+  if ("error" in result)
+    return Response.json({ error: result.error }, { status: result.status });
+  return Response.json({ ok: true, assignment: result.assignment });
+}
+
+async function buildSuggestions(request: Request, date: string) {
+  if (!permitted(request))
+    return Response.json({ error: "Não autorizado" }, { status: 401 });
+  const url = new URL(request.url);
+  const shift = String(url.searchParams.get("shift") || "2");
+  const postId = Number(url.searchParams.get("postId") || 0) || null;
+  const vehicleId = Number(url.searchParams.get("vehicleId") || 0) || null;
+  const role = url.searchParams.get("role") || null;
+  const period = isDayShift(shift) ? "day" : "night";
+
+  const monthStart = `${date.slice(0, 7)}-01`;
+  const [nextMonthDate, monthEnd] = (() => {
+    const [y, m] = date.slice(0, 7).split("-").map(Number);
+    const end = new Date(Date.UTC(y, m, 1));
+    return [end.toISOString().slice(0, 10), end.toISOString().slice(0, 10)];
+  })();
+
+  await ensureBase(date);
+  const schedule = await env.DB.prepare("SELECT id FROM schedules WHERE date=?")
+    .bind(date)
+    .first<{ id: number }>();
+  const scheduleId = Number(schedule?.id || 0);
+
+  const [
+    guards,
+    movementsActive,
+    todayAssignments,
+    heEntries,
+    guardHistory,
+    appliedPattern,
+  ] = await Promise.all([
+    env.DB
+      .prepare(
+        "SELECT id,name,registration,platoon,base_shift,work_regime FROM guards WHERE active=1 ORDER BY name",
+      )
+      .all<{
+        id: number;
+        name: string;
+        registration: string;
+        platoon: string | null;
+        base_shift: string | null;
+        work_regime: string | null;
+      }>(),
+    env.DB
+      .prepare(
+        "SELECT guard_id FROM movements WHERE status='approved' AND starts_at<? AND ends_at>?",
+      )
+      .bind(`${date}T23:59`, `${date}T00:00`)
+      .all<{ guard_id: number }>(),
+    env.DB
+      .prepare(
+        "SELECT guard_id FROM assignments WHERE schedule_id=? AND date(starts_at)=date(?)",
+      )
+      .bind(scheduleId, date)
+      .all<{ guard_id: number }>(),
+    env.DB
+      .prepare(
+        "SELECT guard_id, starts_at, ends_at FROM assignments WHERE status='overtime' AND starts_at>=? AND starts_at<?",
+      )
+      .bind(`${monthStart}T00:00`, `${monthEnd}T00:00`)
+      .all<{ guard_id: number; starts_at: string; ends_at: string }>(),
+    env.DB
+      .prepare(
+        `SELECT guard_id, post_id, vehicle_id, role FROM assignments
+         WHERE post_id=? OR vehicle_id=?
+         GROUP BY guard_id, post_id, vehicle_id, role`,
+      )
+      .bind(postId ?? 0, vehicleId ?? 0)
+      .all<{
+        guard_id: number;
+        post_id: number | null;
+        vehicle_id: number | null;
+        role: string | null;
+      }>(),
+    env.DB
+      .prepare(
+        `SELECT dp.code day_code, np.code night_code
+         FROM schedule_patterns sp
+         JOIN shift_patterns dp ON dp.id=sp.day_pattern_id
+         JOIN shift_patterns np ON np.id=sp.night_pattern_id
+         WHERE sp.schedule_id=?`,
+      )
+      .bind(scheduleId)
+      .first<{ day_code: string; night_code: string }>(),
+  ]);
+
+  const blocked = new Set(movementsActive.results.map((m) => Number(m.guard_id)));
+  const scheduledToday = new Set(todayAssignments.results.map((a) => Number(a.guard_id)));
+
+  const guardHeHours = new Map<number, number>();
+  const guardLastHe = new Map<number, string | null>();
+  for (const entry of heEntries.results) {
+    const hours =
+      (new Date(String(entry.ends_at)).getTime() -
+        new Date(String(entry.starts_at)).getTime()) /
+      3600000;
+    guardHeHours.set(
+      Number(entry.guard_id),
+      Number(guardHeHours.get(Number(entry.guard_id)) ?? 0) + hours,
+    );
+    const current = guardLastHe.get(Number(entry.guard_id));
+    if (!current || String(entry.starts_at) > String(current)) {
+      guardLastHe.set(Number(entry.guard_id), String(entry.starts_at));
+    }
+  }
+
+  const guardHistoryByGuard = new Map<
+    number,
+    { post_id: number | null; vehicle_id: number | null; role: string | null }[]
+  >();
+  for (const h of guardHistory.results) {
+    const list = guardHistoryByGuard.get(Number(h.guard_id)) || [];
+    list.push({
+      post_id: h.post_id ?? null,
+      vehicle_id: h.vehicle_id ?? null,
+      role: h.role ?? null,
+    });
+    guardHistoryByGuard.set(Number(h.guard_id), list);
+  }
+
+  const dayCodes = new Set<string>(appliedPattern?.day_code ? [appliedPattern.day_code] : []);
+  const nightCodes = new Set<string>(appliedPattern?.night_code ? [appliedPattern.night_code] : []);
+
+  const ranked = rankGuardSuggestions(
+    guards.results.map((g) => ({
+      id: Number(g.id),
+      name: String(g.name),
+      registration: String(g.registration),
+      platoon: g.platoon,
+      base_shift: g.base_shift,
+      work_regime: g.work_regime,
+    })),
+    { date, shift, postId, vehicleId, role },
+    {
+      blockedGuardIds: blocked,
+      scheduledGuardIds: scheduledToday,
+      guardHeHours,
+      guardLastHe,
+      guardAssignmentsByGuard: guardHistoryByGuard,
+      appliedDayCodes: dayCodes,
+      appliedNightCodes: nightCodes,
+    },
+  );
+
+  return Response.json({
+    date,
+    shift,
+    period,
+    postId,
+    vehicleId,
+    role,
+    suggestions: ranked.map((s) => ({
+      ...s,
+      reasons: describeReasons(s.reasons, s),
+    })),
+    summary: {
+      blocked: blocked.size,
+      scheduledToday: scheduledToday.size,
+      totalGuards: guards.results.length,
+    },
+  });
 }
