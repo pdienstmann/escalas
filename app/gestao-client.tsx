@@ -13,6 +13,7 @@ type Data = {
   days: Item[];
   choices: Item[];
   vehicleOutages: Item[];
+  vehicleCrews: Item[];
   sections: Item[];
 };
 const empty: Data = {
@@ -24,11 +25,13 @@ const empty: Data = {
   days: [],
   choices: [],
   vehicleOutages: [],
+  vehicleCrews: [],
   sections: [],
 };
 
 const modeLabel = {
   cadastros: "cadastros operacionais",
+  viaturas: "gestão de viaturas",
   folgas: "folgas mensais",
   movimentos: "movimentações do efetivo",
 } as const;
@@ -36,7 +39,7 @@ const modeLabel = {
 export function GestaoClient({
   mode,
 }: {
-  mode: "cadastros" | "folgas" | "movimentos";
+  mode: "cadastros" | "viaturas" | "folgas" | "movimentos";
 }) {
   const { date } = useScheduleDate();
   const [data, setData] = useState<Data>(empty),
@@ -50,10 +53,10 @@ export function GestaoClient({
       item: Item;
     } | null>(null);
   const load = useCallback(async () => {
-    const r = await fetch(`/api/admin?_=${Date.now()}`, { cache: "no-store" });
+    const r = await fetch(`/api/admin?date=${date}&_=${Date.now()}`, { cache: "no-store" });
     setData(await r.json());
     setBusy(false);
-  }, []);
+  }, [date]);
   useEffect(() => {
     // The first request synchronizes this client view with the durable D1 state.
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -283,31 +286,19 @@ export function GestaoClient({
             />
             <input name="sortOrder" type="number" placeholder="Ordem" />
           </Form>
-          <Form title="Nova viatura" onSubmit={(e) => submit(e, "vehicle")}>
-            <input name="prefix" placeholder="VTR 0000" required />
-            <select name="type">
-              <option value="sedan">Sedan</option>
-              <option value="pickup">Caminhonete</option>
-              <option value="van">Furgão</option>
-              <option value="moto">Moto</option>
-              <option value="suv">SUV</option>
-            </select>
-            <input name="zone" placeholder="Zona de atuação" />
-          </Form>
         </div>
         <div className="catalog-tools">
           <SectionOrder sections={data.sections} onReorder={(key, direction) => void reorderSection(key, direction)} onRename={setSectionEditor} />
           <GuardImport onImport={(rows) => void importGuards(rows)} />
         </div>
-        <FleetAvailability vehicles={data.vehicles} outages={data.vehicleOutages} onSubmit={(e)=>submit(e,"vehicle_outage")} onDelete={(id)=>void deleteOutage(id)}/>
         {message && (
           <p className="notice" role="status">
             {message}
           </p>
         )}
         {sectionEditor && (
-          <div className="catalog-backdrop section-editor-backdrop" onClick={() => setSectionEditor(null)}>
-            <form className="catalog-editor section-editor" onClick={(e) => e.stopPropagation()} onSubmit={(e) => void saveSection(e)}>
+          <div className="catalog-backdrop section-editor-backdrop">
+            <form className="catalog-editor section-editor" onSubmit={(e) => void saveSection(e)}>
               <header>
                 <div>
                   <small>ORDEM NA ESCALA E NO PDF</small>
@@ -317,7 +308,7 @@ export function GestaoClient({
               </header>
               <label>
                 Nome exibido
-                <input name="label" defaultValue={String(sectionEditor.label || "")} required autoFocus />
+                <input name="label" defaultValue={String(sectionEditor.label || "")} required />
               </label>
               <p className="section-editor-help">Essa ordem e o nome valem tanto na escala operacional quanto no PDF impresso.</p>
               <button className="save" disabled={saving}>{saving ? "Salvando…" : "Salvar seção"}</button>
@@ -345,16 +336,61 @@ export function GestaoClient({
             onDeactivate={deactivate}
             onReorder={reorderPost}
           />
-          <Record
-            kind="vehicle"
-            title="Viaturas"
-            items={data.vehicles}
-            main="prefix"
-            detail="zone"
-            onEdit={(item) => setEditing({ kind: "vehicle", item })}
-            onDeactivate={deactivate}
+        </div>
+        {editing && (
+          <CatalogEditor
+            editing={editing}
+            onClose={() => setEditing(null)}
+            onSubmit={catalogSubmit}
+          />
+        )}
+      </Module>
+    );
+  if (mode === "viaturas")
+    return (
+      <Module
+        date={date}
+        title="Viaturas"
+        subtitle={`Panorama operacional da frota em ${new Date(`${date}T12:00:00`).toLocaleDateString("pt-BR")}.`}
+        busy={saving}
+        busyArea={modeLabel[mode]}
+      >
+        <FleetPanorama
+          date={date}
+          vehicles={data.vehicles}
+          outages={data.vehicleOutages}
+          crews={data.vehicleCrews}
+          onEdit={(item) => setEditing({ kind: "vehicle", item })}
+        />
+        <div className="fleet-admin-grid">
+          <Form title="Nova viatura" onSubmit={(e) => submit(e, "vehicle")}>
+            <input name="prefix" placeholder="VTR 0000" required />
+            <select name="type">
+              <option value="sedan">Sedan</option>
+              <option value="pickup">Caminhonete</option>
+              <option value="van">Furgão</option>
+              <option value="moto">Moto</option>
+              <option value="suv">SUV</option>
+            </select>
+            <input name="zone" placeholder="Zona de atuação" />
+          </Form>
+          <FleetAvailability
+            vehicles={data.vehicles}
+            outages={data.vehicleOutages}
+            onSubmit={(e) => submit(e, "vehicle_outage")}
+            onDelete={(id) => void deleteOutage(id)}
           />
         </div>
+        {message && <p className="notice" role="status">{message}</p>}
+        <Record
+          kind="vehicle"
+          title="Cadastro da frota"
+          items={data.vehicles}
+          main="prefix"
+          detail="zone"
+          onEdit={(item) => setEditing({ kind: "vehicle", item })}
+          onDeactivate={deactivate}
+        />
         {editing && (
           <CatalogEditor
             editing={editing}
@@ -740,6 +776,36 @@ function FleetAvailability({vehicles,outages,onSubmit,onDelete}:{vehicles:Item[]
   return <section className="fleet-status"><header><div><small>DISPONIBILIDADE EM TEMPO REAL</small><h3>Viaturas em funcionamento / FA</h3></div><span>{outages.length} em FA</span></header><div className="fleet-layout"><form className="data-form" onSubmit={onSubmit}><select name="vehicleId" required defaultValue=""><option value="">Selecionar viatura</option>{vehicles.map(v=><option key={String(v.id)} value={String(v.id)}>{String(v.prefix)} · {String(v.type)}</option>)}</select><label>Início do FA<input name="startsOn" type="date" required/></label><label>Retorno previsto — opcional<input name="endsOn" type="date"/></label><input name="reason" placeholder="Motivo / observação"/><button className="save">Registrar em FA</button></form><div className="fleet-list">{outages.length?outages.map(o=><article key={String(o.id)}><span className="fleet-icon">{vehicleIconLabel(String(o.type))}</span><div><b>{String(o.prefix)}</b><small>FA desde {formatDate(o.starts_on)}{o.ends_on?` até ${formatDate(o.ends_on)}`:" · prazo indeterminado"}</small>{o.reason&&<em>{String(o.reason)}</em>}</div><button onClick={()=>onDelete(o.id)}>Disponibilizar</button></article>):<p>Todas as viaturas estão disponíveis.</p>}</div></div></section>
 }
 const vehicleIconLabel=(type:string)=>type==="moto"?"🏍️":type==="pickup"?"🛻":type==="van"?"🚐":type==="suv"?"🚙":"🚓";
+function FleetPanorama({date,vehicles,outages,crews,onEdit}:{date:string;vehicles:Item[];outages:Item[];crews:Item[];onEdit:(item:Item)=>void}){
+  const[query,setQuery]=useState(""),[filter,setFilter]=useState<"all"|"available"|"service"|"outage">("all");
+  const rows=useMemo(()=>vehicles.map(vehicle=>{
+    const outage=outages.find(item=>Number(item.vehicle_id)===Number(vehicle.id)&&String(item.starts_on)<=date&&(!item.ends_on||String(item.ends_on)>=date));
+    const crew=crews.find(item=>Number(item.vehicle_id)===Number(vehicle.id));
+    const status=outage?"outage":crew?"service":"available";
+    return{vehicle,outage,crew,status};
+  }),[date,vehicles,outages,crews]);
+  const visible=rows.filter(row=>{
+    const text=`${row.vehicle.prefix||""} ${row.vehicle.zone||""} ${row.vehicle.type||""} ${row.crew?.crew_names||""}`.toLowerCase();
+    return(filter==="all"||row.status===filter)&&text.includes(query.toLowerCase().trim());
+  });
+  const count=(status:string)=>rows.filter(row=>row.status===status).length;
+  return <section className="fleet-panorama">
+    <header><div><small>FROTA NA DATA DA ESCALA</small><h2>Panorama operacional</h2><p>As situações refletem a escala aberta e os registros de FA.</p></div><input value={query} onChange={event=>setQuery(event.target.value)} placeholder="Buscar VTR, zona ou GM…"/></header>
+    <div className="fleet-counters" role="group" aria-label="Filtrar situação da frota">
+      <button className={filter==="all"?"active":""} onClick={()=>setFilter("all")}><b>{rows.length}</b><span>Total</span></button>
+      <button className={filter==="available"?"active":""} onClick={()=>setFilter("available")}><b>{count("available")}</b><span>Disponíveis</span></button>
+      <button className={filter==="service"?"active":""} onClick={()=>setFilter("service")}><b>{count("service")}</b><span>Em serviço</span></button>
+      <button className={filter==="outage"?"active":""} onClick={()=>setFilter("outage")}><b>{count("outage")}</b><span>Em FA</span></button>
+    </div>
+    <div className="fleet-map">{visible.map(({vehicle,outage,crew,status})=><article key={String(vehicle.id)} className={`fleet-card ${status}`}>
+      <span className="fleet-card-icon">{vehicleIconLabel(String(vehicle.type))}</span>
+      <div><header><b>{String(vehicle.prefix)}</b><span>{status==="outage"?"EM FA":status==="service"?"EM SERVIÇO":"DISPONÍVEL"}</span></header><strong>{String(vehicle.zone||"Zona não definida")}</strong><small>{vehicleTypeLabel(String(vehicle.type))}</small>{crew&&<p><b>Equipe:</b> {String(crew.crew_names)}</p>}{outage&&<p><b>FA:</b> {String(outage.reason||"Sem motivo informado")} · {outage.ends_on?`retorno ${formatDate(outage.ends_on)}`:"prazo indeterminado"}</p>}</div>
+      <button onClick={()=>onEdit(vehicle)}>Editar</button>
+    </article>)}</div>
+    {!visible.length&&<p className="fleet-empty">Nenhuma viatura corresponde aos filtros.</p>}
+  </section>
+}
+const vehicleTypeLabel=(type:string)=>({moto:"Moto",pickup:"Caminhonete",van:"Furgão",suv:"SUV",sedan:"Sedan"} as Record<string,string>)[type]||"Outro";
 function CatalogEditor({
   editing,
   onClose,

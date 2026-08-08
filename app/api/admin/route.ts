@@ -96,7 +96,8 @@ export async function GET(request: Request) {
   await seed();
   await syncConfirmedLeaves();
   await ensureSections();
-  const [guards, posts, vehicles, movements, campaign, days, choices, vehicleOutages, sections] =
+  const requestedDate = new URL(request.url).searchParams.get("date") || new Date().toISOString().slice(0, 10);
+  const [guards, posts, vehicles, movements, campaign, days, choices, vehicleOutages, sections, vehicleCrews] =
     await Promise.all([
       env.DB.prepare(
         "SELECT * FROM guards WHERE active = 1 ORDER BY name",
@@ -121,6 +122,14 @@ export async function GET(request: Request) {
       ).all(),
       env.DB.prepare("SELECT o.*,v.prefix,v.type FROM vehicle_outages o JOIN vehicles v ON v.id=o.vehicle_id WHERE o.active=1 ORDER BY o.starts_on DESC").all(),
       env.DB.prepare("SELECT section_key,label,sort_order FROM schedule_sections ORDER BY sort_order,label").all(),
+      env.DB.prepare(
+        `SELECT a.vehicle_id,GROUP_CONCAT(DISTINCT g.name) crew_names,COUNT(DISTINCT a.guard_id) crew_count
+         FROM assignments a
+         JOIN schedules s ON s.id=a.schedule_id
+         JOIN guards g ON g.id=a.guard_id
+         WHERE s.date=? AND a.vehicle_id IS NOT NULL
+         GROUP BY a.vehicle_id`,
+      ).bind(requestedDate).all(),
     ]);
   return Response.json({
     guards: guards.results,
@@ -131,6 +140,7 @@ export async function GET(request: Request) {
     days: days.results,
     choices: choices.results,
     vehicleOutages: vehicleOutages.results,
+    vehicleCrews: vehicleCrews.results,
     sections: sections.results,
   });
 }

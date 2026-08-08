@@ -10,6 +10,7 @@ const items = [
   { href: "/horas-extras", label: "Horas extras" },
   { href: "/alteracoes", label: "Alterações diversas" },
   { href: "/folgas", label: "Folgas mensais" },
+  { href: "/viaturas", label: "Viaturas" },
   { href: "/cadastros", label: "Cadastros" },
   { href: "/historico", label: "Histórico" },
 ] as const;
