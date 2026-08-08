@@ -589,7 +589,6 @@ export async function POST(request: Request) {
       assignment: created[0] || null,
       assignments: created,
       message: `GM escalado no ${label}.`,
-      reload: true,
     });
   }
 

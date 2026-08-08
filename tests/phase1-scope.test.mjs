@@ -10,6 +10,7 @@ import {
 import { orderScheduleResources } from "../lib/schedule-sections.ts";
 import { formatHoursDuration, fullPeriodWindow, fullPeriodShifts } from "../lib/shift-rules.ts";
 import { rankGuardSuggestions, describeReasons } from "../lib/suggest-gm.ts";
+import { mergeScheduleAssignments } from "../lib/schedule-state.ts";
 
 test("resolveScheduleDate prefers URL date over storage and today", () => {
   assert.equal(isScheduleDate("2026-08-12"), true);
@@ -163,4 +164,34 @@ test("rankGuardSuggestions orders otherwise equal GMs by the lowest monthly HE",
   );
   assert.equal(ranked[0].id, 2);
   assert.equal(ranked[0].currentHeHours, 4);
+});
+
+test("mergeScheduleAssignments updates both shifts without reloading the schedule", () => {
+  const current = [
+    { id: 1, guard_id: 10, post_id: 1, vehicle_id: null, shift: "2" },
+    { id: 2, guard_id: 11, post_id: 2, vehicle_id: null, shift: "4" },
+  ];
+  const incoming = [
+    { id: 3, guard_id: 20, post_id: 1, vehicle_id: null, shift: "2" },
+    { id: 4, guard_id: 20, post_id: 1, vehicle_id: null, shift: "3" },
+  ];
+  const merged = mergeScheduleAssignments(current, [], incoming);
+  assert.deepEqual(merged.assignments.map((item) => item.id), [1, 2, 3, 4]);
+  assert.equal(merged.availableForRedeployment.length, 0);
+});
+
+test("mergeScheduleAssignments removes and preserves redeployment records locally", () => {
+  const active = [{ id: 1, guard_id: 10, post_id: 1, vehicle_id: null }];
+  const available = [{ id: 2, guard_id: 11, post_id: null, vehicle_id: null }];
+  const moved = [{ id: 1, guard_id: 10, post_id: null, vehicle_id: null }];
+  const merged = mergeScheduleAssignments(active, available, moved);
+  assert.equal(merged.assignments.length, 0);
+  assert.deepEqual(merged.availableForRedeployment.map((item) => item.id), [2, 1]);
+  const removed = mergeScheduleAssignments(
+    merged.assignments,
+    merged.availableForRedeployment,
+    [],
+    2,
+  );
+  assert.deepEqual(removed.availableForRedeployment.map((item) => item.id), [1]);
 });

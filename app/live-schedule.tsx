@@ -5,6 +5,7 @@ import { ScheduleNav } from "./schedule-nav";
 import { useScheduleDate } from "./use-schedule-date";
 import { formatScheduleDate } from "../lib/schedule-date";
 import { orderScheduleResources } from "../lib/schedule-sections";
+import { mergeScheduleAssignments } from "../lib/schedule-state";
 import {
   formatHoursDuration,
   fullPeriodLabel,
@@ -154,26 +155,24 @@ export function LiveSchedule() {
       const j = await r.json();
       setMessage(r.ok ? (j.message || "Alteração salva e já exibida na escala.") : j.error);
       if (r.ok) {
-        if (j.reload || j.deletedId || j.assignments || j.assignment?.post_id || j.assignment?.vehicle_id === null) {
+        const changedAssignments: Rec[] = Array.isArray(j.assignments)
+          ? j.assignments
+          : j.assignment
+            ? [j.assignment]
+            : [];
+        if (j.reload && changedAssignments.length === 0 && !j.deletedId) {
           await load();
         } else {
           setData((current) =>
             current
               ? {
                   ...current,
-                  assignments: j.assignment
-                    ? [
-                        ...current.assignments.filter(
-                          (a) => a.id !== j.assignment.id,
-                        ),
-                        j.assignment,
-                      ]
-                    : current.assignments,
-                  availableForRedeployment: j.assignment
-                    ? current.availableForRedeployment.filter((a) => a.id !== j.assignment.id)
-                    : j.deletedId
-                      ? current.availableForRedeployment.filter((a) => a.id !== j.deletedId)
-                      : current.availableForRedeployment,
+                  ...mergeScheduleAssignments(
+                    current.assignments,
+                    current.availableForRedeployment,
+                    changedAssignments,
+                    Number(j.deletedId || 0),
+                  ),
                 }
               : current,
           );
@@ -204,6 +203,13 @@ export function LiveSchedule() {
       scheduleId: data.schedule.id,
       postId: destination === "post" ? Number(id) : null,
       vehicleId: destination === "vehicle" ? Number(id) : null,
+    });
+  }
+  async function remove() {
+    if (!pick?.assignment) return;
+    await postAssignment({
+      action: "delete",
+      id: Number(pick.assignment.id),
     });
   }
   async function confirmHoleSuggestion(guardId: number) {
