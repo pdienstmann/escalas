@@ -378,7 +378,7 @@ export function LiveSchedule() {
   if (!data)
     return (
       <ModuleLoading
-        area={`escala de ${formatScheduleDate(date)}`}
+        area="escala operacional"
         detail={loadError || "Aplicando padrões, afastamentos e disponibilidade das viaturas…"}
       />
     );
