@@ -345,7 +345,7 @@ export async function GET(request: Request) {
   const schedule = await env.DB.prepare("SELECT * FROM schedules WHERE date=?")
     .bind(date)
     .first<Record<string, unknown>>();
-  const [guards, posts, vehicles, assignments, movements, notices, outages, sections] =
+  const [guards, posts, vehicles, allVehicles, assignments, movements, notices, outages, sections] =
     await Promise.all([
       env.DB.prepare(
         "SELECT id,name,registration,platoon,base_shift,work_regime FROM guards WHERE active=1 ORDER BY name",
@@ -356,6 +356,9 @@ export async function GET(request: Request) {
       env.DB.prepare(
         "SELECT id,prefix,type,zone FROM vehicles v WHERE active=1 AND NOT EXISTS (SELECT 1 FROM vehicle_outages o WHERE o.vehicle_id=v.id AND o.active=1 AND o.starts_on<=? AND (o.ends_on IS NULL OR o.ends_on>=?)) ORDER BY prefix",
       ).bind(date,date).all(),
+      env.DB.prepare(
+        "SELECT id,prefix,type,zone FROM vehicles WHERE active=1 ORDER BY prefix",
+      ).all(),
       env.DB.prepare(
         "SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.schedule_id=? ORDER BY a.shift,a.role,g.name",
       )
@@ -398,6 +401,7 @@ export async function GET(request: Request) {
     guards: guards.results,
     posts: posts.results,
     vehicles: vehicles.results,
+    allVehicles: allVehicles.results,
     assignments: active,
     availableForRedeployment,
     removed: assignments.results.filter((a) => blocked.has(Number(a.guard_id))),
@@ -525,6 +529,83 @@ export async function POST(request: Request) {
   if (!permitted(request))
     return Response.json({ error: "Não autorizado" }, { status: 401 });
   const b = (await request.json()) as Record<string, string | number | boolean | null>;
+  if (b.action === "vehicle_quick_update") {
+    const scheduleId = Number(b.scheduleId);
+    const fromVehicleId = Number(b.fromVehicleId);
+    const toVehicleId = Number(b.toVehicleId || fromVehicleId);
+    const zone = String(b.zone || "").trim();
+    const schedule = await env.DB.prepare("SELECT date FROM schedules WHERE id=?")
+      .bind(scheduleId)
+      .first<{ date: string }>();
+    if (!schedule)
+      return Response.json({ error: "Escala não encontrada." }, { status: 404 });
+    const [source, target] = await Promise.all([
+      env.DB.prepare("SELECT * FROM vehicles WHERE id=? AND active=1").bind(fromVehicleId).first<Record<string, unknown>>(),
+      env.DB.prepare("SELECT * FROM vehicles WHERE id=? AND active=1").bind(toVehicleId).first<Record<string, unknown>>(),
+    ]);
+    if (!source || !target)
+      return Response.json({ error: "Viatura não encontrada ou desativada." }, { status: 404 });
+    if (toVehicleId !== fromVehicleId) {
+      const outage = await env.DB.prepare(
+        "SELECT id FROM vehicle_outages WHERE vehicle_id=? AND active=1 AND starts_on<=? AND (ends_on IS NULL OR ends_on>=?) LIMIT 1",
+      ).bind(toVehicleId, schedule.date, schedule.date).first();
+      if (outage)
+        return Response.json({ error: "A viatura selecionada está em FA nesta data." }, { status: 409 });
+      const occupied = await env.DB.prepare(
+        "SELECT id FROM assignments WHERE schedule_id=? AND vehicle_id=? LIMIT 1",
+      ).bind(scheduleId, toVehicleId).first();
+      if (occupied)
+        return Response.json({ error: "A viatura selecionada já possui uma guarnição nesta escala." }, { status: 409 });
+    }
+    const beforeAssignments = (
+      await env.DB.prepare("SELECT * FROM assignments WHERE schedule_id=? AND vehicle_id=?")
+        .bind(scheduleId, fromVehicleId)
+        .all<Record<string, unknown>>()
+    ).results;
+    await env.DB.batch([
+      env.DB.prepare("UPDATE vehicles SET zone=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(zone, toVehicleId),
+      env.DB.prepare(
+        "UPDATE assignments SET vehicle_id=?,is_reassigned=CASE WHEN ?!=? THEN 1 ELSE is_reassigned END,reassignment_note=CASE WHEN ?!=? THEN ? ELSE reassignment_note END,updated_at=CURRENT_TIMESTAMP WHERE schedule_id=? AND vehicle_id=?",
+      ).bind(
+        toVehicleId,
+        toVehicleId,
+        fromVehicleId,
+        toVehicleId,
+        fromVehicleId,
+        `Troca de ${source.prefix} para ${target.prefix}`,
+        scheduleId,
+        fromVehicleId,
+      ),
+    ]);
+    const assignments = (
+      await env.DB.prepare(
+        "SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.schedule_id=? AND a.vehicle_id=? ORDER BY a.shift,a.role,g.name",
+      ).bind(scheduleId, toVehicleId).all<Record<string, unknown>>()
+    ).results;
+    const vehicle = await env.DB.prepare("SELECT id,prefix,type,zone FROM vehicles WHERE id=?")
+      .bind(toVehicleId)
+      .first();
+    await writeAudit(request, {
+      action: toVehicleId === fromVehicleId ? "update" : "replace",
+      entityType: "schedule_vehicle",
+      entityId: toVehicleId,
+      summary: toVehicleId === fromVehicleId
+        ? `Alterou a zona da ${target.prefix}`
+        : `Trocou ${source.prefix} por ${target.prefix} na escala de ${schedule.date}`,
+      before: { vehicle: source, assignments: beforeAssignments },
+      after: { vehicle, assignments },
+      undoable: true,
+    });
+    return Response.json({
+      ok: true,
+      assignments,
+      vehicle,
+      fromVehicleId,
+      message: toVehicleId === fromVehicleId
+        ? "Zona da viatura atualizada."
+        : `Guarnição transferida para ${target.prefix}.`,
+    });
+  }
   if (b.action === "delete") {
     const before = await env.DB.prepare(
       "SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id=?",

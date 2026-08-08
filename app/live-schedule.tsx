@@ -33,6 +33,8 @@ type State = {
   guards: Rec[];
   posts: Rec[];
   vehicles: Rec[];
+  allVehicles: Rec[];
+  outages: Rec[];
   assignments: Rec[];
   removed: Rec[];
   movements: Rec[];
@@ -67,6 +69,7 @@ export function LiveSchedule() {
   const [data, setData] = useState<State | null>(null),
     [pick, setPick] = useState<Pick | null>(null),
     [holePick, setHolePick] = useState<HolePick | null>(null),
+    [vehicleEdit, setVehicleEdit] = useState<Rec | null>(null),
     [message, setMessage] = useState(""),
     [query, setQuery] = useState(""),
     [view, setView] = useState<ViewFilter>("all"),
@@ -295,6 +298,50 @@ export function LiveSchedule() {
       reassignmentNote: assignment.reassignment_note || "Remanejamento na escala",
     });
   }
+  async function saveVehicleQuick(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!data || !vehicleEdit || saving) return;
+    const body = Object.fromEntries(new FormData(e.currentTarget));
+    setSaving(true);
+    try {
+      const response = await fetch("/api/schedule", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "vehicle_quick_update",
+          scheduleId: data.schedule.id,
+          fromVehicleId: vehicleEdit.id,
+          toVehicleId: Number(body.toVehicleId),
+          zone: String(body.zone || ""),
+        }),
+      });
+      const result = await response.json();
+      setMessage(response.ok ? result.message : result.error);
+      if (!response.ok) return;
+      const changedAssignments: Rec[] = result.assignments || [];
+      setData((current) => {
+        if (!current) return current;
+        const merged = mergeScheduleAssignments(
+          current.assignments,
+          current.availableForRedeployment,
+          changedAssignments,
+        );
+        const updateVehicle = (vehicle: Rec) =>
+          Number(vehicle.id) === Number(result.vehicle.id)
+            ? { ...vehicle, ...result.vehicle }
+            : vehicle;
+        return {
+          ...current,
+          ...merged,
+          vehicles: current.vehicles.map(updateVehicle),
+          allVehicles: current.allVehicles.map(updateVehicle),
+        };
+      });
+      setVehicleEdit(null);
+    } finally {
+      setSaving(false);
+    }
+  }
   // Hooks must stay above any early return.
   const movementGroups = useMemo(() => {
     const groups = [
@@ -465,6 +512,7 @@ export function LiveSchedule() {
                   onPick={setPick}
                   onMove={move}
                   onHolePick={openHoleSuggest}
+                  onEditVehicle={setVehicleEdit}
                 />
               );
               })}
@@ -558,6 +606,15 @@ export function LiveSchedule() {
           />
         </>
       )}
+      {vehicleEdit && (
+        <VehicleQuickEditor
+          data={data}
+          vehicle={vehicleEdit}
+          saving={saving}
+          onClose={() => setVehicleEdit(null)}
+          onSave={saveVehicleQuick}
+        />
+      )}
     </main>
   );
 }
@@ -575,6 +632,30 @@ function movementDetail(m: Rec) {
     return `Dia ${date(start)}`;
   return `${date(start)} · ${time(start)}–${time(end)}`;
 }
+function VehicleQuickEditor({data,vehicle,saving,onClose,onSave}:{data:State;vehicle:Rec;saving:boolean;onClose:()=>void;onSave:(e:FormEvent<HTMLFormElement>)=>void}) {
+  const[selectedId,setSelectedId]=useState(String(vehicle.id));
+  const[zone,setZone]=useState(String(vehicle.zone||""));
+  const occupiedIds=new Set([
+    ...data.assignments.map(assignment=>Number(assignment.vehicle_id||0)),
+    ...data.availableForRedeployment.map(assignment=>Number(assignment.vehicle_id||0)),
+  ]);
+  const outageIds=new Set(data.outages.map(outage=>Number(outage.vehicle_id)));
+  const crewNames=[...new Set(data.assignments.filter(assignment=>Number(assignment.vehicle_id)===Number(vehicle.id)).map(assignment=>String(assignment.guard_name)))];
+  function availability(candidate:Rec){
+    if(Number(candidate.id)===Number(vehicle.id))return"VTR atual";
+    if(outageIds.has(Number(candidate.id)))return"Em FA";
+    if(occupiedIds.has(Number(candidate.id)))return"Em serviço";
+    return"Disponível";
+  }
+  return <div className="vehicle-quick-backdrop"><form className="vehicle-quick-editor" role="dialog" aria-modal="true" aria-labelledby="vehicle-quick-title" onSubmit={onSave}>
+    <header><div><small>EDIÇÃO NA PRÓPRIA ESCALA</small><h2 id="vehicle-quick-title">{String(vehicle.prefix)}</h2><p>{crewNames.length?`${crewNames.length} GMs: ${crewNames.join(" / ")}`:"Sem guarnição nesta data"}</p></div><button type="button" onClick={onClose} aria-label="Fechar editor de viatura">×</button></header>
+    <label>Viatura física<select name="toVehicleId" value={selectedId} onChange={event=>{setSelectedId(event.target.value);const selected=data.allVehicles.find(item=>String(item.id)===event.target.value);if(selected)setZone(String(selected.zone||""))}}>{data.allVehicles.map(candidate=>{const status=availability(candidate),blocked=status==="Em FA"||status==="Em serviço";return <option key={String(candidate.id)} value={String(candidate.id)} disabled={blocked}>{vehicleIcon(String(candidate.type))} {String(candidate.prefix)} · {String(candidate.zone||"Sem zona")} — {status}</option>})}</select></label>
+    <div className="vehicle-status-legend"><span className="available">Disponíveis podem receber a equipe</span><span className="busy">Em serviço</span><span className="outage">Em FA</span></div>
+    <label>Zona / área de atuação<input name="zone" value={zone} onChange={event=>setZone(event.target.value)} placeholder="Definir zona de atuação"/></label>
+    <p className="vehicle-quick-help">Ao trocar a VTR, motorista, patrulheiro e demais integrantes são movidos juntos, mantendo turno, horário e marcações.</p>
+    <footer><button type="button" onClick={onClose}>Cancelar</button><button className="save" disabled={saving}>{saving?"Salvando…":selectedId===String(vehicle.id)?"Salvar zona":"Trocar VTR e mover equipe"}</button></footer>
+  </form></div>
+}
 function Row({
   kind,
   resource,
@@ -588,6 +669,7 @@ function Row({
   onPick,
   onMove,
   onHolePick,
+  onEditVehicle,
 }: {
   kind: "post" | "vehicle";
   resource: Rec;
@@ -606,6 +688,7 @@ function Row({
     shift: string,
     event: ReactMouseEvent<HTMLButtonElement>,
   ) => void;
+  onEditVehicle: (vehicle: Rec) => void;
 }) {
   function drop(e: DragEvent, shift: string) {
     e.preventDefault();
@@ -645,6 +728,16 @@ function Row({
                 : resource.group_name}
             </small>
           </div>
+          {kind === "vehicle" && (
+            <button
+              type="button"
+              className="vehicle-quick-button"
+              aria-label={`Editar ${String(resource.prefix)} e zona`}
+              onClick={() => onEditVehicle(resource)}
+            >
+              Editar
+            </button>
+          )}
         </td>
         {visibleShifts.map((s) => {
           const list = assignmentIndex.get(assignmentKey(kind, Number(resource.id), s.id)) || [];
