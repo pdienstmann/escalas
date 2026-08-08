@@ -48,6 +48,7 @@ type Pick = {
   resource: Rec;
   shift: string;
   assignment?: Rec;
+  manualAdd?: boolean;
 };
 type HolePick = {
   kind: "post" | "vehicle";
@@ -193,7 +194,7 @@ export function LiveSchedule() {
     if (!data || !pick) return;
     const body = Object.fromEntries(new FormData(e.currentTarget)),
       [destination, id] = String(body.destination).split(":");
-    const fillingHole = !pick.assignment;
+    const fillingHole = !pick.assignment && !pick.manualAdd;
     const t = fillingHole
       ? fullPeriodWindow(data.date, String(body.shift || pick.shift))
       : { start: String(body.startsAt), end: String(body.endsAt) };
@@ -264,6 +265,20 @@ export function LiveSchedule() {
       kind: holePick.kind,
       resource: holePick.resource,
       shift: holePick.shift,
+    });
+    setHolePick(null);
+  }
+  function startManualAdd() {
+    const resource = data?.posts[0] || data?.vehicles[0];
+    if (!resource || !data) return;
+    const kind = data.posts.some((post) => Number(post.id) === Number(resource.id))
+      ? "post"
+      : "vehicle";
+    setPick({
+      kind,
+      resource,
+      shift: view === "night" ? "4" : "2",
+      manualAdd: true,
     });
     setHolePick(null);
   }
@@ -437,6 +452,9 @@ export function LiveSchedule() {
           <button type="button" className={view==="night"?"active":""} onClick={()=>jump("night")}>Noturno</button>
           <button type="button" className={view==="holes"||view==="redeploy"?"active":""} onClick={()=>jump("pending")}>Pendências</button>
         </div>
+        <button type="button" className="toolbar-add" onClick={startManualAdd}>
+          + Adicionar GM
+        </button>
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -558,7 +576,7 @@ export function LiveSchedule() {
             <Editor
               key={String(
                 pick.assignment?.id ||
-                  `${pick.kind}-${pick.resource.id}-${pick.shift}`,
+                  `${pick.kind}-${pick.resource.id}-${pick.shift}-${pick.manualAdd ? "manual" : "hole"}`,
               )}
               pick={pick}
               data={data}
@@ -816,7 +834,8 @@ function Editor({
   onRemove: () => void;
 }) {
   const a = pick.assignment,
-    fillingHole = !a,
+    manualAdd = Boolean(pick.manualAdd),
+    fillingHole = !a && !manualAdd,
     t = fillingHole ? fullPeriodWindow(data.date, pick.shift) : times(data.date, pick.shift),
     [guardId, setGuardId] = useState(String(a?.guard_id || "")),
     [guardQuery, setGuardQuery] = useState(""),
@@ -835,7 +854,7 @@ function Editor({
       <div className="editor-head">
         <div>
           <span className="editing-pill">
-            {a ? "EDITANDO GM" : "PREENCHENDO VAGA"}
+            {a ? "EDITANDO GM" : manualAdd ? "ADICIONANDO GM" : "PREENCHENDO VAGA"}
           </span>
           <h2 aria-live="polite">{guard?.name || "Selecione um GM"}</h2>
           <p>
@@ -858,6 +877,12 @@ function Editor({
         <div className="editing-alert full-period-alert">
           <b>Regra de negócio:</b>
           <span>{fullPeriodLabel(pick.shift)}. O GM cobrirá o bloco completo.</span>
+        </div>
+      )}
+      {manualAdd && (
+        <div className="editing-alert manual-add-alert">
+          <b>Novo lançamento:</b>
+          <span>Escolha GM, destino, turno, função e horário.</span>
         </div>
       )}
       <div className="editing-alert">
@@ -988,7 +1013,7 @@ function Editor({
         />
       </label>
       <button className="save" disabled={saving}>
-        {saving ? "Salvando…" : fillingHole ? "Escalar turno inteiro" : "Salvar alteração"}
+        {saving ? "Salvando…" : fillingHole ? "Escalar turno inteiro" : manualAdd ? "Adicionar à escala" : "Salvar alteração"}
       </button>
       {a && (
         <button
