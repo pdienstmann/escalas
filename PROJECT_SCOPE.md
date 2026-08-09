@@ -178,3 +178,12 @@
 6. Efetivo retirado compacto, agrupamentos e formatação da HE semanal.
 7. Nova aba Viaturas e edição rápida de VTR/zona dentro da escala.
 8. Edição visual dos padrões como escala ideal, folgas, validação/PDF, acesso externo e controles administrativos.
+
+### Simplificação operacional implementada
+
+- A escala possui duas visualizações: `Resumida`, com colunas Diurno/Noturno e faixas internas independentes para cada turno, e `4 turnos`, preservando a matriz completa.
+- Horário, destino e situação continuam pertencendo a cada lançamento. Um GM pode cumprir as duas metades no mesmo local ou trabalhar cada metade em um destino e horário diferente.
+- Arrastar e soltar continua operando por faixa/turno; a bandeja `À disposição` acompanha a rolagem quando aberta.
+- O editor parte dos campos essenciais e oferece horários prontos, mantendo extensão de HE e demais exceções em opções avançadas.
+- O efetivo retirado permanece compacto, mas exibe período, requerimento e ações diretas para incluir, editar ou remover folga, férias, curso, licença, reserva técnica, banco de horas e troca.
+- O livro de HE foi separado em `Conferir serviços` e `Distribuição por GM`, sem misturar pendências operacionais com ranking e histórico.
