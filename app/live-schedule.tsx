@@ -846,14 +846,14 @@ export function LiveSchedule() {
               <><tr>
                 <th rowSpan={2}>POSTO / RECURSO</th>
                 {visibleShifts.some((s)=>s.period==="day") && (
-                  <th colSpan={visibleShifts.filter((s)=>s.period==="day").length}>DIURNO</th>
+                  <th className="period-group period-day-head" colSpan={visibleShifts.filter((s)=>s.period==="day").length}>DIURNO</th>
                 )}
                 {visibleShifts.some((s)=>s.period==="night") && (
-                  <th colSpan={visibleShifts.filter((s)=>s.period==="night").length}>NOTURNO</th>
+                  <th className="period-group period-night-head period-night-start" colSpan={visibleShifts.filter((s)=>s.period==="night").length}>NOTURNO</th>
                 )}
               </tr><tr>
                 {visibleShifts.map((s) => (
-                  <th key={s.id}>
+                  <th key={s.id} className={`period-${s.period} ${s.id==="4"?"period-night-start":""}`}>
                     {s.label} · {s.time}
                   </th>
                 ))}
@@ -1430,7 +1430,7 @@ function Row({
           return (
             <td
               key={s.id}
-              className={`${missingRoles.length ? "furo" : ""} ${pasteAllowed?"paste-target":""} drop-cell`}
+              className={`${missingRoles.length ? "furo" : ""} ${pasteAllowed?"paste-target":""} drop-cell period-${s.period} ${s.id==="4"?"period-night-start":""}`}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => drop(e, s.id)}
             >

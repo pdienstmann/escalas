@@ -288,3 +288,14 @@ test("every expanded schedule section ends with an inline resource action", () =
   assert.match(source, /initialSection:kind==="post"\?section:undefined/);
   assert.match(source, /selectableResources=kind==="post"&&initialSection/);
 });
+
+test("schedule editor distinguishes day and night without changing the PDF", () => {
+  const source = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/simple-ux.css"), "utf8");
+  assert.match(source, /period-day-head/);
+  assert.match(source, /period-night-head period-night-start/);
+  assert.match(source, /drop-cell period-\$\{s\.period\}/);
+  assert.match(styles, /@media screen\{/);
+  assert.match(styles, /td\.period-day:not\(\.furo\)/);
+  assert.match(styles, /td\.period-night:not\(\.furo\)/);
+});
