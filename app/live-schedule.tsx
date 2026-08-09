@@ -368,7 +368,7 @@ export function LiveSchedule() {
       return;
     }
     const t = times(data.date, shift),
-      sameShift = String(assignment.shift) === shift,
+      preserveInterval = String(assignment.shift) === shift || Boolean(sourceShift && sourceShift === shift && assignmentOverlapsShift(assignment, data.date, sourceShift)),
       currentCount = data.assignments.filter(
         (a) =>
           (kind === "post"
@@ -384,8 +384,8 @@ export function LiveSchedule() {
       shift,
       role:
         kind === "post" ? "guard" : currentCount === 0 ? "driver" : "patrol",
-      startsAt: sameShift ? assignment.starts_at : t.start,
-      endsAt: sameShift ? assignment.ends_at : t.end,
+      startsAt: preserveInterval ? assignment.starts_at : t.start,
+      endsAt: preserveInterval ? assignment.ends_at : t.end,
       status: assignment.status,
       requestRef: assignment.request_ref || null,
       isReassigned: 1,
