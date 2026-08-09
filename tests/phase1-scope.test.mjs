@@ -346,4 +346,5 @@ test("operation redeployment preserves and restores every source assignment", ()
   assert.match(api, /async function restoreOperation/);
   assert.match(dashboard, /Remanejar da escala/);
   assert.match(dashboard, /Horários parcialmente sobrepostos não são remanejados automaticamente/);
+  assert.match(dashboard, /useScheduleDate\(initialDate\)/);
 });

@@ -13,8 +13,8 @@ type Operation=Rec&{id:number;title:string;starts_at:string;ends_at:string;statu
 type Data={date:string;operations:Operation[];vehicles:Vehicle[]};
 type Suggestion={guardId:number;name:string;registration:string;platoon?:string;sourceType:"available"|"redeployment"|"extension"|"overtime";originLabel?:string|null;currentHeHours:number;lastOvertime?:string|null;operationHours:number};
 
-export function OperationsDashboard(){
-  const{date}=useScheduleDate(),[data,setData]=useState<Data|null>(null),[error,setError]=useState(""),[message,setMessage]=useState(""),[creating,setCreating]=useState(false),[busy,setBusy]=useState(false),[slotPick,setSlotPick]=useState<{operation:Operation;slot:Slot}|null>(null);
+export function OperationsDashboard({initialDate}:{initialDate?:string|null}){
+  const{date}=useScheduleDate(initialDate),[data,setData]=useState<Data|null>(null),[error,setError]=useState(""),[message,setMessage]=useState(""),[creating,setCreating]=useState(false),[busy,setBusy]=useState(false),[slotPick,setSlotPick]=useState<{operation:Operation;slot:Slot}|null>(null);
   const load=useCallback(async()=>{try{const response=await fetch(`/api/operations?date=${date}&_=${Date.now()}`,{cache:"no-store"});const value=await response.json();if(!response.ok)throw new Error(value.error);setError("");setData(value)}catch(reason){setError(reason instanceof Error?reason.message:"Não foi possível abrir as operações.")}},[date]);
   // O efeito sincroniza a data da navegação com a API de operações.
   // eslint-disable-next-line react-hooks/set-state-in-effect
