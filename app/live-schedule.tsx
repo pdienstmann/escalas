@@ -66,6 +66,7 @@ type HolePick = {
   position: SuggestionPosition | null;
 };
 type RedeployPick = { assignments: Rec[] };
+type ResourceRemovalPick = { kind: "post" | "vehicle"; resource: Rec; assignments: Rec[] };
 type UndoState = { id: number; label: string };
 type ViewFilter = "all" | "day" | "night" | "holes" | "redeploy";
 const shifts = SHIFT_DEFS;
@@ -83,6 +84,7 @@ export function LiveSchedule() {
     [redeployPick, setRedeployPick] = useState<RedeployPick | null>(null),
     [contextPick, setContextPick] = useState<Pick | null>(null),
     [vehicleEdit, setVehicleEdit] = useState<Rec | null>(null),
+    [resourceRemoval, setResourceRemoval] = useState<ResourceRemovalPick | null>(null),
     [createOpen, setCreateOpen] = useState(false),
     [createKind, setCreateKind] = useState<"guard" | "post" | "vehicle" | "section">("guard"),
     [resourceDialog, setResourceDialog] = useState<"post" | "vehicle" | null>(null),
@@ -527,6 +529,47 @@ export function LiveSchedule() {
       setSaving(false);
     }
   }
+  async function removeResourceFromDay() {
+    if (!data || !resourceRemoval || saving) return;
+    setSaving(true);
+    try {
+      const response = await fetch("/api/schedule", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "remove_resource_from_day",
+          scheduleId: data.schedule.id,
+          resourceKind: resourceRemoval.kind,
+          resourceId: resourceRemoval.resource.id,
+        }),
+      });
+      const result = await response.json();
+      setMessage(response.ok ? result.message : result.error);
+      if (!response.ok) return;
+      if (result.auditEventId) setUndoEvent({ id: Number(result.auditEventId), label: "Desfazer retirada do local" });
+      setData((current) => {
+        if (!current) return current;
+        const merged = mergeScheduleAssignments(
+          current.assignments,
+          current.availableForRedeployment,
+          result.assignments || [],
+        );
+        return {
+          ...current,
+          ...merged,
+          posts: resourceRemoval.kind === "post"
+            ? current.posts.filter((post) => Number(post.id) !== Number(resourceRemoval.resource.id))
+            : current.posts,
+          vehicles: resourceRemoval.kind === "vehicle"
+            ? current.vehicles.filter((vehicle) => Number(vehicle.id) !== Number(resourceRemoval.resource.id))
+            : current.vehicles,
+        };
+      });
+      setResourceRemoval(null);
+    } finally {
+      setSaving(false);
+    }
+  }
   // Hooks must stay above any early return.
   const movementGroups = useMemo(() => {
     const groups = [
@@ -717,6 +760,13 @@ export function LiveSchedule() {
                   onMoveGroup={moveGroup}
                   onHolePick={openHoleSuggest}
                   onEditVehicle={setVehicleEdit}
+                  onRemoveResource={(kind,resource)=>setResourceRemoval({
+                    kind,
+                    resource,
+                    assignments:data.assignments.filter((assignment)=>kind==="post"
+                      ? Number(assignment.post_id)===Number(resource.id)
+                      : Number(assignment.vehicle_id)===Number(resource.id)),
+                  })}
                 />
               );
               })}
@@ -757,7 +807,7 @@ export function LiveSchedule() {
           </section>
           {showRedeploy && data.availableForRedeployment.length > 0 && (
             <section className="redeployment-pool">
-              <header><div><span>VIATURA INDISPONÍVEL</span><h2>GMs à disposição para remanejamento</h2><p>Cada card reúne os dois horários do mesmo período. Ao mover, ambos seguem juntos.</p></div><b title={`${data.availableForRedeployment.length} horários`}>{redeploymentGroups.length}</b></header>
+              <header><div><span>RECURSO RETIRADO OU INDISPONÍVEL</span><h2>GMs à disposição para remanejamento</h2><p>Cada card reúne os dois horários do mesmo período. Ao mover, ambos seguem juntos.</p></div><b title={`${data.availableForRedeployment.length} horários`}>{redeploymentGroups.length}</b></header>
               <div>{redeploymentGroups.map((group) => (
                 <article key={group.key} draggable onDragStart={(event) => {
                   event.dataTransfer.effectAllowed = "move";
@@ -846,6 +896,7 @@ export function LiveSchedule() {
       )}
       {createOpen&&<QuickCreateDialog key={createKind} initialKind={createKind} data={data} saving={saving} onClose={()=>setCreateOpen(false)} onSave={createCatalogItem}/>}
       {resourceDialog&&<ResourceCrewDialog key={resourceDialog} kind={resourceDialog} data={data} saving={saving} onClose={()=>setResourceDialog(null)} onSave={saveResourceCrew}/>}
+      {resourceRemoval&&<ResourceRemovalDialog pick={resourceRemoval} saving={saving} onClose={()=>setResourceRemoval(null)} onConfirm={removeResourceFromDay}/>}
     </main>
   );
 }
@@ -949,6 +1000,18 @@ function VehicleQuickEditor({data,vehicle,saving,onClose,onSave}:{data:State;veh
     <footer><button type="button" onClick={onClose}>Cancelar</button><button className="save" disabled={saving}>{saving?"Salvando…":selectedId===String(vehicle.id)?"Salvar zona":"Trocar VTR e mover equipe"}</button></footer>
   </form></div>
 }
+function ResourceRemovalDialog({pick,saving,onClose,onConfirm}:{pick:ResourceRemovalPick;saving:boolean;onClose:()=>void;onConfirm:()=>void}){
+  const label=String(pick.kind==="vehicle"?pick.resource.prefix:pick.resource.name);
+  const guards=[...new Map(pick.assignments.map((assignment)=>[Number(assignment.guard_id),String(assignment.guard_name)])).values()];
+  return <div className="resource-remove-backdrop"><section className="resource-remove-dialog" role="dialog" aria-modal="true" aria-labelledby="resource-remove-title">
+    <header><div><small>RETIRAR SOMENTE DESTA ESCALA</small><h2 id="resource-remove-title">{label}</h2><p>O cadastro continuará disponível para outros dias e para os padrões.</p></div><button type="button" onClick={onClose} aria-label="Fechar">×</button></header>
+    <div className="resource-remove-alert"><b>{guards.length?`${guards.length} GM(s) não serão apagados`:`Este local está sem GMs`}</b><span>{guards.length?"Eles irão para À disposição / aguardando remanejamento.":"Apenas a linha será retirada da escala deste dia."}</span></div>
+    {guards.length>0&&<div className="resource-remove-guards">{guards.map((guard)=><span key={guard}>{guard}</span>)}</div>}
+    <p>A retirada cria um registro no histórico e pode ser desfeita. O local não será excluído do cadastro geral.</p>
+    <footer><button type="button" onClick={onClose}>Cancelar</button><button type="button" className="danger" disabled={saving} onClick={onConfirm}>{saving?"Retirando…":"Retirar local desta escala"}</button></footer>
+  </section></div>
+}
+
 function Row({
   date,
   kind,
@@ -971,6 +1034,7 @@ function Row({
   onMoveGroup,
   onHolePick,
   onEditVehicle,
+  onRemoveResource,
 }: {
   date: string;
   kind: "post" | "vehicle";
@@ -998,6 +1062,7 @@ function Row({
     event: ReactMouseEvent<HTMLButtonElement>,
   ) => void;
   onEditVehicle: (vehicle: Rec) => void;
+  onRemoveResource: (kind: "post" | "vehicle", resource: Rec) => void;
 }) {
   function drop(e: DragEvent, shift: string) {
     e.preventDefault();
@@ -1065,6 +1130,15 @@ function Row({
               Editar
             </button>
           )}
+          <button
+            type="button"
+            className="resource-remove-button"
+            aria-label={`Retirar ${String(kind === "vehicle" ? resource.prefix : resource.name)} desta escala`}
+            title="Retirar somente desta escala"
+            onClick={() => onRemoveResource(kind, resource)}
+          >
+            <span aria-hidden="true">×</span>
+          </button>
         </td>
         {visibleShifts.map((s) => {
           const list = assignmentIndex.get(assignmentKey(kind, Number(resource.id), s.id)) || [];

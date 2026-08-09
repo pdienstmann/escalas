@@ -315,6 +315,17 @@ async function seedSchedule(date: string, scheduleId: number) {
 }
 
 async function ensureBase(date: string) {
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS schedule_resource_exclusions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      schedule_id INTEGER NOT NULL REFERENCES schedules(id),
+      resource_kind TEXT NOT NULL,
+      resource_id INTEGER NOT NULL,
+      reason TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(schedule_id,resource_kind,resource_id)
+    )`,
+  ).run();
   await ensureCatalog();
   await ensureDemoMovements();
   await ensureSections();
@@ -331,6 +342,14 @@ async function ensureBase(date: string) {
     await applyPatternsToSchedule(env.DB, date, schedule.id);
     await applyWeeklyToSchedule(env.DB,date,schedule.id);
     await seedSchedule(date, schedule.id);
+    const exclusions = (await env.DB.prepare(
+      "SELECT resource_kind,resource_id FROM schedule_resource_exclusions WHERE schedule_id=?",
+    ).bind(schedule.id).all<{resource_kind:string;resource_id:number}>()).results;
+    if (exclusions.length) {
+      await env.DB.batch(exclusions.map((item) => env.DB.prepare(
+        `UPDATE assignments SET post_id=NULL,vehicle_id=NULL,is_reassigned=1,reassignment_note=COALESCE(reassignment_note,?),updated_at=CURRENT_TIMESTAMP WHERE schedule_id=? AND ${item.resource_kind === "post" ? "post_id" : "vehicle_id"}=?`,
+      ).bind("Local retirado desta escala — aguardando remanejamento", schedule.id, item.resource_id)));
+    }
   }
 }
 
@@ -353,14 +372,14 @@ export async function GET(request: Request) {
         "SELECT id,name,registration,platoon,base_shift,work_regime,overtime_eligible FROM guards WHERE active=1 ORDER BY name",
       ).all(),
       env.DB.prepare(
-        "SELECT id,name,group_name FROM posts WHERE active=1 ORDER BY sort_order,name",
-      ).all(),
+        "SELECT id,name,group_name FROM posts WHERE active=1 AND NOT EXISTS (SELECT 1 FROM schedule_resource_exclusions e WHERE e.schedule_id=? AND e.resource_kind='post' AND e.resource_id=posts.id) ORDER BY sort_order,name",
+      ).bind(schedule?.id).all(),
       env.DB.prepare(
-        "SELECT id,prefix,type,zone FROM vehicles v WHERE active=1 AND NOT EXISTS (SELECT 1 FROM vehicle_outages o WHERE o.vehicle_id=v.id AND o.active=1 AND o.starts_on<=? AND (o.ends_on IS NULL OR o.ends_on>=?)) ORDER BY prefix",
-      ).bind(date,date).all(),
+        "SELECT id,prefix,type,zone FROM vehicles v WHERE active=1 AND NOT EXISTS (SELECT 1 FROM vehicle_outages o WHERE o.vehicle_id=v.id AND o.active=1 AND o.starts_on<=? AND (o.ends_on IS NULL OR o.ends_on>=?)) AND NOT EXISTS (SELECT 1 FROM schedule_resource_exclusions e WHERE e.schedule_id=? AND e.resource_kind='vehicle' AND e.resource_id=v.id) ORDER BY prefix",
+      ).bind(date,date,schedule?.id).all(),
       env.DB.prepare(
-        "SELECT id,prefix,type,zone FROM vehicles WHERE active=1 ORDER BY prefix",
-      ).all(),
+        "SELECT id,prefix,type,zone FROM vehicles v WHERE active=1 AND NOT EXISTS (SELECT 1 FROM schedule_resource_exclusions e WHERE e.schedule_id=? AND e.resource_kind='vehicle' AND e.resource_id=v.id) ORDER BY prefix",
+      ).bind(schedule?.id).all(),
       env.DB.prepare(
         "SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.schedule_id=? ORDER BY a.shift,a.role,g.name",
       )
@@ -540,6 +559,61 @@ export async function POST(request: Request) {
   if (!permitted(request))
     return Response.json({ error: "Não autorizado" }, { status: 401 });
   const b = (await request.json()) as Record<string, string | number | boolean | null>;
+  if (b.action === "remove_resource_from_day") {
+    const scheduleId = Number(b.scheduleId);
+    const resourceId = Number(b.resourceId);
+    const resourceKind = b.resourceKind === "vehicle" ? "vehicle" : b.resourceKind === "post" ? "post" : null;
+    if (!scheduleId || !resourceId || !resourceKind)
+      return Response.json({ error: "Local inválido." }, { status: 400 });
+    await env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS schedule_resource_exclusions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        schedule_id INTEGER NOT NULL REFERENCES schedules(id),
+        resource_kind TEXT NOT NULL,
+        resource_id INTEGER NOT NULL,
+        reason TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(schedule_id,resource_kind,resource_id)
+      )`,
+    ).run();
+    const schedule = await env.DB.prepare("SELECT date FROM schedules WHERE id=?").bind(scheduleId).first<{date:string}>();
+    if (!schedule) return Response.json({ error: "Escala não encontrada." }, { status: 404 });
+    const resource = resourceKind === "post"
+      ? await env.DB.prepare("SELECT id,name label FROM posts WHERE id=? AND active=1").bind(resourceId).first<Record<string,unknown>>()
+      : await env.DB.prepare("SELECT id,prefix label FROM vehicles WHERE id=? AND active=1").bind(resourceId).first<Record<string,unknown>>();
+    if (!resource) return Response.json({ error: "Local não encontrado ou já desativado." }, { status: 404 });
+    const column = resourceKind === "post" ? "post_id" : "vehicle_id";
+    const beforeAssignments = (await env.DB.prepare(
+      `SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.schedule_id=? AND a.${column}=?`,
+    ).bind(scheduleId,resourceId).all<Record<string,unknown>>()).results;
+    const note = `${resource.label} retirado da escala de ${schedule.date} — aguardando remanejamento`;
+    await env.DB.batch([
+      env.DB.prepare("INSERT OR IGNORE INTO schedule_resource_exclusions (schedule_id,resource_kind,resource_id,reason) VALUES (?,?,?,?)").bind(scheduleId,resourceKind,resourceId,note),
+      env.DB.prepare(`UPDATE assignments SET post_id=NULL,vehicle_id=NULL,is_reassigned=1,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE schedule_id=? AND ${column}=?`).bind(note,scheduleId,resourceId),
+    ]);
+    const assignmentIds = beforeAssignments.map((item)=>Number(item.id)).filter(Boolean);
+    const assignments = assignmentIds.length
+      ? (await env.DB.prepare(`SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id IN (${assignmentIds.map(()=>"?").join(",")})`).bind(...assignmentIds).all<Record<string,unknown>>()).results
+      : [];
+    const entityId = `${scheduleId}:${resourceKind}:${resourceId}`;
+    const auditEventId = await writeAudit(request,{
+      action:"create",
+      entityType:"schedule_resource_exclusion",
+      entityId,
+      summary:`Retirou ${resource.label} da escala de ${schedule.date}`,
+      before:{resourceKind,resourceId,assignments:beforeAssignments},
+      after:{resourceKind,resourceId,assignments},
+      undoable:true,
+    });
+    const guardCount = new Set(beforeAssignments.map((item)=>Number(item.guard_id))).size;
+    return Response.json({
+      ok:true,
+      assignments,
+      removedResource:{kind:resourceKind,id:resourceId},
+      auditEventId,
+      message:`${resource.label} retirado desta escala. ${guardCount} GM(s) estão à disposição para remanejamento.`,
+    });
+  }
   if (b.action === "assign_resource_group") {
     const scheduleId = Number(b.scheduleId);
     const postId = Number(b.postId || 0) || null;

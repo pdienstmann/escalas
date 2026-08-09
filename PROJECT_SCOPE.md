@@ -119,6 +119,7 @@
 - Melhorar a troca de GM com busca por nome/matrícula, destaque animado do registro selecionado, resumo “GM anterior → novo GM”, confirmação visual forte, opção de desfazer e bloqueio enquanto salva.
 - Incluir o botão “Adicionar GM à escala” diretamente na tela operacional. O fluxo deverá permitir escolher GM, turno, horário, função e destino, exibindo conflitos antes de confirmar.
 - Adotar como regra permanente de negócio que nenhum GM pode desaparecer da escala. Ao remover uma designação, posto ou viatura, o sistema deverá exigir um novo destino ou enviar o GM para uma área visível de “À disposição / aguardando remanejamento”.
+- Permitir retirar um posto ou uma viatura somente da escala aberta por um pequeno ícone junto ao recurso. A ação não desativará o cadastro geral, mostrará previamente os GMs afetados, enviará todos para “À disposição / aguardando remanejamento” e poderá ser desfeita pelo histórico.
 - Permitir criar, editar, renomear, reordenar e desativar postos diretamente na escala, usando um painel lateral compacto. A área de Cadastros continuará disponível para manutenção em massa.
 - Ao excluir ou desativar um posto com GMs escalados, mostrar os envolvidos, oferecer transferência coletiva e impedir que as designações fiquem sem representação visual.
 - Transformar remanejamentos em uma fila operacional compacta: origem, destino sugerido, horário, motivo, requerimento, situação de aviso e ação direta para escolher uma vaga.

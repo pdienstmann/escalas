@@ -74,6 +74,11 @@ export async function POST(request: Request) {
     if(action==="create")statements.push(env.DB.prepare("DELETE FROM vehicle_outages WHERE id=?").bind(id));
     else if(action==="delete"&&before)statements.push(env.DB.prepare("INSERT INTO vehicle_outages (id,vehicle_id,starts_on,ends_on,reason,active) VALUES (?,?,?,?,?,?)").bind(id,before.vehicle_id,before.starts_on,before.ends_on,before.reason,before.active));
     else return Response.json({error:"Não foi possível reconstruir este FA."},{status:409});
+  } else if(type==="schedule_resource_exclusion" && before && Array.isArray(before.assignments)) {
+    const parts=rawEntityId.split(":");
+    if(parts.length!==3)return Response.json({error:"Não foi possível identificar o local retirado."},{status:409});
+    statements.push(env.DB.prepare("DELETE FROM schedule_resource_exclusions WHERE schedule_id=? AND resource_kind=? AND resource_id=?").bind(Number(parts[0]),parts[1],Number(parts[2])));
+    for(const assignment of before.assignments as Row[])statements.push(assignmentUpdate(assignment,Number(assignment.id)));
   } else {
     return Response.json({error:"O desfazer seguro ainda não está disponível para este tipo de alteração."},{status:409});
   }
