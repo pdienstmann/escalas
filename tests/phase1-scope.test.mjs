@@ -335,6 +335,18 @@ test("monthly leave compilation is reviewed before one bulk confirmation", () =>
   assert.match(dashboard, /GM não encontrado/);
 });
 
+test("monthly leave panorama highlights shift, roles, vehicle risks and links to the day", () => {
+  const api = readFileSync(resolve("app/api/admin/route.ts"), "utf8");
+  const dashboard = readFileSync(resolve("app/gestao-client.tsx"), "utf8");
+  assert.match(api, /function buildLeaveOverview/);
+  assert.match(api, /vehicleRisks/);
+  assert.match(api, /pattern_role/);
+  assert.match(dashboard, /Risco de efetivo nas folgas/);
+  assert.match(dashboard, /Motoristas/);
+  assert.match(dashboard, /Abrir escala/);
+  assert.match(dashboard, /\?date=\$\{day\.date\}/);
+});
+
 test("operation redeployment preserves and restores every source assignment", () => {
   const migration = readFileSync(resolve("drizzle/0013_operation_redeployments.sql"), "utf8");
   const api = readFileSync(resolve("app/api/operations/route.ts"), "utf8");

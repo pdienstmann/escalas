@@ -4,6 +4,26 @@ import { ModuleBusyOverlay, ModuleLoading } from "./module-loading";
 import { BackToSchedule } from "./schedule-nav";
 import { useScheduleDate } from "./use-schedule-date";
 type Item = Record<string, string | number | null>;
+type LeaveOverviewDay = {
+  date: string;
+  total: number;
+  capacity: number | null;
+  day: number;
+  night: number;
+  roles: Record<"driver" | "patrol" | "third" | "guard" | "unassigned", number>;
+  patterns: string[];
+  vehicleRisks: Array<{vehicle:string;members:Array<{name:string;role:string}>}>;
+  severity: "critical" | "attention" | "normal";
+};
+type LeaveOverview = {
+  month: string;
+  totalLeaves: number;
+  criticalDays: number;
+  attentionDays: number;
+  vehicleAlertDays: number;
+  busiest: LeaveOverviewDay | null;
+  days: LeaveOverviewDay[];
+};
 type Data = {
   guards: Item[];
   posts: Item[];
@@ -16,6 +36,7 @@ type Data = {
   vehicleCrews: Item[];
   sections: Item[];
   vehicleReturnImpacts: Item[];
+  leaveOverview: LeaveOverview | null;
 };
 const empty: Data = {
   guards: [],
@@ -29,6 +50,7 @@ const empty: Data = {
   vehicleCrews: [],
   sections: [],
   vehicleReturnImpacts: [],
+  leaveOverview: null,
 };
 
 const modeLabel = {
@@ -484,6 +506,7 @@ export function GestaoClient({
       busy={saving}
       busyArea={modeLabel[mode]}
     >
+      <LeaveMonthOverview overview={data.leaveOverview} />
       <LeaveImport
         guards={data.guards}
         choices={data.choices}
@@ -602,6 +625,40 @@ function LeaveImport({guards,choices,defaultMonth,saving,onImport}:{guards:Item[
     {reviewing&&<div className="leave-import-review"><header><div><small>CONFIRMAÇÃO - NENHUM DADO SALVO AINDA</small><h3>Folgas de {month.split("-").reverse().join("/")}</h3></div><strong className={problems?"warning":"ready"}>{problems?"Corrigir pendências":`${validRows.length} novas folgas`}</strong></header><div className="leave-import-list">{parsed.map(row=><article key={`${row.line}-${row.guardName}`} className={row.problems.length?"invalid":""}><span className={`leave-shift ${row.shift.toLowerCase()}`}>{row.shift||"-"}</span><div><b>{row.guardName}</b><small>Linha {row.line}</small></div><div className="leave-date-tags">{row.dates.map(date=><span key={date} className={existing.has(`${row.guardId}:${date}`)?"existing":""}>{formatDate(date)}{existing.has(`${row.guardId}:${date}`)?" · já incluída":""}</span>)}{row.problems.map(problem=><em key={problem}>{problem}</em>)}</div></article>)}</div><footer><button type="button" onClick={()=>setReviewing(false)}>Voltar e corrigir</button><button type="button" className="save" disabled={!validRows.length||Boolean(problems)||saving} onClick={()=>void confirmImport()}>{saving?"Importando…":`Confirmar importação geral (${validRows.length})`}</button></footer></div>}
   </section>
 }
+function LeaveMonthOverview({overview}:{overview:LeaveOverview|null}) {
+  if(!overview)return <section className="leave-overview empty"><b>Panorama mensal</b><p>Abra uma campanha de folgas para visualizar os dias críticos.</p></section>;
+  const [year,month]=overview.month.split("-").map(Number);
+  const totalDays=new Date(year,month,0).getDate();
+  const leading=(new Date(`${overview.month}-01T12:00:00`).getDay()+6)%7;
+  const byDate=new Map(overview.days.map(day=>[day.date,day]));
+  const calendar:Array<{date:string;number:number;day?:LeaveOverviewDay}|null>=[...Array(leading).fill(null)];
+  for(let number=1;number<=totalDays;number++){
+    const date=`${overview.month}-${String(number).padStart(2,"0")}`;
+    calendar.push({date,number,day:byDate.get(date)});
+  }
+  const priorities=[...overview.days].sort((a,b)=>severityWeight(b.severity)-severityWeight(a.severity)||b.total-a.total||a.date.localeCompare(b.date)).slice(0,10);
+  return <section className="leave-overview">
+    <header><div><small>PANORAMA DO MÊS</small><h2>Risco de efetivo nas folgas</h2><p>Os alertas cruzam turno, função no padrão e integrantes da mesma viatura.</p></div><a href={`/?date=${overview.busiest?.date||`${overview.month}-01`}`}>Abrir escala do dia mais carregado</a></header>
+    <div className="leave-overview-summary">
+      <span><b>{overview.totalLeaves}</b><small>folgas confirmadas</small></span>
+      <span className="critical"><b>{overview.criticalDays}</b><small>dias críticos</small></span>
+      <span className="attention"><b>{overview.attentionDays}</b><small>dias de atenção</small></span>
+      <span className="vehicle"><b>{overview.vehicleAlertDays}</b><small>alertas de guarnição</small></span>
+    </div>
+    <div className="leave-overview-grid">
+      <div className="leave-calendar-wrap">
+        <div className="leave-calendar-weekdays">{["SEG","TER","QUA","QUI","SEX","SÁB","DOM"].map(label=><span key={label}>{label}</span>)}</div>
+        <div className="leave-calendar">{calendar.map((entry,index)=>entry?<a key={entry.date} href={`/?date=${entry.date}`} className={entry.day?.severity||"clear"} title={entry.day?`${entry.day.total} folgas · Dia ${entry.day.day} · Noite ${entry.day.night}`:"Sem folgas confirmadas"}><span>{entry.number}</span>{entry.day?<><b>{entry.day.total} folga{entry.day.total===1?"":"s"}</b><small><i>D {entry.day.day}</i><i>N {entry.day.night}</i></small>{entry.day.vehicleRisks.length>0&&<em>⚠ VTR</em>}</>:<small className="no-leave">—</small>}</a>:<span className="calendar-blank" key={`blank-${index}`}/>)}</div>
+        <footer><span><i className="normal"/>Regular</span><span><i className="attention"/>Atenção</span><span><i className="critical"/>Crítico</span><small>Clique em qualquer dia para abrir a escala.</small></footer>
+      </div>
+      <div className="leave-priority-days"><header><div><small>MAIOR IMPACTO</small><h3>Dias para conferir</h3></div><span>{priorities.length}</span></header>{priorities.length?priorities.map(day=><a href={`/?date=${day.date}`} className={day.severity} key={day.date}><div className="priority-date"><b>{new Date(`${day.date}T12:00:00`).toLocaleDateString("pt-BR",{day:"2-digit",month:"short"})}</b><small>{day.patterns.join(" + ")}</small></div><div className="priority-detail"><strong>{day.total} folgas <i>Dia {day.day}</i><i>Noite {day.night}</i></strong><div className="leave-role-chips">{roleEntries(day.roles).map(([role,count])=><span key={role}>{roleLabel(role)} {count}</span>)}</div>{day.vehicleRisks.map(risk=><em key={risk.vehicle}>⚠ {risk.vehicle}: {risk.members.map(member=>member.name).join(" + ")}</em>)}</div><span className="open-day">Abrir escala →</span></a>):<p>Nenhuma folga confirmada neste mês.</p>}</div>
+    </div>
+  </section>;
+}
+function severityWeight(value:LeaveOverviewDay["severity"]){return value==="critical"?3:value==="attention"?2:1}
+function roleEntries(roles:LeaveOverviewDay["roles"]){return Object.entries(roles).filter(([,count])=>count>0) as Array<[keyof LeaveOverviewDay["roles"],number]>}
+function roleLabel(role:keyof LeaveOverviewDay["roles"]){return role==="driver"?"Motoristas":role==="patrol"?"Patrulheiros":role==="third"?"3º integrantes":role==="guard"?"Postos":"Sem função"}
+
 const formatDate = (value: string | number | null) =>
   new Date(String(value) + "T12:00:00").toLocaleDateString("pt-BR", {
     weekday: "short",

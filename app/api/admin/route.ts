@@ -7,6 +7,101 @@ export const dynamic = "force-dynamic";
 type LeaveImportRow = { guardId: number; date: string };
 type AdminBody = Record<string, string | number> & { rows?: LeaveImportRow[] };
 
+function buildLeaveOverview(
+  campaign: Record<string, unknown> | null,
+  choices: Record<string, unknown>[],
+  limits: Record<string, unknown>[],
+  patternSlots: Record<string, unknown>[],
+) {
+  if (!campaign) return null;
+  const confirmed = choices.filter((choice) => choice.status === "confirmed");
+  const anchor = String(patternSlots[0]?.anchor_date || "2026-08-12");
+  const slotByGuardAndCode = new Map(
+    patternSlots.map((slot) => [`${slot.guard_id}:${slot.pattern_code}`, slot]),
+  );
+  const limitsByDate = new Map<string, number>();
+  for (const limit of limits) {
+    const date = String(limit.date);
+    limitsByDate.set(date, (limitsByDate.get(date) || 0) + Number(limit.capacity || 0));
+  }
+  const grouped = new Map<string, Record<string, unknown>[]>();
+  for (const choice of confirmed) {
+    const date = String(choice.date);
+    grouped.set(date, [...(grouped.get(date) || []), choice]);
+  }
+  const days = [...grouped.entries()].map(([date, dayChoices]) => {
+    const diff = Math.round(
+      (new Date(`${date}T12:00:00Z`).getTime() - new Date(`${anchor}T12:00:00Z`).getTime()) /
+        86400000,
+    );
+    const parity = ((diff % 2) + 2) % 2;
+    const expectedCodes = [parity === 0 ? "D1" : "D2", parity === 0 ? "N1" : "N2"];
+    const roles = { driver: 0, patrol: 0, third: 0, guard: 0, unassigned: 0 };
+    const periods = { day: 0, night: 0 };
+    const vehicles = new Map<string, Array<{ name: string; role: string }>>();
+    const guards = dayChoices.map((choice) => {
+      const slot = expectedCodes
+        .map((code) => slotByGuardAndCode.get(`${choice.guard_id}:${code}`))
+        .find(Boolean);
+      const fallbackNight = /noite/i.test(String(choice.base_shift || ""));
+      const period = String(slot?.pattern_period || (fallbackNight ? "night" : "day"));
+      const role = String(slot?.pattern_role || "unassigned");
+      periods[period === "night" ? "night" : "day"] += 1;
+      if (role in roles) roles[role as keyof typeof roles] += 1;
+      else roles.unassigned += 1;
+      const vehicle = slot?.vehicle_prefix ? String(slot.vehicle_prefix) : null;
+      if (vehicle)
+        vehicles.set(vehicle, [
+          ...(vehicles.get(vehicle) || []),
+          { name: String(choice.guard_name), role },
+        ]);
+      return {
+        id: Number(choice.guard_id),
+        name: String(choice.guard_name),
+        period,
+        role,
+        pattern: String(slot?.pattern_code || ""),
+        vehicle,
+      };
+    });
+    const vehicleRisks = [...vehicles.entries()]
+      .filter(([, members]) => members.length > 1)
+      .map(([vehicle, members]) => ({ vehicle, members }));
+    const capacity = limitsByDate.get(date) || null;
+    const total = dayChoices.length;
+    const ratio = capacity ? total / capacity : 0;
+    const severity =
+      vehicleRisks.length > 0 || (capacity !== null && total >= capacity) || total >= 5
+        ? "critical"
+        : total >= 3 || ratio >= 0.67
+          ? "attention"
+          : "normal";
+    return {
+      date,
+      total,
+      capacity,
+      day: periods.day,
+      night: periods.night,
+      roles,
+      guards,
+      patterns: expectedCodes,
+      vehicleRisks,
+      severity,
+    };
+  });
+  days.sort((a, b) => a.date.localeCompare(b.date));
+  const busiest = [...days].sort((a, b) => b.total - a.total || a.date.localeCompare(b.date))[0] || null;
+  return {
+    month: String(campaign.month),
+    totalLeaves: confirmed.length,
+    criticalDays: days.filter((day) => day.severity === "critical").length,
+    attentionDays: days.filter((day) => day.severity === "attention").length,
+    vehicleAlertDays: days.filter((day) => day.vehicleRisks.length > 0).length,
+    busiest,
+    days,
+  };
+}
+
 
 async function seed() {
   const count = await env.DB.prepare(
@@ -167,7 +262,7 @@ export async function GET(request: Request) {
   await ensureSections();
   await ensureFleetReturnTables();
   const requestedDate = new URL(request.url).searchParams.get("date") || todayScheduleDate();
-  const [guards, posts, vehicles, movements, campaign, days, choices, vehicleOutages, sections, vehicleCrews, vehicleReturnImpacts] =
+  const [guards, posts, vehicles, movements, campaign, days, choices, vehicleOutages, sections, vehicleCrews, vehicleReturnImpacts, leavePatternSlots] =
     await Promise.all([
       env.DB.prepare(
         "SELECT * FROM guards WHERE active = 1 ORDER BY name",
@@ -185,10 +280,10 @@ export async function GET(request: Request) {
         "SELECT * FROM leave_campaigns WHERE status='open' ORDER BY month DESC LIMIT 1",
       ).first(),
       env.DB.prepare(
-        "SELECT l.*, (SELECT COUNT(*) FROM leave_choices c WHERE c.campaign_id=l.campaign_id AND c.date=l.date AND c.status='confirmed') AS used FROM leave_day_limits l ORDER BY l.date",
+        "SELECT l.*, (SELECT COUNT(*) FROM leave_choices c WHERE c.campaign_id=l.campaign_id AND c.date=l.date AND c.status='confirmed') AS used FROM leave_day_limits l WHERE l.campaign_id=(SELECT id FROM leave_campaigns WHERE status='open' ORDER BY month DESC LIMIT 1) ORDER BY l.date",
       ).all(),
       env.DB.prepare(
-        "SELECT c.*,g.name AS guard_name FROM leave_choices c JOIN guards g ON g.id=c.guard_id WHERE c.status!='cancelled' ORDER BY c.date",
+        "SELECT c.*,g.name AS guard_name,g.registration,g.platoon,g.base_shift FROM leave_choices c JOIN guards g ON g.id=c.guard_id WHERE c.status!='cancelled' AND c.campaign_id=(SELECT id FROM leave_campaigns WHERE status='open' ORDER BY month DESC LIMIT 1) ORDER BY c.date,g.name",
       ).all(),
       env.DB.prepare("SELECT o.*,v.prefix,v.type FROM vehicle_outages o JOIN vehicles v ON v.id=o.vehicle_id WHERE o.active=1 ORDER BY o.starts_on DESC").all(),
       env.DB.prepare("SELECT section_key,label,sort_order FROM schedule_sections ORDER BY sort_order,label").all(),
@@ -203,6 +298,12 @@ export async function GET(request: Request) {
       env.DB.prepare(`SELECT r.*,s.date schedule_date,s.status schedule_status,v.prefix
         FROM vehicle_return_reconciliations r JOIN schedules s ON s.id=r.schedule_id JOIN vehicles v ON v.id=r.vehicle_id
         WHERE r.status='pending' ORDER BY s.date,v.prefix`).all(),
+      env.DB.prepare(`SELECT ps.guard_id,ps.role pattern_role,p.code pattern_code,p.period pattern_period,p.anchor_date,
+          v.prefix vehicle_prefix,po.name post_name
+        FROM pattern_slots ps
+        JOIN shift_patterns p ON p.id=ps.pattern_id AND p.active=1
+        LEFT JOIN vehicles v ON v.id=ps.vehicle_id
+        LEFT JOIN posts po ON po.id=ps.post_id`).all(),
     ]);
   return Response.json({
     guards: guards.results,
@@ -216,6 +317,12 @@ export async function GET(request: Request) {
     vehicleCrews: vehicleCrews.results,
     sections: sections.results,
     vehicleReturnImpacts: vehicleReturnImpacts.results,
+    leaveOverview: buildLeaveOverview(
+      campaign as Record<string, unknown> | null,
+      choices.results,
+      days.results,
+      leavePatternSlots.results,
+    ),
   });
 }
 
