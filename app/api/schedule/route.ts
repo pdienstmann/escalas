@@ -10,6 +10,7 @@ import { permitted } from "../../../lib/access";
 import { isScheduleDate, todayScheduleDate } from "../../../lib/schedule-date";
 import { fullPeriodShifts, shiftTimes as periodShiftTimes, isDayShift } from "../../../lib/shift-rules";
 import { rankGuardSuggestions, describeReasons } from "../../../lib/suggest-gm";
+import { syncScheduleOvertime } from "../../../lib/overtime-ledger";
 
 export const dynamic = "force-dynamic";
 
@@ -790,6 +791,7 @@ async function buildSuggestions(request: Request, date: string) {
   const vehicleId = Number(url.searchParams.get("vehicleId") || 0) || null;
   const role = url.searchParams.get("role") || null;
   const period = isDayShift(shift) ? "day" : "night";
+  await syncScheduleOvertime();
 
   const monthStart = `${date.slice(0, 7)}-01`;
   const monthEnd = (() => {
@@ -839,10 +841,13 @@ async function buildSuggestions(request: Request, date: string) {
       .all<{ guard_id: number }>(),
     env.DB
       .prepare(
-        "SELECT guard_id, starts_at, ends_at FROM assignments WHERE status='overtime' AND starts_at>=? AND starts_at<?",
+        `SELECT guard_id,starts_at,
+          CASE WHEN status IN ('confirmed','partial') THEN COALESCE(confirmed_minutes,0)
+               WHEN status='pending' THEN planned_minutes ELSE 0 END effective_minutes
+         FROM overtime_entries WHERE service_date>=? AND service_date<?`,
       )
-      .bind(`${monthStart}T00:00`, `${monthEnd}T00:00`)
-      .all<{ guard_id: number; starts_at: string; ends_at: string }>(),
+      .bind(monthStart, monthEnd)
+      .all<{ guard_id: number; starts_at: string; effective_minutes: number }>(),
     env.DB
       .prepare(
         `SELECT guard_id, post_id, vehicle_id, role FROM assignments
@@ -874,10 +879,7 @@ async function buildSuggestions(request: Request, date: string) {
   const guardHeHours = new Map<number, number>();
   const guardLastHe = new Map<number, string | null>();
   for (const entry of heEntries.results) {
-    const hours =
-      (new Date(String(entry.ends_at)).getTime() -
-        new Date(String(entry.starts_at)).getTime()) /
-      3600000;
+    const hours = Number(entry.effective_minutes || 0) / 60;
     guardHeHours.set(
       Number(entry.guard_id),
       Number(guardHeHours.get(Number(entry.guard_id)) ?? 0) + hours,

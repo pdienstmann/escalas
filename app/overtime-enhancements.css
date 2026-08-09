@@ -25,5 +25,13 @@
 .he-settings-dialog footer{display:flex;justify-content:flex-end;gap:8px}
 .he-settings-dialog footer button{padding:9px 12px;border:1px solid #b9c8d7;border-radius:6px;background:#fff}
 .he-settings-dialog footer .save{border-color:#0871e1;background:#0871e1;color:#fff;font-weight:800}
+.he-stat-warning{border-color:#e4b650!important;background:#fff9e8!important}.he-stat-warning b{color:#9a6200}
+.he-empty{padding:20px;text-align:center;color:#60738a}
+.he-entry-table{min-width:900px;border:1px solid #dce5ed;border-radius:7px;overflow:hidden}
+.he-entry-head,.he-entry-table article{display:grid;grid-template-columns:1.1fr 1.4fr .65fr .65fr .8fr .55fr;gap:9px;align-items:center;padding:9px 10px}
+.he-entry-head{background:#e7f0f8;color:#49647c;font-size:10px;font-weight:900;text-transform:uppercase}
+.he-entry-table article{border-top:1px solid #e1e7ed}.he-entry-table article>div{display:grid;gap:2px}.he-entry-table article small{color:#60738a}.he-entry-table article>button{padding:7px;border:1px solid #a9bfd3;border-radius:5px;background:#fff;color:#075cac;font-weight:800}
+.he-status{justify-self:start;padding:4px 7px;border-radius:10px;font-size:10px;font-weight:900}.he-status.pending{background:#fff1ce;color:#8b5a00}.he-status.confirmed{background:#dcf6e5;color:#13703c}.he-status.partial{background:#e2eefb;color:#145c97}.he-status.not_performed,.he-status.cancelled{background:#ffe3e3;color:#9b2932}
+.he-review-dialog select,.he-review-dialog input{width:100%;padding:9px;border:1px solid #b9c8d7;border-radius:6px;background:#fff}.he-review-summary{display:grid;grid-template-columns:1fr auto;gap:3px;padding:10px;border:1px solid #d7e2ec;border-radius:7px;background:#f5f9fc}.he-review-summary b{font-size:20px}.he-review-summary small{grid-column:1/-1;color:#60738a}.he-time-pair{display:grid;grid-template-columns:1fr 1fr;gap:9px}.he-time-pair label{display:grid;gap:6px;font-weight:800}
 @media(max-width:900px){.he-head{align-items:stretch;flex-direction:column;gap:10px}.he-filters{display:grid;grid-template-columns:1fr}.he-filters input{min-width:0}.he-settings-backdrop{align-items:end;padding:0}.he-settings-dialog{max-height:92dvh;overflow:auto;border-radius:12px 12px 0 0}}
 @media print{.he-settings-backdrop{display:none!important}}

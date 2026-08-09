@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 const audit = {
   createdAt: text("created_at").notNull().default("CURRENT_TIMESTAMP"),
@@ -29,6 +29,23 @@ export const assignments = sqliteTable("assignments", {
   id:integer("id").primaryKey({autoIncrement:true}), scheduleId:integer("schedule_id").notNull().references(()=>schedules.id), guardId:integer("guard_id").notNull().references(()=>guards.id),
   postId:integer("post_id").references(()=>posts.id), vehicleId:integer("vehicle_id").references(()=>vehicles.id), shift:text("shift").notNull(), role:text("role",{enum:["guard","driver","patrol","third"]}).notNull().default("guard"), startsAt:text("starts_at").notNull(), endsAt:text("ends_at").notNull(), regularEndsAt:text("regular_ends_at"), breakStartsAt:text("break_starts_at"), breakEndsAt:text("break_ends_at"), workKind:text("work_kind").notNull().default("shift"), status:text("status",{enum:["normal","overtime","time_bank","swap"]}).notNull().default("normal"), requestRef:text("request_ref"), isReassigned:integer("is_reassigned",{mode:"boolean"}).notNull().default(false), reassignmentNote:text("reassignment_note"), ...audit,
 },t=>[uniqueIndex("idx_assignments_schedule_guard_time").on(t.scheduleId,t.guardId,t.startsAt)]);
+export const overtimeEntries = sqliteTable("overtime_entries", {
+  id:integer("id").primaryKey({autoIncrement:true}),
+  assignmentId:integer("assignment_id").references(()=>assignments.id),
+  guardId:integer("guard_id").notNull().references(()=>guards.id),
+  serviceDate:text("service_date").notNull(),
+  startsAt:text("starts_at").notNull(),
+  endsAt:text("ends_at").notNull(),
+  plannedMinutes:integer("planned_minutes").notNull(),
+  confirmedMinutes:integer("confirmed_minutes"),
+  status:text("status",{enum:["pending","confirmed","partial","not_performed","cancelled"]}).notNull().default("pending"),
+  source:text("source",{enum:["schedule","manual","adjustment"]}).notNull().default("schedule"),
+  location:text("location"),requestRef:text("request_ref"),notes:text("notes"),confirmedAt:text("confirmed_at"),...audit,
+},t=>[
+  uniqueIndex("idx_overtime_entries_assignment").on(t.assignmentId),
+  index("idx_overtime_entries_guard_date").on(t.guardId,t.serviceDate),
+  index("idx_overtime_entries_status_date").on(t.status,t.serviceDate),
+]);
 export const weeklySlots = sqliteTable("weekly_slots", {id:integer("id").primaryKey({autoIncrement:true}),guardId:integer("guard_id").notNull().references(()=>guards.id),weekdays:text("weekdays").notNull().default("1,2,3,4,5"),postId:integer("post_id").references(()=>posts.id),vehicleId:integer("vehicle_id").references(()=>vehicles.id),role:text("role").notNull().default("guard"),startsAt:text("starts_at").notNull().default("08:00"),breakStart:text("break_start"),breakEnd:text("break_end"),regularEnd:text("regular_end").notNull().default("17:00"),overtimeEnd:text("overtime_end"),active:integer("active",{mode:"boolean"}).notNull().default(true),...audit},t=>[uniqueIndex("idx_weekly_slots_guard").on(t.guardId)]);
 export const vehicleOutages = sqliteTable("vehicle_outages", {id:integer("id").primaryKey({autoIncrement:true}),vehicleId:integer("vehicle_id").notNull().references(()=>vehicles.id),startsOn:text("starts_on").notNull(),endsOn:text("ends_on"),reason:text("reason"),active:integer("active",{mode:"boolean"}).notNull().default(true),...audit});
 export const scheduleSections=sqliteTable("schedule_sections",{sectionKey:text("section_key").primaryKey(),label:text("label").notNull(),sortOrder:integer("sort_order").notNull().default(0),updatedAt:text("updated_at").notNull().default("CURRENT_TIMESTAMP")});

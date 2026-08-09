@@ -37,6 +37,7 @@
 
 ## Controle de horas extras — reformulação aprovada
 
+- Base do livro manual implementada: previsões separadas, conferência individual, lançamento manual, elegibilidade e avisos por GM. Permanecem no roadmap fechamento mensal, reabertura controlada e relatórios finais.
 - Separar `HE prevista` de `HE confirmada`. Uma designação marcada como HE na escala criará uma previsão, mas não aumentará automaticamente o total oficial do GM.
 - Criar o fechamento/conferência de HE por dia. O responsável verá as previsões do período e marcará cada uma como `Realizada integralmente`, `Realizada parcialmente`, `Não realizada`, `Cancelada` ou `Pendente`.
 - Permitir informar manualmente horário inicial/final ou quantidade de horas efetivamente cumprida, posto/VTR, requerimento, justificativa, observação e responsável pela conferência.
