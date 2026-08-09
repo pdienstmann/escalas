@@ -652,10 +652,16 @@ export async function POST(request: Request) {
         );
     }
 
+    const requestedRole = vehicleId && ["driver", "patrol", "third"].includes(String(b.role))
+      ? String(b.role)
+      : null;
+    const reassignmentNote = String(
+      b.reassignmentNote || "Avisar o GM: remanejamento para cobrir furo de escala",
+    );
     await env.DB.prepare(
-      `UPDATE assignments SET post_id=?,vehicle_id=?,role=CASE WHEN ? IS NOT NULL THEN 'guard' ELSE role END,is_reassigned=1,reassignment_note='Remanejamento do período completo',updated_at=CURRENT_TIMESTAMP WHERE id IN (${placeholders})`,
+      `UPDATE assignments SET post_id=?,vehicle_id=?,role=CASE WHEN ? IS NOT NULL THEN 'guard' WHEN ? IS NOT NULL THEN ? ELSE role END,is_reassigned=1,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id IN (${placeholders})`,
     )
-      .bind(postId, vehicleId, postId, ...assignmentIds)
+      .bind(postId, vehicleId, postId, requestedRole, requestedRole, reassignmentNote, ...assignmentIds)
       .run();
     const assignments = (
       await env.DB.prepare(
@@ -664,7 +670,7 @@ export async function POST(request: Request) {
         .bind(...assignmentIds)
         .all<Record<string, unknown>>()
     ).results;
-    await writeAudit(request, {
+    const auditEventId = await writeAudit(request, {
       action: "update",
       entityType: "assignment_group",
       entityId: assignmentIds.join(","),
@@ -676,6 +682,7 @@ export async function POST(request: Request) {
     return Response.json({
       ok: true,
       assignments,
+      auditEventId,
       message: `${before[0].guard_name} remanejado com todos os horários do período.`,
     });
   }
@@ -885,6 +892,7 @@ async function buildSuggestions(request: Request, date: string) {
   const vehicleId = Number(url.searchParams.get("vehicleId") || 0) || null;
   const role = url.searchParams.get("role") || null;
   const period = isDayShift(shift) ? "day" : "night";
+  const periodShiftIds = period === "day" ? ["2", "3"] : ["4", "1"];
   await syncScheduleOvertime();
 
   const monthStart = `${date.slice(0, 7)}-01`;
@@ -910,7 +918,7 @@ async function buildSuggestions(request: Request, date: string) {
   ] = await Promise.all([
     env.DB
       .prepare(
-        "SELECT id,name,registration,platoon,base_shift,work_regime FROM guards WHERE active=1 ORDER BY name",
+        "SELECT id,name,registration,platoon,base_shift,work_regime,overtime_eligible FROM guards WHERE active=1 ORDER BY name",
       )
       .all<{
         id: number;
@@ -929,10 +937,18 @@ async function buildSuggestions(request: Request, date: string) {
       .all<{ guard_id: number }>(),
     env.DB
       .prepare(
-        "SELECT guard_id FROM assignments WHERE schedule_id=? AND date(starts_at)=date(?)",
+        `SELECT a.*,g.name guard_name,g.registration,
+                COALESCE(p.name,v.prefix,'Sem destino') origin_label,
+                CASE WHEN a.post_id IS NOT NULL THEN 'post' WHEN a.vehicle_id IS NOT NULL THEN 'vehicle' ELSE 'pending' END origin_kind
+         FROM assignments a
+         JOIN guards g ON g.id=a.guard_id
+         LEFT JOIN posts p ON p.id=a.post_id
+         LEFT JOIN vehicles v ON v.id=a.vehicle_id
+         WHERE a.schedule_id=? AND a.shift IN (?,?) AND COALESCE(a.work_kind,'shift')!='overtime_extension'
+         ORDER BY g.name,a.starts_at`,
       )
-      .bind(scheduleId, date)
-      .all<{ guard_id: number }>(),
+      .bind(scheduleId, ...periodShiftIds)
+      .all<Record<string, unknown>>(),
     env.DB
       .prepare(
         `SELECT guard_id,starts_at,
@@ -969,6 +985,37 @@ async function buildSuggestions(request: Request, date: string) {
 
   const blocked = new Set(movementsActive.results.map((m) => Number(m.guard_id)));
   const scheduledToday = new Set(todayAssignments.results.map((a) => Number(a.guard_id)));
+
+  const sameDayGroups = new Map<number, Record<string, unknown>[]>();
+  for (const assignment of todayAssignments.results) {
+    const guardId = Number(assignment.guard_id);
+    if (blocked.has(guardId)) continue;
+    const atTarget = postId
+      ? Number(assignment.post_id) === postId
+      : Number(assignment.vehicle_id) === vehicleId;
+    if (atTarget) continue;
+    const list = sameDayGroups.get(guardId) || [];
+    list.push(assignment);
+    sameDayGroups.set(guardId, list);
+  }
+  const sameDayCandidates = [...sameDayGroups.entries()]
+    .map(([guardId, assignments]) => {
+      const first = assignments[0];
+      const compatibleRole = !vehicleId || !role || assignments.some((item) => String(item.role) === role);
+      return {
+        guardId,
+        name: String(first.guard_name),
+        registration: String(first.registration || ""),
+        assignmentIds: assignments.map((item) => Number(item.id)),
+        origins: [...new Set(assignments.map((item) => String(item.origin_label)))],
+        roles: [...new Set(assignments.map((item) => String(item.role || "guard")))],
+        startsAt: String(assignments[0].starts_at),
+        endsAt: String(assignments[assignments.length - 1].ends_at),
+        compatibleRole,
+      };
+    })
+    .sort((a, b) => Number(b.compatibleRole) - Number(a.compatibleRole) || a.name.localeCompare(b.name, "pt-BR"))
+    .slice(0, 8);
 
   const guardHeHours = new Map<number, number>();
   const guardLastHe = new Map<number, string | null>();
@@ -1033,6 +1080,7 @@ async function buildSuggestions(request: Request, date: string) {
       ...s,
       reasons: describeReasons(s.reasons, s),
     })),
+    sameDayCandidates,
     summary: {
       blocked: blocked.size,
       scheduledToday: scheduledToday.size,

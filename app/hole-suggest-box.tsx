@@ -17,6 +17,18 @@ type Suggested = {
   rank: number;
 };
 
+export type SameDayCandidate = {
+  guardId: number;
+  name: string;
+  registration: string;
+  assignmentIds: number[];
+  origins: string[];
+  roles: string[];
+  startsAt: string;
+  endsAt: string;
+  compatibleRole: boolean;
+};
+
 type State = {
   date: string;
   shift: string;
@@ -24,6 +36,7 @@ type State = {
   vehicleId: number | null;
   role: string | null;
   suggestions: Suggested[];
+  sameDayCandidates: SameDayCandidate[];
   summary?: {
     blocked: number;
     scheduledToday: number;
@@ -40,6 +53,7 @@ export function HoleSuggestBox({
   role,
   resourceLabel,
   onPick,
+  onRedeploy,
   onManual,
   onClose,
   busy,
@@ -52,6 +66,7 @@ export function HoleSuggestBox({
   role: string | null;
   resourceLabel: string;
   onPick: (guardId: number, guardName: string) => void | Promise<void>;
+  onRedeploy: (candidate: SameDayCandidate) => void | Promise<void>;
   onManual: () => void;
   onClose: () => void;
   busy: boolean;
@@ -61,6 +76,7 @@ export function HoleSuggestBox({
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedRedeployId, setSelectedRedeployId] = useState<number | null>(null);
   useEffect(() => {
     const controller = new AbortController();
     const params = new URLSearchParams({
@@ -100,6 +116,16 @@ export function HoleSuggestBox({
   const effectiveSelectedId = filtered.some((guard) => guard.id === selectedId)
     ? selectedId
     : (filtered[0]?.id ?? null);
+  const filteredSameDay = useMemo(() => {
+    const list = data?.sameDayCandidates || [];
+    if (!query.trim()) return list;
+    const q = query.toLowerCase();
+    return list.filter((candidate) =>
+      `${candidate.name} ${candidate.registration} ${candidate.origins.join(" ")}`
+        .toLowerCase()
+        .includes(q),
+    );
+  }, [data, query]);
 
   function confirmSuggestion(guard: Suggested) {
     return async () => {
@@ -170,6 +196,26 @@ export function HoleSuggestBox({
             </p>
           )}
           <div className="hole-suggest-results">
+            {filteredSameDay.length > 0 && (
+              <section className="hole-suggest-group redeploy-suggestions">
+                <b>Remanejar nesta escala</b>
+                <p>Move o período do GM de outro posto e marca automaticamente “Avisar remanejamento”.</p>
+                {filteredSameDay.slice(0, 5).map((candidate) => (
+                  <SameDayRow
+                    key={candidate.guardId}
+                    candidate={candidate}
+                    selected={selectedRedeployId === candidate.guardId}
+                    busy={busy}
+                    onSelect={() => setSelectedRedeployId(candidate.guardId)}
+                    onConfirm={() => onRedeploy(candidate)}
+                  />
+                ))}
+              </section>
+            )}
+            <section className="hole-suggest-group overtime-suggestions">
+              <b>Chamar GM para hora extra</b>
+              <p>Prioriza equipe do dia oposto e menor quantidade de HE confirmada.</p>
+            </section>
             {!filtered.length && (
               <p className="hole-suggest-empty">
                 Nenhum GM elegível para este furo com os filtros atuais. Use seleção manual.
@@ -217,6 +263,53 @@ export function HoleSuggestBox({
         <small>A sugestão nunca é aplicada sem confirmação.</small>
       </footer>}
     </div>
+  );
+}
+
+function SameDayRow({
+  candidate,
+  selected,
+  busy,
+  onSelect,
+  onConfirm,
+}: {
+  candidate: SameDayCandidate;
+  selected: boolean;
+  busy: boolean;
+  onSelect: () => void;
+  onConfirm: () => void | Promise<void>;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  return (
+    <article className={`hole-suggest-row same-day-row ${selected ? "is-selected" : ""}`}>
+      <button type="button" className="hole-suggest-row-main" onClick={onSelect}>
+        <div>
+          <strong>{candidate.name}</strong>
+          <span>{candidate.registration} · atualmente em {candidate.origins.join(" + ")}</span>
+          <em>{candidate.compatibleRole ? "Função compatível" : "Função será ajustada no destino"}</em>
+        </div>
+        <aside className="same-day-time">
+          <b>{candidate.startsAt.slice(11, 16)}–{candidate.endsAt.slice(11, 16)}</b>
+          <small>{candidate.assignmentIds.length} horários vinculados</small>
+        </aside>
+      </button>
+      {selected && (
+        <div className="hole-suggest-confirm redeploy-confirm">
+          <span>O local de origem ficará com uma nova pendência para conferência.</span>
+          <button
+            type="button"
+            className="save"
+            disabled={busy || confirming}
+            onClick={async () => {
+              setConfirming(true);
+              try { await onConfirm(); } finally { setConfirming(false); }
+            }}
+          >
+            {confirming ? "Remanejando…" : `Remanejar ${candidate.name}`}
+          </button>
+        </div>
+      )}
+    </article>
   );
 }
 

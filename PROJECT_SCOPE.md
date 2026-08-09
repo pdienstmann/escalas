@@ -129,6 +129,7 @@
 - Incluir “Sugerir GM para HE”. A primeira preferência será um GM da equipe/padrão do dia contrário que normalmente trabalhe no mesmo posto ou viatura e esteja de folga naquele dia. Depois, ordenar os demais elegíveis por menor quantidade de HE, maior intervalo desde a última HE e compatibilidade de função.
 - Antes de sugerir ou confirmar, excluir automaticamente quem estiver escalado, afastado, em férias, curso, licença, folga registrada, descanso incompatível ou com conflito de horário. A sugestão nunca será aplicada sem confirmação do escalante.
 - Permitir confirmar o GM sugerido em poucos passos, já marcando `HE`, função, horário e origem da sugestão; manter uma opção “Ver outros GMs” para seleção manual.
+- No mesmo painel do furo, oferecer também `Remanejar nesta escala`: listar GMs já trabalhando no período, mostrar claramente o posto/VTR de origem e mover o bloco diurno ou noturno após confirmação. O remanejamento deverá marcar automaticamente `Avisar remanejamento`, destacar o GM na escala e criar uma nova pendência visível no local de origem.
 - Tornar “Efetivo retirado automaticamente” compacto e agrupado por Reserva técnica, Folgas, Férias, Cursos, Licenças/atestados, Banco de horas e Trocas. Cada grupo terá contador e lista densa de nomes, preservando período e requerimento.
 - Padronizar durações de HE semanal em formato legível, como `2h` ou `2h30`, sem casas decimais desnecessárias. Aplicar o mesmo formato na escala, controle de HE e PDF.
 

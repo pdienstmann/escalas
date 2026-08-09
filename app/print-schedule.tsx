@@ -129,7 +129,7 @@ function PrintPage({
                           {visualStatus !== "normal" && (
                             <em>{visualStatus==="overtime"&&a.regular_ends_at?`HE após ${String(a.regular_ends_at).slice(11,16)}`:status(visualStatus)}</em>
                           )}
-                          {Number(a.is_reassigned)===1&&<em className="print-rem">REM</em>}
+                          {Number(a.is_reassigned)===1&&<em className="print-rem">AVISAR REM.</em>}
                           <small>
                             {assignmentDisplayInShift(a,data.date,s.id)}
                           </small>

@@ -21,7 +21,7 @@ import {
   shiftTimes,
   SHIFT_DEFS,
 } from "../lib/shift-rules";
-import { HoleSuggestBox } from "./hole-suggest-box";
+import { HoleSuggestBox, type SameDayCandidate } from "./hole-suggest-box";
 import {
   DragEvent,
   FormEvent,
@@ -317,6 +317,20 @@ export function LiveSchedule() {
       endsAt: t.end,
       status: "overtime",
       reassignmentNote: "Sugestão inteligente para preenchimento de furo",
+    });
+  }
+  async function confirmSameDayRedeployment(candidate: SameDayCandidate) {
+    if (!data || !holePick) return;
+    await postAssignment({
+      action: "redeploy_group",
+      assignmentIds: candidate.assignmentIds,
+      scheduleId: data.schedule.id,
+      postId: holePick.kind === "post" ? Number(holePick.resource.id) : null,
+      vehicleId: holePick.kind === "vehicle" ? Number(holePick.resource.id) : null,
+      role: holePick.role || (holePick.kind === "vehicle" ? "patrol" : "guard"),
+      reassignmentNote: `AVISAR REMANEJAMENTO: ${candidate.origins.join(" + ")} → ${
+        holePick.kind === "vehicle" ? holePick.resource.prefix : holePick.resource.name
+      }`,
     });
   }
   function openHoleSuggest(
@@ -806,6 +820,7 @@ export function LiveSchedule() {
             position={holePick.position}
             busy={saving}
             onPick={confirmHoleSuggestion}
+            onRedeploy={confirmSameDayRedeployment}
             onManual={jumpToManualEditor}
             onClose={() => setHolePick(null)}
           />
@@ -1087,7 +1102,7 @@ function Row({
                       {visualStatus==="overtime"&&a.regular_ends_at?`HE · após ${String(a.regular_ends_at).slice(11,16)}`:statusShort(visualStatus)}
                     </span>
                   )}
-                  {Number(a.is_reassigned)===1&&<span className="badge remanejamento">REM</span>}
+                  {Number(a.is_reassigned)===1&&<span className="badge remanejamento" title={String(a.reassignment_note||"Avisar sobre o remanejamento")}>AVISAR REM</span>}
                   <small>
                     {assignmentDisplayInShift(a,date,s.id)}
                   </small>

@@ -30,6 +30,7 @@
 .hole-suggest-group{display:grid;gap:5px;border-top:1px solid #e3eaf2;padding-top:8px;margin-top:4px}
 .hole-suggest-group.primary>b{color:#0b579b}
 .hole-suggest-group>b{color:#54708b;font-size:11px;letter-spacing:.04em;text-transform:uppercase}
+.hole-suggest-group>p{margin:0 0 3px;color:#6f8398;font-size:10px;line-height:1.35}.redeploy-suggestions{padding:9px;border:1px solid #f0ce7a;border-radius:8px;background:#fffaf0}.redeploy-suggestions>b{color:#8a5700}.same-day-row{border-color:#ead7a2}.same-day-row.is-selected{border-color:#d79a19;background:#fff7df}.same-day-time{display:grid;gap:3px;min-width:92px;text-align:right}.same-day-time b{font-size:11px;color:#714b08}.same-day-time small{font-size:9px;color:#88785d}.redeploy-confirm{border-top:1px solid #ead7a2;padding-top:8px}.redeploy-confirm .save{background:#bd7500}.overtime-suggestions{margin-top:10px;border-top:0;padding-top:0}.badge.remanejamento{white-space:nowrap}
 .hole-suggest-row{display:grid;gap:6px;border:1px solid #dde6ef;border-radius:6px;background:#fff}
 .hole-suggest-row.is-selected{border-color:#0871e1;background:#eaf3ff}
 .hole-suggest-row.is-primary{border-left:3px solid #0b579b}
