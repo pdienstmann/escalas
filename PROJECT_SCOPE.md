@@ -9,12 +9,13 @@
 - Movimentações: reserva técnica, folga, férias, curso, atestado/licença, banco de horas e troca, com requerimento associado.
 - Cadastros editáveis e histórico das alterações.
 
-## Padrões 12x36 — MVP de consulta e aplicação implementado
+## Padrões 12x36 — aplicação e primeira edição visual implementadas
 
 - Quatro equipes-base: dois padrões diurnos e dois padrões noturnos.
 - Padrão 1/Padrão 2, também apresentável como par/ímpar conforme o mês.
 - Tela para consultar a composição de cada padrão e aplicar o padrão correto em uma data.
-- Edição detalhada da composição dos padrões prevista para a próxima evolução.
+- Primeira edição visual implementada como `escala ideal`: composição agrupada por seções, postos e viaturas, busca, inclusão no próprio destino, edição/movimentação do GM e indicação de efetivo ainda sem posição.
+- Permanecem previstas comparação lado a lado, arrastar/soltar, validação visual de funções/furos e prévia completa antes de aplicar.
 - Aplicação automática do padrão correto ao criar/abrir a escala de uma data.
 - A escala gerada permanece editável para receber folgas, afastamentos, HE, banco de horas e demais ajustes do dia.
 
