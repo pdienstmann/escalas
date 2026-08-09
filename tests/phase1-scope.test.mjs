@@ -395,6 +395,8 @@ test("schedule edits reject stale versions and refresh the visible scale", () =>
   assert.match(api, /expectedUpdatedAt/);
   assert.match(api, /expectedUpdatedAts/);
   assert.match(api, /alterada por outra pessoa/);
+  assert.match(api, /an edit of an existing cell/);
+  assert.match(api, /duplicateRows/);
   assert.match(schedule, /expectedUpdatedAt: pick\.assignment\?\.updated_at/);
   assert.match(schedule, /expectedUpdatedAts/);
   assert.match(schedule, /r\.status === 409 && j\.conflict/);

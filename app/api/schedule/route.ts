@@ -547,7 +547,28 @@ async function upsertAssignment(
     end: string;
   },
 ) {
-  const id = Number(opts.id || 0);
+  let id = Number(opts.id || 0);
+  // The editor normally sends the assignment id.  Keep the operation safe if
+  // an older cached client loses that field: an edit of an existing cell must
+  // update the row already occupying it, never create a second GM card.
+  if (!id) {
+    const existing = await env.DB.prepare(
+      `SELECT id FROM assignments
+       WHERE schedule_id=? AND guard_id=? AND starts_at=?
+         AND COALESCE(post_id,0)=COALESCE(?,0)
+         AND COALESCE(vehicle_id,0)=COALESCE(?,0)
+       ORDER BY id LIMIT 1`,
+    )
+      .bind(
+        opts.scheduleId,
+        opts.guardId,
+        opts.start,
+        b.postId || null,
+        b.vehicleId || null,
+      )
+      .first<{ id: number }>();
+    if (existing) id = Number(existing.id);
+  }
   const before = id
     ? await env.DB.prepare(
         "SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id=? AND a.schedule_id=?",
@@ -616,6 +637,32 @@ async function upsertAssignment(
       )
       .run();
     assignmentId = Number(created.meta.last_row_id);
+  }
+  // A legacy client/database can contain an exact duplicate of the same
+  // guard/resource/start.  Once this row is saved, keep the canonical id and
+  // remove only exact duplicates; different shifts or destinations are kept.
+  const duplicateRows = await env.DB.prepare(
+    `SELECT id FROM assignments
+     WHERE schedule_id=? AND guard_id=? AND starts_at=?
+       AND COALESCE(post_id,0)=COALESCE(?,0)
+       AND COALESCE(vehicle_id,0)=COALESCE(?,0)
+       AND id!=?`,
+  )
+    .bind(
+      opts.scheduleId,
+      opts.guardId,
+      opts.start,
+      b.postId || null,
+      b.vehicleId || null,
+      assignmentId,
+    )
+    .all<{ id: number }>();
+  if (duplicateRows.results.length) {
+    await env.DB.batch(
+      duplicateRows.results.map((duplicate) =>
+        env.DB.prepare("DELETE FROM assignments WHERE id=?").bind(duplicate.id),
+      ),
+    );
   }
   const assignment = await env.DB.prepare(
     "SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id=?",
