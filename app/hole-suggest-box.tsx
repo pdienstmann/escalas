@@ -27,6 +27,7 @@ export type SameDayCandidate = {
   startsAt: string;
   endsAt: string;
   compatibleRole: boolean;
+  availableForRedeployment: boolean;
 };
 
 type State = {
@@ -126,6 +127,8 @@ export function HoleSuggestBox({
         .includes(q),
     );
   }, [data, query]);
+  const availableCandidates = filteredSameDay.filter((candidate) => candidate.availableForRedeployment);
+  const assignedCandidates = filteredSameDay.filter((candidate) => !candidate.availableForRedeployment);
 
   function confirmSuggestion(guard: Suggested) {
     return async () => {
@@ -196,11 +199,27 @@ export function HoleSuggestBox({
             </p>
           )}
           <div className="hole-suggest-results">
-            {filteredSameDay.length > 0 && (
+            {availableCandidates.length > 0 && (
+              <section className="hole-suggest-group redeploy-suggestions available-suggestions">
+                <b>À disposição para escala</b>
+                <p>Estes GMs já estão aguardando destino e podem ser colocados diretamente neste local.</p>
+                {availableCandidates.slice(0, 6).map((candidate) => (
+                  <SameDayRow
+                    key={candidate.guardId}
+                    candidate={candidate}
+                    selected={selectedRedeployId === candidate.guardId}
+                    busy={busy}
+                    onSelect={() => setSelectedRedeployId(candidate.guardId)}
+                    onConfirm={() => onRedeploy(candidate)}
+                  />
+                ))}
+              </section>
+            )}
+            {assignedCandidates.length > 0 && (
               <section className="hole-suggest-group redeploy-suggestions">
                 <b>Remanejar nesta escala</b>
                 <p>Move o período do GM de outro posto e marca automaticamente “Avisar remanejamento”.</p>
-                {filteredSameDay.slice(0, 5).map((candidate) => (
+                {assignedCandidates.slice(0, 5).map((candidate) => (
                   <SameDayRow
                     key={candidate.guardId}
                     candidate={candidate}
@@ -295,7 +314,7 @@ function SameDayRow({
       </button>
       {selected && (
         <div className="hole-suggest-confirm redeploy-confirm">
-          <span>O local de origem ficará com uma nova pendência para conferência.</span>
+          <span>{candidate.availableForRedeployment ? "O GM sairá da bandeja À disposição e ocupará este local." : "O local de origem ficará com uma nova pendência para conferência."}</span>
           <button
             type="button"
             className="save"
@@ -305,7 +324,7 @@ function SameDayRow({
               try { await onConfirm(); } finally { setConfirming(false); }
             }}
           >
-            {confirming ? "Remanejando…" : `Remanejar ${candidate.name}`}
+            {confirming ? "Movendo…" : candidate.availableForRedeployment ? `Escalar ${candidate.name} aqui` : `Remanejar ${candidate.name}`}
           </button>
         </div>
       )}

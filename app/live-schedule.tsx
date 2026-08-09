@@ -110,7 +110,7 @@ export function LiveSchedule() {
     [message, setMessage] = useState(""),
     [query, setQuery] = useState(()=>readUiSetting("query")||""),
     [view, setView] = useState<ViewFilter>(()=>{const value=readUiSetting("view");return value&&["all","day","night","holes","redeploy"].includes(value)?value as ViewFilter:"all"}),
-    [density, setDensity] = useState<ScheduleDensity>(()=>readUiSetting("density")==="detailed"?"detailed":"summary"),
+    [density, setDensity] = useState<ScheduleDensity>(()=>readUiSetting("density-v2")==="summary"?"summary":"detailed"),
     [movementEdit, setMovementEdit] = useState<MovementEdit | null>(null),
     [swapPick,setSwapPick]=useState<SwapPick|null>(null),
     [recentAssignmentIds,setRecentAssignmentIds]=useState<number[]>([]),
@@ -144,7 +144,7 @@ export function LiveSchedule() {
     void load();
   }, [load]);
   useEffect(()=>{if(data)writeScheduleCache(data)},[data]);
-  useEffect(()=>{writeUiSetting("query",query);writeUiSetting("view",view);writeUiSetting("density",density)},[density,query,view]);
+  useEffect(()=>{writeUiSetting("query",query);writeUiSetting("view",view);writeUiSetting("density-v2",density)},[density,query,view]);
   useEffect(()=>{
     if(typeof window==="undefined"||data?.date!==date)return;
     const key=`gmnh:scroll:${date}`,saved=Number(readUiSetting(key)||0);
@@ -720,8 +720,8 @@ export function LiveSchedule() {
           <button type="button" className={view==="holes"||view==="redeploy"?"active":""} onClick={()=>jump("pending")}>Pendências</button>
         </div>
         <div className="seg density-seg" role="group" aria-label="Visualização dos turnos">
-          <button type="button" className={density==="summary"?"active":""} onClick={()=>setDensity("summary")}>Resumida</button>
-          <button type="button" className={density==="detailed"?"active":""} onClick={()=>setDensity("detailed")}>4 turnos</button>
+          <button type="button" className={density==="detailed"?"active":""} onClick={()=>setDensity("detailed")}>4 turnos lado a lado</button>
+          <button type="button" className={density==="summary"?"active":""} onClick={()=>setDensity("summary")}>Agrupar dia/noite</button>
         </div>
         <div className="schedule-add-menu">
           <button type="button" className="schedule-add-trigger" aria-expanded={addMenuOpen} onClick={()=>setAddMenuOpen(value=>!value)}>＋ Adicionar</button>

@@ -1054,7 +1054,12 @@ async function buildSuggestions(request: Request, date: string) {
       .prepare(
         `SELECT a.*,g.name guard_name,g.registration,
                 COALESCE(p.name,v.prefix,'Sem destino') origin_label,
-                CASE WHEN a.post_id IS NOT NULL THEN 'post' WHEN a.vehicle_id IS NOT NULL THEN 'vehicle' ELSE 'pending' END origin_kind
+                CASE WHEN a.post_id IS NOT NULL THEN 'post' WHEN a.vehicle_id IS NOT NULL THEN 'vehicle' ELSE 'pending' END origin_kind,
+                CASE WHEN (a.post_id IS NULL AND a.vehicle_id IS NULL)
+                  OR EXISTS (SELECT 1 FROM schedule_resource_exclusions e WHERE e.schedule_id=a.schedule_id AND e.resource_kind='post' AND e.resource_id=a.post_id)
+                  OR EXISTS (SELECT 1 FROM schedule_resource_exclusions e WHERE e.schedule_id=a.schedule_id AND e.resource_kind='vehicle' AND e.resource_id=a.vehicle_id)
+                  OR EXISTS (SELECT 1 FROM vehicle_outages o WHERE o.vehicle_id=a.vehicle_id AND o.active=1 AND o.starts_on<=? AND (o.ends_on IS NULL OR o.ends_on>=?))
+                  THEN 1 ELSE 0 END awaiting_redeploy
          FROM assignments a
          JOIN guards g ON g.id=a.guard_id
          LEFT JOIN posts p ON p.id=a.post_id
@@ -1062,7 +1067,7 @@ async function buildSuggestions(request: Request, date: string) {
          WHERE a.schedule_id=? AND a.shift IN (?,?) AND COALESCE(a.work_kind,'shift')!='overtime_extension'
          ORDER BY g.name,a.starts_at`,
       )
-      .bind(scheduleId, ...periodShiftIds)
+      .bind(date, date, scheduleId, ...periodShiftIds)
       .all<Record<string, unknown>>(),
     env.DB
       .prepare(
@@ -1127,6 +1132,7 @@ async function buildSuggestions(request: Request, date: string) {
         startsAt: String(assignments[0].starts_at),
         endsAt: String(assignments[assignments.length - 1].ends_at),
         compatibleRole,
+        availableForRedeployment: assignments.some((item) => Number(item.awaiting_redeploy) === 1),
       };
     })
     .sort((a, b) => Number(b.compatibleRole) - Number(a.compatibleRole) || a.name.localeCompare(b.name, "pt-BR"))
