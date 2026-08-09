@@ -38,7 +38,7 @@ export async function GET(request: Request) {
         "SELECT id,name,group_name FROM posts WHERE active=1 ORDER BY sort_order,name",
       ).all(),
       env.DB.prepare(
-        "SELECT id,prefix,zone FROM vehicles WHERE active=1 ORDER BY prefix",
+        "SELECT id,prefix,type,zone FROM vehicles WHERE active=1 ORDER BY prefix",
       ).all(),
       resolvePatternCodes(env.DB, previewDate),
       env.DB.prepare("SELECT w.*,g.name guard_name,g.platoon,p.name post_name,p.group_name,v.prefix,v.zone FROM weekly_slots w JOIN guards g ON g.id=w.guard_id LEFT JOIN posts p ON p.id=w.post_id LEFT JOIN vehicles v ON v.id=w.vehicle_id WHERE w.active=1 ORDER BY p.group_name,p.name,v.prefix,g.name").all(),
@@ -95,6 +95,46 @@ export async function POST(request: Request) {
       const after = await env.DB.prepare("SELECT * FROM pattern_slots WHERE id=?").bind(created.meta.last_row_id).first();
       await writeAudit(request,{action:"create",entityType:"pattern_slot",entityId:Number(created.meta.last_row_id),summary:"Adicionou uma posição ao padrão 12x36",after:after as Record<string,unknown>,undoable:true});
       return Response.json({ ok: true });
+    }
+    if (body.action === "add_post") {
+      const name = String(body.name || "").trim();
+      const groupName = String(body.groupName || "POSTOS DIVERSOS").trim() || "POSTOS DIVERSOS";
+      const sortOrder = Number.isFinite(Number(body.sortOrder)) ? Math.max(0, Number(body.sortOrder)) : 99;
+      if (!name) return Response.json({ error: "Informe o nome do posto." }, { status: 400 });
+      const duplicate = await env.DB.prepare("SELECT id FROM posts WHERE active=1 AND lower(name)=lower(?) LIMIT 1").bind(name).first();
+      if (duplicate) return Response.json({ error: "Já existe um posto ativo com esse nome." }, { status: 409 });
+      const created = await env.DB.prepare("INSERT INTO posts (name,group_name,sort_order) VALUES (?,?,?)")
+        .bind(name, groupName, sortOrder)
+        .run();
+      const after = await env.DB.prepare("SELECT * FROM posts WHERE id=?").bind(created.meta.last_row_id).first();
+      await writeAudit(request, { action: "create", entityType: "post", entityId: Number(created.meta.last_row_id), summary: `Adicionou o posto ${name} a partir dos padrões`, after: after as Record<string, unknown>, undoable: true });
+      return Response.json({ ok: true, message: `Posto ${name} adicionado.`, resource: after });
+    }
+    if (body.action === "add_vehicle") {
+      const prefix = String(body.prefix || "").trim();
+      const type = String(body.type || "sedan").trim();
+      const zone = String(body.zone || "").trim() || null;
+      const allowedTypes = new Set(["sedan", "pickup", "van", "moto", "suv", "other"]);
+      if (!prefix) return Response.json({ error: "Informe o prefixo da viatura." }, { status: 400 });
+      if (!allowedTypes.has(type)) return Response.json({ error: "Tipo de viatura inválido." }, { status: 400 });
+      const existing = await env.DB.prepare("SELECT id,active FROM vehicles WHERE lower(prefix)=lower(?) LIMIT 1").bind(prefix).first<{ id: number; active: number }>();
+      const duplicate = existing?.active ? existing : null;
+      if (duplicate) return Response.json({ error: "Já existe uma viatura ativa com esse prefixo." }, { status: 409 });
+      if (existing) {
+        const before = await env.DB.prepare("SELECT * FROM vehicles WHERE id=?").bind(existing.id).first<Record<string, unknown>>();
+        await env.DB.prepare("UPDATE vehicles SET type=?,zone=?,active=1,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+          .bind(type, zone, existing.id)
+          .run();
+        const after = await env.DB.prepare("SELECT * FROM vehicles WHERE id=?").bind(existing.id).first();
+        await writeAudit(request, { action: "update", entityType: "vehicle", entityId: existing.id, summary: `Reativou a viatura ${prefix} a partir dos padrÃµes`, before, after: after as Record<string, unknown>, undoable: true });
+        return Response.json({ ok: true, message: `${prefix} reativada e atualizada.`, resource: after });
+      }
+      const created = await env.DB.prepare("INSERT INTO vehicles (prefix,type,zone) VALUES (?,?,?)")
+        .bind(prefix, type, zone)
+        .run();
+      const after = await env.DB.prepare("SELECT * FROM vehicles WHERE id=?").bind(created.meta.last_row_id).first();
+      await writeAudit(request, { action: "create", entityType: "vehicle", entityId: Number(created.meta.last_row_id), summary: `Adicionou a viatura ${prefix} a partir dos padrões`, after: after as Record<string, unknown>, undoable: true });
+      return Response.json({ ok: true, message: `${prefix} adicionada.`, resource: after });
     }
     if (body.action === "delete_slot") {
       const before = await env.DB.prepare("SELECT * FROM pattern_slots WHERE id=?").bind(body.id).first<Record<string,unknown>>();

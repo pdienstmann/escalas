@@ -120,6 +120,12 @@ export function PatternsDashboard() {
     }
   }
 
+  async function addResource(body: Record<string, unknown>) {
+    const ok = await action(body);
+    if (ok) setShowEmpty(true);
+    return ok;
+  }
+
   async function moveSlot(slotId: number, patternId: number, destination: string) {
     const slot = data?.slots.find((item) => Number(item.id) === slotId);
     if (!slot || busy) return;
@@ -251,6 +257,7 @@ export function PatternsDashboard() {
                   onAdd={setAddDestination}
                   onSave={saveSlot}
                   onAddSlot={addSlot}
+                  onAddResource={addResource}
                   onDelete={(slot) => confirm(`Remover ${slot.guard_name} deste padrão?`) && void action({ action: "delete_slot", id: slot.id })}
                   onMove={moveSlot}
                 />
@@ -267,7 +274,7 @@ export function PatternsDashboard() {
   );
 }
 
-function PatternBoard({ pattern, data, search, showEmpty, busy, memberEditing, addDestination, onEdit, onAdd, onSave, onAddSlot, onDelete, onMove }: {
+function PatternBoard({ pattern, data, search, showEmpty, busy, memberEditing, addDestination, onEdit, onAdd, onSave, onAddSlot, onAddResource, onDelete, onMove }: {
   pattern: Rec;
   data: Data;
   search: string;
@@ -279,9 +286,11 @@ function PatternBoard({ pattern, data, search, showEmpty, busy, memberEditing, a
   onAdd: (key: string) => void;
   onSave: (event: FormEvent<HTMLFormElement>, id: number) => void;
   onAddSlot: (event: FormEvent<HTMLFormElement>, patternId: number) => void;
+  onAddResource: (body: Record<string, unknown>) => Promise<boolean>;
   onDelete: (slot: Rec) => void;
   onMove: (slotId: number, patternId: number, destination: string) => void;
 }) {
+  const [resourceEditing, setResourceEditing] = useState<{ kind: "post" | "vehicle"; section: string } | null>(null);
   const patternId = Number(pattern.id);
   const members = data.slots.filter((slot) => Number(slot.pattern_id) === patternId);
   const resources = buildResources(data, members, search, showEmpty);
@@ -292,9 +301,11 @@ function PatternBoard({ pattern, data, search, showEmpty, busy, memberEditing, a
   return (
     <section className="pattern-board">
       <header><div><span className={`pattern-code ${pattern.period}`}>{pattern.code}</span><div><b>{pattern.name}</b><small>{members.length} GMs posicionados</small></div></div><span className={issues.length ? "pattern-health warning" : "pattern-health ok"}>{issues.length ? `${issues.length} pendência${issues.length > 1 ? "s" : ""}` : "Composição válida"}</span></header>
+      <div className="pattern-resource-toolbar"><span><b>Recursos da composição</b><small>Crie um destino e depois use “Adicionar GM neste local”.</small></span><div><button type="button" onClick={() => setResourceEditing({ kind: "post", section: "POSTOS DIVERSOS" })}>＋ Adicionar posto</button><button type="button" onClick={() => setResourceEditing({ kind: "vehicle", section: "VIATURAS E ZONAS" })}>＋ Viatura / zona</button></div></div>
+      {resourceEditing && <PatternResourceForm kind={resourceEditing.kind} defaultGroup={resourceEditing.section} busy={busy} onCancel={() => setResourceEditing(null)} onSubmit={async (body) => { const ok = await onAddResource(body); if (ok) setResourceEditing(null); return ok; }} />}
       {issues.length > 0 && <details className="pattern-issues"><summary>Conferir pendências</summary>{issues.map((issue, index) => <p key={`${issue.kind}-${index}`}>{issue.message}</p>)}</details>}
       <div className="pattern-map">
-        {sections.map((section) => <section className="pattern-map-section" key={section}><header><b>{section}</b><span>{resources.filter((resource) => resource.section === section).reduce((sum, resource) => sum + resource.members.length, 0)} GMs</span></header><div className="pattern-resource-grid">{resources.filter((resource) => resource.section === section).map((resource) => {
+        {sections.map((section) => <section className="pattern-map-section" key={section}><header><div><b>{section}</b><span>{resources.filter((resource) => resource.section === section).reduce((sum, resource) => sum + resource.members.length, 0)} GMs</span></div><div className="pattern-section-actions">{section !== "VIATURAS E ZONAS" && <button type="button" onClick={() => setResourceEditing({ kind: "post", section })}>＋ Posto</button>}{section === "VIATURAS E ZONAS" && <button type="button" onClick={() => setResourceEditing({ kind: "vehicle", section })}>＋ VTR / zona</button>}</div></header><div className="pattern-resource-grid">{resources.filter((resource) => resource.section === section).map((resource) => {
           const resourceIssues = issuesForResource(issues, resource.key);
           const addKey = `${addKeyPrefix}${resource.key}`;
           return <article className={`pattern-resource kind-${resource.kind} ${resourceIssues.length ? "has-warning" : ""}`} key={resource.key} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; }} onDrop={(event) => dropPatternMember(event, patternId, resource.key, onMove)}>
@@ -308,6 +319,19 @@ function PatternBoard({ pattern, data, search, showEmpty, busy, memberEditing, a
       </div>
     </section>
   );
+}
+
+function PatternResourceForm({ kind, defaultGroup, busy, onCancel, onSubmit }: { kind: "post" | "vehicle"; defaultGroup: string; busy: boolean; onCancel: () => void; onSubmit: (body: Record<string, unknown>) => Promise<boolean> }) {
+  async function send(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const values = Object.fromEntries(new FormData(event.currentTarget));
+    await onSubmit({ ...values, action: kind === "post" ? "add_post" : "add_vehicle" });
+  }
+  return <form className="pattern-resource-create" onSubmit={(event) => void send(event)}>
+    <header><div><b>{kind === "post" ? "Novo posto na composição" : "Nova viatura e zona"}</b><small>O cadastro ficará disponível em todos os padrões e na escala diária.</small></div><button type="button" onClick={onCancel} aria-label="Cancelar criação">×</button></header>
+    {kind === "post" ? <div className="pattern-resource-create-fields"><label>Nome do posto<input name="name" placeholder="Ex.: Rodoviária" required /></label><label>Seção<select name="groupName" defaultValue={defaultGroup}><option value={defaultGroup}>{defaultGroup}</option><option value="SEDE DA GM">SEDE DA GM</option><option value="POSTOS FIXOS">POSTOS FIXOS</option><option value="PRAÇAS E PARQUES">PRAÇAS E PARQUES</option><option value="POSTOS DIVERSOS">POSTOS DIVERSOS</option><option value="ÁREA DA SAÚDE">ÁREA DA SAÚDE</option></select></label><label>Ordem<input name="sortOrder" type="number" min="0" defaultValue="99" /></label></div> : <div className="pattern-resource-create-fields"><label>Prefixo<input name="prefix" placeholder="VTR 0000" required /></label><label>Tipo<select name="type" defaultValue="sedan"><option value="sedan">Sedan</option><option value="pickup">Caminhonete</option><option value="van">Furgão</option><option value="moto">Moto</option><option value="suv">SUV</option><option value="other">Outro</option></select></label><label>Zona de atuação<input name="zone" placeholder="Ex.: Zona B3 Dia" /></label></div>}
+    <footer><button type="button" onClick={onCancel}>Cancelar</button><button className="save" disabled={busy}>{busy ? "Salvando…" : kind === "post" ? "Adicionar posto" : "Adicionar viatura"}</button></footer>
+  </form>;
 }
 
 function PatternPreview({ data, date, dayCode, nightCode, busy, onClose, onApply }: { data: Data; date: string; dayCode: string; nightCode: string; busy: boolean; onClose: () => void; onApply: () => void }) {

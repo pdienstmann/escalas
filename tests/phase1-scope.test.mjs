@@ -372,6 +372,22 @@ test("monthly leave import can register an unknown GM during the review", () => 
   assert.match(dashboard, /Será cadastrado após informar a matrícula/);
 });
 
+test("pattern editor can create contextual posts and vehicles without duplicate fleet rows", () => {
+  const api = readFileSync(resolve("app/api/patterns/route.ts"), "utf8");
+  const dashboard = readFileSync(resolve("app/patterns-dashboard.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/pattern-resource-actions.css"), "utf8");
+  assert.match(api, /body\.action === "add_post"/);
+  assert.match(api, /body\.action === "add_vehicle"/);
+  assert.match(api, /SELECT id,active FROM vehicles/);
+  assert.match(api, /UPDATE vehicles SET type=\?,zone=\?,active=1/);
+  assert.match(dashboard, /PatternResourceForm/);
+  assert.match(dashboard, /onAddResource/);
+  assert.match(dashboard, /Adicionar posto/);
+  assert.match(dashboard, /Viatura \/ zona/);
+  assert.match(dashboard, /Adicionar GM neste local/);
+  assert.match(styles, /@media\(max-width:700px\)/);
+});
+
 test("operation redeployment preserves and restores every source assignment", () => {
   const migration = readFileSync(resolve("drizzle/0013_operation_redeployments.sql"), "utf8");
   const api = readFileSync(resolve("app/api/operations/route.ts"), "utf8");
