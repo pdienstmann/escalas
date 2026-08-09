@@ -325,6 +325,13 @@ async function ensureBase(date: string) {
       UNIQUE(schedule_id,resource_kind,resource_id)
     )`,
   ).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS vehicle_return_reconciliations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    outage_id INTEGER NOT NULL REFERENCES vehicle_outages(id),vehicle_id INTEGER NOT NULL REFERENCES vehicles(id),
+    schedule_id INTEGER NOT NULL REFERENCES schedules(id),return_on TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',
+    linked_assignments INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(outage_id,schedule_id)
+  )`).run();
   await ensureCatalog();
   await ensureDemoMovements();
   await ensureSections();
@@ -374,11 +381,11 @@ export async function GET(request: Request) {
         "SELECT id,name,group_name FROM posts WHERE active=1 AND NOT EXISTS (SELECT 1 FROM schedule_resource_exclusions e WHERE e.schedule_id=? AND e.resource_kind='post' AND e.resource_id=posts.id) ORDER BY sort_order,name",
       ).bind(schedule?.id).all(),
       env.DB.prepare(
-        "SELECT id,prefix,type,zone FROM vehicles v WHERE active=1 AND NOT EXISTS (SELECT 1 FROM vehicle_outages o WHERE o.vehicle_id=v.id AND o.active=1 AND o.starts_on<=? AND (o.ends_on IS NULL OR o.ends_on>=?)) AND NOT EXISTS (SELECT 1 FROM schedule_resource_exclusions e WHERE e.schedule_id=? AND e.resource_kind='vehicle' AND e.resource_id=v.id) ORDER BY prefix",
-      ).bind(date,date,schedule?.id).all(),
+        "SELECT id,prefix,type,zone FROM vehicles v WHERE active=1 AND NOT EXISTS (SELECT 1 FROM vehicle_outages o WHERE o.vehicle_id=v.id AND o.active=1 AND o.starts_on<=? AND (o.ends_on IS NULL OR o.ends_on>=?)) AND NOT EXISTS (SELECT 1 FROM schedule_resource_exclusions e WHERE e.schedule_id=? AND e.resource_kind='vehicle' AND e.resource_id=v.id) AND NOT EXISTS (SELECT 1 FROM vehicle_return_reconciliations r WHERE r.schedule_id=? AND r.vehicle_id=v.id AND r.status IN ('pending','kept')) ORDER BY prefix",
+      ).bind(date,date,schedule?.id,schedule?.id).all(),
       env.DB.prepare(
-        "SELECT id,prefix,type,zone FROM vehicles v WHERE active=1 AND NOT EXISTS (SELECT 1 FROM schedule_resource_exclusions e WHERE e.schedule_id=? AND e.resource_kind='vehicle' AND e.resource_id=v.id) ORDER BY prefix",
-      ).bind(schedule?.id).all(),
+        "SELECT id,prefix,type,zone FROM vehicles v WHERE active=1 AND NOT EXISTS (SELECT 1 FROM schedule_resource_exclusions e WHERE e.schedule_id=? AND e.resource_kind='vehicle' AND e.resource_id=v.id) AND NOT EXISTS (SELECT 1 FROM vehicle_return_reconciliations r WHERE r.schedule_id=? AND r.vehicle_id=v.id AND r.status IN ('pending','kept')) ORDER BY prefix",
+      ).bind(schedule?.id,schedule?.id).all(),
       env.DB.prepare(
         "SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.schedule_id=? ORDER BY a.shift,a.role,g.name",
       )

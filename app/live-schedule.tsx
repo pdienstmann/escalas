@@ -781,11 +781,12 @@ export function LiveSchedule() {
             <tbody>
               {resources.map(({ kind, r, section }, index) => {
                 const first = index === 0 || resources[index - 1].section !== section;
+                const last = index === resources.length - 1 || resources[index + 1].section !== section;
                 const isCollapsed = Boolean(collapsed[section]);
                 if (isCollapsed && !first) return null;
                 return (
+                <Fragment key={`${kind}-${r.id}`}>
                 <Row
-                  key={`${kind}-${r.id}`}
                   date={data.date}
                   kind={kind}
                   resource={r}
@@ -834,6 +835,16 @@ export function LiveSchedule() {
                       : Number(assignment.vehicle_id)===Number(resource.id)),
                   })}
                 />
+                {kind === "vehicle" && last && !isCollapsed && (
+                  <tr className="vehicle-section-footer">
+                    <td colSpan={density === "detailed" ? visibleShifts.length + 1 : (view === "all" ? 3 : 2)}>
+                      <button type="button" onClick={()=>setResourceDialog({kind:"vehicle",initialMode:"existing",initialShift:"2"})}>
+                        ＋ Adicionar viatura à escala
+                      </button>
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               );
               })}
             </tbody>

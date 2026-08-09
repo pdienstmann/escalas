@@ -91,14 +91,70 @@ async function ensureSections(){
   await env.DB.batch(commands);
 }
 
+async function ensureFleetReturnTables(){
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS vehicle_return_reconciliations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    outage_id INTEGER NOT NULL REFERENCES vehicle_outages(id),
+    vehicle_id INTEGER NOT NULL REFERENCES vehicles(id),
+    schedule_id INTEGER NOT NULL REFERENCES schedules(id),
+    return_on TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    linked_assignments INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(outage_id,schedule_id)
+  )`).run();
+}
+
+async function vehicleReturnImpact(outageId:number,returnOn:string){
+  const outage=await env.DB.prepare("SELECT o.*,v.prefix FROM vehicle_outages o JOIN vehicles v ON v.id=o.vehicle_id WHERE o.id=? AND o.active=1").bind(outageId).first<Record<string,unknown>>();
+  if(!outage)return{outage:null,impacts:[] as Record<string,unknown>[]};
+  const impacts=(await env.DB.prepare(`SELECT s.id schedule_id,s.date,s.status,
+      (SELECT COUNT(*) FROM assignments a WHERE a.schedule_id=s.id AND a.vehicle_id=?) linked_assignments,
+      EXISTS(SELECT 1 FROM schedule_resource_exclusions e WHERE e.schedule_id=s.id AND e.resource_kind='vehicle' AND e.resource_id=?) explicitly_removed
+    FROM schedules s
+    WHERE s.date>=? AND (
+      EXISTS(SELECT 1 FROM assignments a WHERE a.schedule_id=s.id AND a.vehicle_id=?)
+      OR EXISTS(SELECT 1 FROM schedule_patterns sp JOIN pattern_slots ps ON ps.pattern_id IN (sp.day_pattern_id,sp.night_pattern_id) WHERE sp.schedule_id=s.id AND ps.vehicle_id=?)
+      OR EXISTS(SELECT 1 FROM weekly_slots w WHERE w.vehicle_id=? AND w.active=1 AND instr(','||w.weekdays||',',','||CAST(strftime('%w',s.date) AS TEXT)||',')>0)
+    ) ORDER BY s.date`).bind(outage.vehicle_id,outage.vehicle_id,returnOn,outage.vehicle_id,outage.vehicle_id,outage.vehicle_id).all<Record<string,unknown>>()).results;
+  return{outage,impacts:impacts.map(item=>({...item,automatic:item.status==="draft"&&Number(item.linked_assignments)>0&&Number(item.explicitly_removed)===0}))};
+}
+
+function previousDate(date:string){const value=new Date(`${date}T12:00:00Z`);value.setUTCDate(value.getUTCDate()-1);return value.toISOString().slice(0,10)}
+
+function assignmentTimes(date:string,shift:string){
+  const values:Record<string,[string,string]>={"2":["07:00","13:00"],"3":["13:00","19:00"],"4":["19:00","01:00"],"1":["01:00","07:00"]};
+  const [start,end]=values[shift];const next=new Date(`${date}T12:00:00Z`);next.setUTCDate(next.getUTCDate()+1);
+  return{start:`${date}T${start}`,end:`${shift==="4"?next.toISOString().slice(0,10):date}T${end}`};
+}
+
+async function restoreVehiclePatternCrew(scheduleId:number,date:string,vehicleId:number){
+  const slots=(await env.DB.prepare(`SELECT ps.guard_id,ps.role,p.period FROM schedule_patterns sp
+    JOIN shift_patterns p ON p.id IN (sp.day_pattern_id,sp.night_pattern_id)
+    JOIN pattern_slots ps ON ps.pattern_id=p.id
+    WHERE sp.schedule_id=? AND ps.vehicle_id=?`).bind(scheduleId,vehicleId).all<Record<string,unknown>>()).results;
+  const statements:D1PreparedStatement[]=[];
+  for(const slot of slots)for(const shift of String(slot.period)==="day"?["2","3"]:["4","1"]){
+    const interval=assignmentTimes(date,shift);
+    statements.push(env.DB.prepare(`INSERT INTO assignments (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,status,is_reassigned,reassignment_note)
+      VALUES (?,?,NULL,?,?,?,?,?,'normal',0,NULL)
+      ON CONFLICT(schedule_id,guard_id,starts_at) DO UPDATE SET post_id=NULL,vehicle_id=excluded.vehicle_id,shift=excluded.shift,role=excluded.role,ends_at=excluded.ends_at,is_reassigned=0,reassignment_note=NULL,updated_at=CURRENT_TIMESTAMP`)
+      .bind(scheduleId,slot.guard_id,vehicleId,shift,slot.role,interval.start,interval.end));
+  }
+  if(statements.length)await env.DB.batch(statements);
+  return statements.length;
+}
+
 export async function GET(request: Request) {
   if (!permitted(request))
     return Response.json({ error: "Não autorizado" }, { status: 401 });
   await seed();
   await syncConfirmedLeaves();
   await ensureSections();
+  await ensureFleetReturnTables();
   const requestedDate = new URL(request.url).searchParams.get("date") || todayScheduleDate();
-  const [guards, posts, vehicles, movements, campaign, days, choices, vehicleOutages, sections, vehicleCrews] =
+  const [guards, posts, vehicles, movements, campaign, days, choices, vehicleOutages, sections, vehicleCrews, vehicleReturnImpacts] =
     await Promise.all([
       env.DB.prepare(
         "SELECT * FROM guards WHERE active = 1 ORDER BY name",
@@ -131,6 +187,9 @@ export async function GET(request: Request) {
          WHERE s.date=? AND a.vehicle_id IS NOT NULL
          GROUP BY a.vehicle_id`,
       ).bind(requestedDate).all(),
+      env.DB.prepare(`SELECT r.*,s.date schedule_date,s.status schedule_status,v.prefix
+        FROM vehicle_return_reconciliations r JOIN schedules s ON s.id=r.schedule_id JOIN vehicles v ON v.id=r.vehicle_id
+        WHERE r.status='pending' ORDER BY s.date,v.prefix`).all(),
     ]);
   return Response.json({
     guards: guards.results,
@@ -143,6 +202,7 @@ export async function GET(request: Request) {
     vehicleOutages: vehicleOutages.results,
     vehicleCrews: vehicleCrews.results,
     sections: sections.results,
+    vehicleReturnImpacts: vehicleReturnImpacts.results,
   });
 }
 
@@ -150,6 +210,7 @@ export async function POST(request: Request) {
   if (!permitted(request))
     return Response.json({ error: "Não autorizado" }, { status: 401 });
   const body = (await request.json()) as Record<string, string | number>;
+  await ensureFleetReturnTables();
   try {
     if (body.action === "guard_import") {
       const rows = ((body as unknown as {rows?:Array<{registration?:string;name?:string;platoon?:string;baseShift?:string}>}).rows || []).slice(0,500).filter(row=>row.registration?.trim()&&row.name?.trim());
@@ -227,6 +288,55 @@ export async function POST(request: Request) {
       ).bind(vehicleId, endsOn || "9999-12-31", startsOn, startsOn, endsOn, endsOn || "9999-12-31").run();
       await writeAudit(request,{action:"create",entityType:"vehicle_outage",entityId:Number(created.meta.last_row_id),summary:`Registrou ${after?.prefix} em FA`,after:after as Record<string,unknown>,undoable:true});
       return Response.json({ok:true,message:`${after?.prefix} em FA. GMs mantidos à disposição para remanejamento.`});
+    } else if (body.action === "vehicle_outage_return_preview") {
+      const outageId=Number(body.id),returnOn=String(body.returnOn||"");
+      if(!outageId||!/^\d{4}-\d{2}-\d{2}$/.test(returnOn))return Response.json({error:"Informe a data de retorno."},{status:400});
+      const result=await vehicleReturnImpact(outageId,returnOn);
+      if(!result.outage)return Response.json({error:"Registro de FA não encontrado."},{status:404});
+      if(returnOn<String(result.outage.starts_on))return Response.json({error:"O retorno não pode ser anterior ao início do FA."},{status:400});
+      return Response.json({ok:true,...result});
+    } else if (body.action === "vehicle_outage_return") {
+      const outageId=Number(body.id),returnOn=String(body.returnOn||"");
+      if(!outageId||!/^\d{4}-\d{2}-\d{2}$/.test(returnOn))return Response.json({error:"Informe a data de retorno."},{status:400});
+      const {outage,impacts}=await vehicleReturnImpact(outageId,returnOn);
+      if(!outage)return Response.json({error:"Registro de FA não encontrado."},{status:404});
+      if(returnOn<String(outage.starts_on))return Response.json({error:"O retorno não pode ser anterior ao início do FA."},{status:400});
+      const before={...outage};
+      await env.DB.prepare("UPDATE vehicle_outages SET ends_on=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(previousDate(returnOn),outageId).run();
+      const statements:D1PreparedStatement[]=[];
+      let automatic=0,pending=0;
+      for(const impact of impacts){
+        const safe=Boolean(impact.automatic),status=safe?"restored":"pending";
+        if(safe)automatic++;else pending++;
+        statements.push(env.DB.prepare(`INSERT INTO vehicle_return_reconciliations (outage_id,vehicle_id,schedule_id,return_on,status,linked_assignments)
+          VALUES (?,?,?,?,?,?) ON CONFLICT(outage_id,schedule_id) DO UPDATE SET return_on=excluded.return_on,status=excluded.status,linked_assignments=excluded.linked_assignments,updated_at=CURRENT_TIMESTAMP`)
+          .bind(outageId,outage.vehicle_id,impact.schedule_id,returnOn,status,impact.linked_assignments));
+        if(safe)statements.push(env.DB.prepare(`UPDATE assignments SET is_reassigned=CASE WHEN reassignment_note LIKE 'VTR em FA%' THEN 0 ELSE is_reassigned END,
+          reassignment_note=CASE WHEN reassignment_note LIKE 'VTR em FA%' THEN NULL ELSE reassignment_note END,updated_at=CURRENT_TIMESTAMP
+          WHERE schedule_id=? AND vehicle_id=?`).bind(impact.schedule_id,outage.vehicle_id));
+      }
+      if(statements.length)await env.DB.batch(statements);
+      const after=await env.DB.prepare("SELECT o.*,v.prefix FROM vehicle_outages o JOIN vehicles v ON v.id=o.vehicle_id WHERE o.id=?").bind(outageId).first<Record<string,unknown>>();
+      await writeAudit(request,{action:"update",entityType:"vehicle_outage",entityId:outageId,summary:`Registrou retorno de ${outage.prefix} em ${returnOn}`,before,after:after as Record<string,unknown>,undoable:false});
+      return Response.json({ok:true,message:`Retorno de ${outage.prefix} registrado. ${automatic} rascunho(s) restaurado(s) e ${pending} escala(s) aguardando decisão.`,automatic,pending});
+    } else if (body.action === "vehicle_return_reconcile") {
+      const id=Number(body.id),decision=String(body.decision||"");
+      if(!["keep","show","restore"].includes(decision))return Response.json({error:"Decisão inválida."},{status:400});
+      const item=await env.DB.prepare(`SELECT r.*,s.date,s.status schedule_status,v.prefix FROM vehicle_return_reconciliations r
+        JOIN schedules s ON s.id=r.schedule_id JOIN vehicles v ON v.id=r.vehicle_id WHERE r.id=?`).bind(id).first<Record<string,unknown>>();
+      if(!item)return Response.json({error:"Revisão não encontrada."},{status:404});
+      let restored=0;
+      if(decision==="restore")restored=await restoreVehiclePatternCrew(Number(item.schedule_id),String(item.date),Number(item.vehicle_id));
+      if(decision==="show"||decision==="restore"){
+        await env.DB.prepare(`UPDATE assignments SET is_reassigned=CASE WHEN reassignment_note LIKE 'VTR em FA%' THEN 0 ELSE is_reassigned END,
+          reassignment_note=CASE WHEN reassignment_note LIKE 'VTR em FA%' THEN NULL ELSE reassignment_note END,updated_at=CURRENT_TIMESTAMP
+          WHERE schedule_id=? AND vehicle_id=?`).bind(item.schedule_id,item.vehicle_id).run();
+        if(item.schedule_status==="published")await env.DB.prepare("UPDATE schedules SET status='draft',published_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(item.schedule_id).run();
+      }
+      const status=decision==="keep"?"kept":decision==="show"?"shown":"restored";
+      await env.DB.prepare("UPDATE vehicle_return_reconciliations SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(status,id).run();
+      await writeAudit(request,{action:"update",entityType:"vehicle_return_reconciliation",entityId:id,summary:`Reconciliou ${item.prefix} na escala de ${item.date}: ${status}`,before:item,after:{status,restored},undoable:false});
+      return Response.json({ok:true,message:decision==="keep"?`${item.prefix} permanecerá fora da escala de ${item.date}.`:decision==="show"?`${item.prefix} foi reexibida sem desfazer remanejamentos.`:`Guarnição do padrão restaurada (${restored} horários). A escala voltou para rascunho se estava publicada.`});
     } else if (body.action === "vehicle_outage_delete") {
       const before=await env.DB.prepare("SELECT o.*,v.prefix FROM vehicle_outages o JOIN vehicles v ON v.id=o.vehicle_id WHERE o.id=?").bind(body.id).first<Record<string,unknown>>();
       await env.DB.prepare("DELETE FROM vehicle_outages WHERE id=?").bind(body.id).run();

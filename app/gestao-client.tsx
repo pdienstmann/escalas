@@ -15,6 +15,7 @@ type Data = {
   vehicleOutages: Item[];
   vehicleCrews: Item[];
   sections: Item[];
+  vehicleReturnImpacts: Item[];
 };
 const empty: Data = {
   guards: [],
@@ -27,6 +28,7 @@ const empty: Data = {
   vehicleOutages: [],
   vehicleCrews: [],
   sections: [],
+  vehicleReturnImpacts: [],
 };
 
 const modeLabel = {
@@ -47,6 +49,8 @@ export function GestaoClient({
     [saving, setSaving] = useState(false),
     [message, setMessage] = useState(""),
     [movementEditing,setMovementEditing]=useState<Item|null>(null),
+    [returningOutage,setReturningOutage]=useState<Item|null>(null),
+    [returnPreview,setReturnPreview]=useState<{outage:Item;impacts:Item[]}|null>(null),
     [sectionEditor, setSectionEditor] = useState<Item | null>(null),
     [editing, setEditing] = useState<{
       kind: "guard" | "post" | "vehicle";
@@ -244,7 +248,18 @@ export function GestaoClient({
     );
     if (r.ok) await load();
   }
-  async function deleteOutage(id:Item["id"]){if(!confirm("Retirar o registro de FA e disponibilizar novamente a viatura?"))return;const r=await fetch("/api/admin",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"vehicle_outage_delete",id})});const j=await r.json();setMessage(r.ok?"Viatura novamente disponível.":j.error);if(r.ok)await load()}
+  async function previewVehicleReturn(returnOn:string){
+    if(!returningOutage)return;setSaving(true);setMessage("");
+    try{const r=await fetch("/api/admin",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"vehicle_outage_return_preview",id:returningOutage.id,returnOn})});const j=await r.json();if(r.ok)setReturnPreview(j);else setMessage(j.error)}finally{setSaving(false)}
+  }
+  async function confirmVehicleReturn(returnOn:string){
+    if(!returningOutage)return;setSaving(true);setMessage("");
+    try{const r=await fetch("/api/admin",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"vehicle_outage_return",id:returningOutage.id,returnOn})});const j=await r.json();setMessage(r.ok?j.message:j.error);if(r.ok){setReturningOutage(null);setReturnPreview(null);await load()}}finally{setSaving(false)}
+  }
+  async function reconcileVehicleReturn(id:Item["id"],decision:"keep"|"show"|"restore"){
+    setSaving(true);setMessage("");
+    try{const r=await fetch("/api/admin",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"vehicle_return_reconcile",id,decision})});const j=await r.json();setMessage(r.ok?j.message:j.error);if(r.ok)await load()}finally{setSaving(false)}
+  }
   async function quickOutage(vehicle:Item){
     if(!confirm(`Marcar ${String(vehicle.prefix)} em FA por prazo indeterminado a partir de hoje?`))return;
     setSaving(true);setMessage("");
@@ -367,8 +382,9 @@ export function GestaoClient({
           crews={data.vehicleCrews}
           onEdit={(item) => setEditing({ kind: "vehicle", item })}
           onQuickOutage={(item)=>void quickOutage(item)}
-          onClearOutage={(id)=>void deleteOutage(id)}
+          onClearOutage={(id)=>{const outage=data.vehicleOutages.find(item=>Number(item.id)===Number(id));if(outage){setReturningOutage(outage);setReturnPreview(null)}}}
         />
+        {data.vehicleReturnImpacts.length>0&&<VehicleReturnPending items={data.vehicleReturnImpacts} saving={saving} onDecision={(id,decision)=>void reconcileVehicleReturn(id,decision)}/>}
         <div className="fleet-admin-grid">
           <Form title="Nova viatura" onSubmit={(e) => submit(e, "vehicle")}>
             <input name="prefix" placeholder="VTR 0000" required />
@@ -386,7 +402,7 @@ export function GestaoClient({
             vehicles={data.vehicles}
             outages={data.vehicleOutages}
             onSubmit={(e) => submit(e, "vehicle_outage")}
-            onDelete={(id) => void deleteOutage(id)}
+            onDelete={(id) => {const outage=data.vehicleOutages.find(item=>Number(item.id)===Number(id));if(outage){setReturningOutage(outage);setReturnPreview(null)}}}
           />
         </div>
         {message && <p className="notice" role="status">{message}</p>}
@@ -406,6 +422,7 @@ export function GestaoClient({
             onSubmit={catalogSubmit}
           />
         )}
+        {returningOutage&&<VehicleReturnDialog outage={returningOutage} preview={returnPreview} saving={saving} onClose={()=>{setReturningOutage(null);setReturnPreview(null)}} onPreview={(returnOn)=>void previewVehicleReturn(returnOn)} onConfirm={(returnOn)=>void confirmVehicleReturn(returnOn)}/>}
       </Module>
     );
   if (mode === "movimentos")
@@ -781,11 +798,24 @@ function movementPeriod(item: Item) {
   return `${start.toLocaleDateString("pt-BR")} a ${end.toLocaleDateString("pt-BR")}`;
 }
 function FleetAvailability({date,vehicles,outages,onSubmit,onDelete}:{date:string;vehicles:Item[];outages:Item[];onSubmit:(e:FormEvent<HTMLFormElement>)=>void;onDelete:(id:Item["id"])=>void}){
-  const unavailableIds=new Set(outages.filter(item=>String(item.starts_on)<=date&&(!item.ends_on||String(item.ends_on)>=date)).map(item=>Number(item.vehicle_id)));
+  const activeOutages=outages.filter(item=>String(item.starts_on)<=date&&(!item.ends_on||String(item.ends_on)>=date));
+  const unavailableIds=new Set(activeOutages.map(item=>Number(item.vehicle_id)));
   const selectable=vehicles.filter(vehicle=>!unavailableIds.has(Number(vehicle.id)));
-  return <section className="fleet-status"><header><div><small>DISPONIBILIDADE EM TEMPO REAL</small><h3>Viaturas em funcionamento / FA</h3></div><span>{unavailableIds.size} em FA nesta data</span></header><div className="fleet-layout"><form className="data-form" onSubmit={onSubmit}><select name="vehicleId" required defaultValue=""><option value="">Selecionar viatura disponível</option>{selectable.map(v=><option key={String(v.id)} value={String(v.id)}>{String(v.prefix)} · {String(v.type)}</option>)}</select><label>Início do FA — vazio significa hoje<input name="startsOn" type="date"/></label><label>Retorno previsto — deixe vazio para indefinido<input name="endsOn" type="date"/></label><input name="reason" placeholder="Motivo / observação"/><button className="save">Registrar em FA</button></form><div className="fleet-list">{outages.length?outages.map(o=><article key={String(o.id)}><span className="fleet-icon">{vehicleIconLabel(String(o.type))}</span><div><b>{String(o.prefix)}</b><small>FA desde {formatDate(o.starts_on)}{o.ends_on?` até ${formatDate(o.ends_on)}`:" · prazo indeterminado"}</small>{o.reason&&<em>{String(o.reason)}</em>}</div><button onClick={()=>onDelete(o.id)}>Disponibilizar</button></article>):<p>Todas as viaturas estão disponíveis.</p>}</div></div></section>
+  return <section className="fleet-status"><header><div><small>DISPONIBILIDADE EM TEMPO REAL</small><h3>Viaturas em funcionamento / FA</h3></div><span>{unavailableIds.size} em FA nesta data</span></header><div className="fleet-layout"><form className="data-form" onSubmit={onSubmit}><select name="vehicleId" required defaultValue=""><option value="">Selecionar viatura disponível</option>{selectable.map(v=><option key={String(v.id)} value={String(v.id)}>{String(v.prefix)} · {String(v.type)}</option>)}</select><label>Início do FA — vazio significa hoje<input name="startsOn" type="date"/></label><label>Retorno previsto — deixe vazio para indefinido<input name="endsOn" type="date"/></label><input name="reason" placeholder="Motivo / observação"/><button className="save">Registrar em FA</button></form><div className="fleet-list">{activeOutages.length?activeOutages.map(o=><article key={String(o.id)}><span className="fleet-icon">{vehicleIconLabel(String(o.type))}</span><div><b>{String(o.prefix)}</b><small>FA desde {formatDate(o.starts_on)}{o.ends_on?` até ${formatDate(o.ends_on)}`:" · prazo indeterminado"}</small>{o.reason&&<em>{String(o.reason)}</em>}</div><button onClick={()=>onDelete(o.id)}>Registrar retorno</button></article>):<p>Todas as viaturas estão disponíveis.</p>}</div></div></section>
 }
 const vehicleIconLabel=(type:string)=>type==="moto"?"🏍️":type==="pickup"?"🛻":type==="van"?"🚐":type==="suv"?"🚙":"🚓";
+function VehicleReturnPending({items,saving,onDecision}:{items:Item[];saving:boolean;onDecision:(id:Item["id"],decision:"keep"|"show"|"restore")=>void}){
+  return <section className="vehicle-return-pending"><header><div><small>DECISÕES PENDENTES</small><h2>Viaturas que retornaram após a criação da escala</h2><p>Nenhum remanejamento será desfeito sem uma escolha.</p></div><strong>{items.length}</strong></header><div>{items.map(item=><article key={String(item.id)}><span className="fleet-icon">🚓</span><div><b>{item.prefix} · {formatDate(item.schedule_date)}</b><small>Escala {item.schedule_status} · {Number(item.linked_assignments)} horários ainda vinculados à VTR</small></div><div className="vehicle-return-actions"><button disabled={saving} onClick={()=>onDecision(item.id,"keep")}>Manter fora</button><button disabled={saving} onClick={()=>onDecision(item.id,"show")}>Reexibir VTR</button><button className="restore" disabled={saving} onClick={()=>onDecision(item.id,"restore")}>Restaurar padrão</button></div></article>)}</div></section>
+}
+
+function VehicleReturnDialog({outage,preview,saving,onClose,onPreview,onConfirm}:{outage:Item;preview:{outage:Item;impacts:Item[]}|null;saving:boolean;onClose:()=>void;onPreview:(returnOn:string)=>void;onConfirm:(returnOn:string)=>void}){
+  const now=new Date(),localToday=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);
+  const[returnOn,setReturnOn]=useState(localToday<String(outage.starts_on)?String(outage.starts_on):localToday);
+  const automatic=preview?.impacts.filter(item=>Boolean(item.automatic)).length||0;
+  const protectedCount=preview?.impacts.filter(item=>!item.automatic).length||0;
+  return <div className="fleet-return-backdrop"><section className="fleet-return-dialog" role="dialog" aria-modal="true" aria-labelledby="fleet-return-title"><header><div><small>RETORNO SEGURO DE FA</small><h2 id="fleet-return-title">Registrar retorno de {outage.prefix}</h2><p>FA desde {formatDate(outage.starts_on)} · o histórico será preservado.</p></div><button type="button" onClick={onClose} aria-label="Fechar">×</button></header>{!preview?<div className="fleet-return-step"><label>Disponível novamente a partir de<input type="date" min={String(outage.starts_on)} value={returnOn} onChange={event=>setReturnOn(event.target.value)}/></label><div className="fleet-return-note"><b>O aplicativo verificará todas as escalas já criadas.</b><span>Rascunhos seguros podem ser restaurados; escalas modificadas ou publicadas exigirão decisão.</span></div></div>:<div className="fleet-return-step"><div className="fleet-return-summary"><span><b>{preview.impacts.length}</b> escalas afetadas</span><span className="safe"><b>{automatic}</b> restaurações seguras</span><span className="warning"><b>{protectedCount}</b> aguardam decisão</span></div><div className="fleet-return-impact-list">{preview.impacts.length?preview.impacts.slice(0,12).map(item=><span key={String(item.schedule_id)}><b>{formatDate(item.date)}</b><small>{item.automatic?"Rascunho com guarnição preservada":"Será mantida sem alteração até decisão"} · {item.status}</small></span>):<p>Nenhuma escala já criada será afetada. A VTR entrará normalmente nas próximas escalas.</p>}</div></div>}<footer><button type="button" onClick={onClose}>Cancelar</button>{preview?<><button type="button" onClick={()=>onPreview(returnOn)}>Atualizar análise</button><button type="button" className="save" disabled={saving} onClick={()=>onConfirm(returnOn)}>{saving?"Registrando…":"Confirmar retorno"}</button></>:<button type="button" className="save" disabled={saving||!returnOn} onClick={()=>onPreview(returnOn)}>{saving?"Analisando…":"Analisar impacto"}</button>}</footer></section></div>
+}
+
 function FleetPanorama({date,vehicles,outages,crews,onEdit,onQuickOutage,onClearOutage}:{date:string;vehicles:Item[];outages:Item[];crews:Item[];onEdit:(item:Item)=>void;onQuickOutage:(item:Item)=>void;onClearOutage:(id:Item["id"])=>void}){
   const[query,setQuery]=useState(""),[filter,setFilter]=useState<"all"|"available"|"service"|"outage">("all");
   const rows=useMemo(()=>vehicles.map(vehicle=>{
@@ -810,7 +840,7 @@ function FleetPanorama({date,vehicles,outages,crews,onEdit,onQuickOutage,onClear
     <div className="fleet-map">{visible.map(({vehicle,outage,crew,status})=><article key={String(vehicle.id)} className={`fleet-card ${status}`}>
       <span className="fleet-card-icon">{vehicleIconLabel(String(vehicle.type))}</span>
       <div><header><b>{String(vehicle.prefix)}</b><span>{status==="outage"?"EM FA":status==="service"?"EM SERVIÇO":"DISPONÍVEL"}</span></header><strong>{String(vehicle.zone||"Zona não definida")}</strong><small>{vehicleTypeLabel(String(vehicle.type))}</small>{crew&&<p><b>Equipe:</b> {String(crew.crew_names)}</p>}{outage&&<p><b>FA:</b> {String(outage.reason||"Sem motivo informado")} · {outage.ends_on?`retorno ${formatDate(outage.ends_on)}`:"prazo indeterminado"}</p>}</div>
-      <div className="fleet-card-actions"><button onClick={()=>onEdit(vehicle)}>Editar</button>{outage?<button className="available" onClick={()=>onClearOutage(outage.id)}>Disponibilizar</button>:<button className="outage" onClick={()=>onQuickOutage(vehicle)}>Marcar FA</button>}</div>
+      <div className="fleet-card-actions"><button onClick={()=>onEdit(vehicle)}>Editar</button>{outage?<button className="available" onClick={()=>onClearOutage(outage.id)}>Registrar retorno</button>:<button className="outage" onClick={()=>onQuickOutage(vehicle)}>Marcar FA</button>}</div>
     </article>)}</div>
     {!visible.length&&<p className="fleet-empty">Nenhuma viatura corresponde aos filtros.</p>}
   </section>
