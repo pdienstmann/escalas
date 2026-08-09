@@ -28,6 +28,7 @@ import {
   Fragment,
   MouseEvent as ReactMouseEvent,
   useCallback,
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -120,9 +121,15 @@ export function LiveSchedule() {
     [saving, setSaving] = useState(false),
     [loadError, setLoadError] = useState("");
   const loadSequence=useRef(0);
+  const loadController=useRef<AbortController|null>(null);
+  const savingRef=useRef(false);
   const tableRef = useRef<HTMLTableElement | null>(null);
+  const scheduleWrapRef = useRef<HTMLElement | null>(null);
   const load = useCallback(async () => {
     const sequence=++loadSequence.current;
+    loadController.current?.abort();
+    const controller=new AbortController();
+    loadController.current=controller;
     try {
       const cached=readScheduleCache(date);if(cached)setData(cached);
       setPick(null);
@@ -130,17 +137,20 @@ export function LiveSchedule() {
       setLoadError("");
       const r = await fetch(`/api/schedule?date=${date}&_=${Date.now()}`, {
         cache: "no-store",
+        signal:controller.signal,
       });
       if (!r.ok) throw new Error();
       const value=await r.json();
       if(sequence===loadSequence.current){setData(value);writeScheduleCache(value)}
-    } catch {
+    } catch (error) {
+      if(error instanceof DOMException&&error.name==="AbortError")return;
       if(sequence===loadSequence.current){
         setLoadError("Não foi possível consultar a escala. Recarregue a página para tentar novamente.");
         setMessage("Não foi possível consultar a escala. Recarregue a página para tentar novamente.");
       }
     }
   }, [date]);
+  useEffect(()=>()=>loadController.current?.abort(),[]);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
@@ -181,9 +191,10 @@ export function LiveSchedule() {
     () => groupRedeploymentAssignments(data?.availableForRedeployment || []),
     [data?.availableForRedeployment],
   );
+  const deferredQuery=useDeferredValue(query);
   const resources = useMemo(() => {
     if (!data) return [];
-    const q = query.toLowerCase().trim();
+    const q = deferredQuery.toLowerCase().trim();
     return orderScheduleResources(data.vehicles, data.posts, data.sections).filter((x) => {
       const text = `${x.r.name || ""} ${x.r.prefix || ""} ${x.r.zone || ""} ${x.r.group_name || ""} ${x.section}`
         .toLowerCase();
@@ -203,9 +214,10 @@ export function LiveSchedule() {
       }
       return true;
     });
-  }, [assignmentIndex, data, query, view]);
+  }, [assignmentIndex, data, deferredQuery, view]);
   async function postAssignment(body: Record<string, unknown>) {
-    if (saving) return false;
+    if (savingRef.current) return false;
+    savingRef.current=true;
     setSaving(true);
     try {
       const r = await fetch("/api/schedule", {
@@ -245,9 +257,14 @@ export function LiveSchedule() {
         setHolePick(null);
         setRedeployPick(null);
         setSwapPick(null);
+        if(j.deletedId&&Number(copiedAssignment?.id)===Number(j.deletedId))setCopiedAssignment(null);
       }
       return r.ok;
+    } catch {
+      setMessage("A alteração não foi concluída. Verifique a conexão e tente novamente.");
+      return false;
     } finally {
+      savingRef.current=false;
       setSaving(false);
     }
   }
@@ -325,7 +342,8 @@ export function LiveSchedule() {
   }
   async function saveResourceCrew(event: FormEvent<HTMLFormElement>, kind: "post" | "vehicle") {
     event.preventDefault();
-    if (!data || saving) return;
+    if (!data || savingRef.current) return;
+    savingRef.current=true;
     setSaving(true);
     try {
       const form = new FormData(event.currentTarget);
@@ -362,7 +380,10 @@ export function LiveSchedule() {
           : { ...current, ...merged, posts: [...current.posts, entity] };
       });
       setResourceDialog(null);
+    } catch {
+      setMessage("Não foi possível adicionar a equipe. Verifique a conexão e tente novamente.");
     } finally {
+      savingRef.current=false;
       setSaving(false);
     }
   }
@@ -465,6 +486,12 @@ export function LiveSchedule() {
     const saved=await postAssignment({action:"copy_assignment_to_cell",sourceAssignmentId:copiedAssignment.id,scheduleId:data.schedule.id,postId:kind==="post"?resource.id:null,vehicleId:kind==="vehicle"?resource.id:null,shift});
     if(saved)setCopiedAssignment(null);
   }
+  useEffect(()=>{
+    if(!copiedAssignment)return;
+    const cancel=(event:KeyboardEvent)=>{if(event.key==="Escape"){setCopiedAssignment(null);setMessage("Cópia cancelada.")}};
+    window.addEventListener("keydown",cancel);
+    return()=>window.removeEventListener("keydown",cancel);
+  },[copiedAssignment]);
   function openQuickSwap(assignment:Rec,kind:"post"|"vehicle",resource:Rec,shift:string){
     if(!data)return;
     const period=isDayShift(shift)?"day":"night",extension=String(assignment.work_kind)==="overtime_extension";
@@ -516,12 +543,11 @@ export function LiveSchedule() {
     }
     const t = times(data.date, shift),
       preserveInterval = String(assignment.shift) === shift || Boolean(sourceShift && sourceShift === shift && assignmentOverlapsShift(assignment, data.date, sourceShift)),
-      currentCount = data.assignments.filter(
-        (a) =>
-          (kind === "post"
-            ? a.post_id === resource.id
-            : a.vehicle_id === resource.id) && a.shift === shift,
-      ).length;
+      targetStart=preserveInterval?String(assignment.starts_at):t.start,
+      targetEnd=preserveInterval?String(assignment.ends_at):t.end,
+      targetCrew=data.assignments.filter((a)=>Number(a.id)!==Number(assignment.id)&&(kind==="post"?Number(a.post_id)===Number(resource.id):Number(a.vehicle_id)===Number(resource.id))&&String(a.starts_at)<targetEnd&&String(a.ends_at)>targetStart),
+      targetRoles=new Set(targetCrew.map(item=>String(item.role))),
+      targetRole=kind==="post"?"guard":!targetRoles.has("driver")?"driver":!targetRoles.has("patrol")?"patrol":"third";
     await postAssignment({
       id: assignment.id,
       scheduleId: data.schedule.id,
@@ -529,10 +555,9 @@ export function LiveSchedule() {
       postId: kind === "post" ? resource.id : null,
       vehicleId: kind === "vehicle" ? resource.id : null,
       shift,
-      role:
-        kind === "post" ? "guard" : currentCount === 0 ? "driver" : "patrol",
-      startsAt: preserveInterval ? assignment.starts_at : t.start,
-      endsAt: preserveInterval ? assignment.ends_at : t.end,
+      role:targetRole,
+      startsAt:targetStart,
+      endsAt:targetEnd,
       status: assignment.status,
       requestRef: assignment.request_ref || null,
       isReassigned: 1,
@@ -570,9 +595,9 @@ export function LiveSchedule() {
   }
   async function saveVehicleQuick(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!data || !vehicleEdit || saving) return;
+    if (!data || !vehicleEdit || savingRef.current) return;
     const body = Object.fromEntries(new FormData(e.currentTarget));
-    setSaving(true);
+    savingRef.current=true;setSaving(true);
     try {
       const response = await fetch("/api/schedule", {
         method: "POST",
@@ -608,13 +633,16 @@ export function LiveSchedule() {
         };
       });
       setVehicleEdit(null);
+    } catch {
+      setMessage("Não foi possível atualizar a viatura. Nenhum GM foi removido da tela.");
     } finally {
+      savingRef.current=false;
       setSaving(false);
     }
   }
   async function removeResourceFromDay() {
-    if (!data || !resourceRemoval || saving) return;
-    setSaving(true);
+    if (!data || !resourceRemoval || savingRef.current) return;
+    savingRef.current=true;setSaving(true);
     try {
       const response = await fetch("/api/schedule", {
         method: "POST",
@@ -649,7 +677,10 @@ export function LiveSchedule() {
         };
       });
       setResourceRemoval(null);
+    } catch {
+      setMessage("Não foi possível retirar o local. A escala exibida foi preservada.");
     } finally {
+      savingRef.current=false;
       setSaving(false);
     }
   }
@@ -705,7 +736,7 @@ export function LiveSchedule() {
   const showTable = view !== "redeploy";
 
   return (
-    <main className="app compact">
+    <main className={`app compact ${saving?"is-saving":""}`} aria-busy={saving}>
       <header className="topbar">
         <div className="brand">
           <span className="crest">GM</span>
@@ -719,7 +750,7 @@ export function LiveSchedule() {
             aria-label="Data da escala"
             type="date"
             value={date}
-            onChange={(e) => setDate(e.target.value)}
+            onChange={(e) => {setCopiedAssignment(null);setContextPick(null);setPick(null);setDate(e.target.value)}}
           />
         </div>
         <div className="stats">
@@ -741,7 +772,7 @@ export function LiveSchedule() {
       <section className="toolbar">
         <strong>Escala de {formatScheduleDate(data.date)}</strong>
         <span className="pattern-confirm">Padrão: {data.patternLabel}</span>
-        <span className="sync">● sincronizado</span>
+        <span className={`sync ${saving?"saving":""}`} aria-live="polite">{saving?"◌ salvando alteração…":"● sincronizado"}</span>
         <div className="seg toolbar-seg" role="group" aria-label="Atalhos da escala">
           <button type="button" className={view==="all"?"active":""} onClick={()=>setView("all")}>Tudo</button>
           <button type="button" className={view==="day"?"active":""} onClick={()=>jump("day")}>Diurno</button>
@@ -753,6 +784,7 @@ export function LiveSchedule() {
           {addMenuOpen&&<div role="menu"><button type="button" onClick={()=>{setAddMenuOpen(false);startManualAdd()}}>👤 Escalar GM</button><button type="button" onClick={()=>{setAddMenuOpen(false);openCreate("vehicle")}}>🚓 Viatura</button><button type="button" onClick={()=>{setAddMenuOpen(false);openCreate("post")}}>📍 Posto</button><button type="button" onClick={()=>{setAddMenuOpen(false);openCreate("section")}}>▦ Seção</button></div>}
         </div>
         <input
+          aria-busy={query!==deferredQuery}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Buscar posto, VTR, zona ou GM…"
@@ -760,7 +792,12 @@ export function LiveSchedule() {
         <Link className="toolbar-link" href={hrefFor("/impressao")}>
           Gerar PDF
         </Link>
+        <div className="schedule-scroll-controls" role="group" aria-label="Mover visualização dos turnos">
+          <button type="button" title="Turnos anteriores" onClick={()=>scheduleWrapRef.current?.scrollBy({left:-420,behavior:"smooth"})}>←</button>
+          <button type="button" title="Próximos turnos" onClick={()=>scheduleWrapRef.current?.scrollBy({left:420,behavior:"smooth"})}>→</button>
+        </div>
       </section>
+      {copiedAssignment&&<section className="schedule-clipboard" role="status"><span aria-hidden="true">▣</span><div><b>{copiedAssignment.guard_name} copiado</b><small>Os destinos compatíveis estão destacados. O horário será ajustado ao quadrante.</small></div><button type="button" onClick={()=>{setCopiedAssignment(null);setMessage("Cópia cancelada.")}}>Cancelar · Esc</button></section>}
       {data.notices?.length > 0 && (
         <section className="daily-notices">
           <b>Alterações previstas para esta data</b>
@@ -779,7 +816,7 @@ export function LiveSchedule() {
         </div>
       )}
       <div className={`workspace ${pick?"has-editor":"schedule-only"}`}>
-        <section className={`schedule-wrap ${data.date!==date?"is-switching":""}`}>
+        <section ref={scheduleWrapRef} className={`schedule-wrap ${data.date!==date?"is-switching":""}`}>
           {data.date!==date&&<div className="schedule-switching" role="status"><b>Abrindo escala de {formatScheduleDate(date)}</b><span>A escala anterior permanece bloqueada até a nova data terminar de carregar.</span></div>}
           <div className="drag-help">
             Arraste um GM para outra célula ou clique para editar. Ao preencher um furo diurno, o GM é escalado no turno inteiro (07:00–19:00).
@@ -1254,6 +1291,11 @@ function Row({
     if(shift!=="4"||String(assignment.work_kind)==="overtime_extension")return false;
     return assignmentOverlapsShift(assignment,date,"4");
   }
+  function canPasteInShift(shift:string){
+    if(!copiedAssignment)return false;
+    const target=operationalShiftWindow(date,shift);
+    return ![...knownAssignments,...availableForRedeployment].some(item=>Number(item.guard_id)===Number(copiedAssignment.guard_id)&&String(item.starts_at)<target.end&&String(item.ends_at)>target.start);
+  }
   function drop(e: DragEvent, shift: string) {
     e.preventDefault();
     const groupIds = e.dataTransfer
@@ -1346,13 +1388,14 @@ function Row({
         </td>
         {visibleShifts.map((s) => {
           const list = assignmentIndex.get(assignmentKey(kind, Number(resource.id), s.id)) || [];
+          const pasteAllowed=canPasteInShift(s.id);
           const missingRoles = kind === "vehicle"
             ? ["driver", "patrol"].filter((role) => !list.some((assignment) => String(assignment.role) === role && !isOvertimeExtensionCell(assignment,date,s.id)))
             : list.length ? [] : ["guard"];
           return (
             <td
               key={s.id}
-              className={`${missingRoles.length ? "furo" : ""} drop-cell`}
+              className={`${missingRoles.length ? "furo" : ""} ${pasteAllowed?"paste-target":""} drop-cell`}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => drop(e, s.id)}
             >
@@ -1389,7 +1432,7 @@ function Row({
                 {showEarlyExtensionShortcut(a,s.id)&&<button type="button" className="inline-he-extension early" aria-label={`Antecipar ${String(a.guard_name)} em hora extra`} title="Fazer o GM da noite começar mais cedo em HE" onClick={()=>onExtend(a,kind,resource,s.id,"before")}>＋ HE antes</button>}
                 {Number(a.id)===selectedId&&<div className="cell-quick-actions" role="group" aria-label={`Ações rápidas de ${String(a.guard_name)}`}><b>{a.guard_name}</b><button type="button" className="swap-action" onClick={()=>onSwap(a,kind,resource,s.id)}><span aria-hidden="true">⇄</span> Trocar GM</button><button type="button" onClick={()=>onEdit({kind,resource,shift:s.id,assignment:a})}><span aria-hidden="true">✎</span> Alterar / mover</button>{showExtensionShortcut(a,s.id)&&<button type="button" className="extend-action" onClick={()=>onExtend(a,kind,resource,s.id,"after")}><span aria-hidden="true">＋</span> HE depois</button>}{showEarlyExtensionShortcut(a,s.id)&&<button type="button" className="extend-action" onClick={()=>onExtend(a,kind,resource,s.id,"before")}><span aria-hidden="true">＋</span> HE antes</button>}<button type="button" className={a.status==="time_bank"?"active":""} onClick={()=>onQuickStatus(a,a.status==="time_bank"?"normal":"time_bank")}><span aria-hidden="true">◷</span> BH</button><button type="button" className="copy-action" onClick={()=>onCopy(a)}><span aria-hidden="true">▣</span> Copiar</button><button type="button" className="danger" onClick={()=>onQuickDelete(a)}><span aria-hidden="true">×</span> Remover</button><button type="button" aria-label="Fechar ações" onClick={()=>onContextPick({kind,resource,shift:s.id})}>×</button></div>}</Fragment>
               )})}
-              {copiedAssignment&&<button type="button" className="cell-paste-assignment" onClick={()=>onPaste(kind,resource,s.id)}><span aria-hidden="true">▣</span> Colar {String(copiedAssignment.guard_name)} aqui</button>}
+              {copiedAssignment&&pasteAllowed&&<button type="button" className="cell-paste-assignment" onClick={()=>onPaste(kind,resource,s.id)}><span aria-hidden="true">▣</span> Colar aqui</button>}
               {missingRoles.length > 0 && (
                 <button
                   className="live-hole"

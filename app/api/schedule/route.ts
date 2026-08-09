@@ -572,6 +572,16 @@ export async function POST(request: Request) {
     if(!["1","2","3","4"].includes(targetShift))return Response.json({error:"Escolha um quadrante válido para colar."},{status:400});
     const postId=Number(b.postId||0)||null,vehicleId=Number(b.vehicleId||0)||null;
     if((postId?1:0)+(vehicleId?1:0)!==1)return Response.json({error:"Escolha um único destino para colar."},{status:400});
+    const resource=postId
+      ? await env.DB.prepare("SELECT id FROM posts WHERE id=? AND active=1").bind(postId).first()
+      : await env.DB.prepare("SELECT id FROM vehicles WHERE id=? AND active=1").bind(vehicleId).first();
+    if(!resource)return Response.json({error:"O destino não existe mais ou foi desativado."},{status:404});
+    const excluded=await env.DB.prepare("SELECT id FROM schedule_resource_exclusions WHERE schedule_id=? AND resource_kind=? AND resource_id=? LIMIT 1").bind(scheduleId,postId?"post":"vehicle",postId||vehicleId).first();
+    if(excluded)return Response.json({error:"Este local foi retirado da escala e não pode receber o GM."},{status:409});
+    if(vehicleId){
+      const outage=await env.DB.prepare("SELECT id FROM vehicle_outages WHERE vehicle_id=? AND active=1 AND starts_on<=? AND (ends_on IS NULL OR ends_on>=?) LIMIT 1").bind(vehicleId,source.schedule_date,source.schedule_date).first();
+      if(outage)return Response.json({error:"A viatura está em FA nesta data."},{status:409});
+    }
     const interval=periodShiftTimes(String(source.schedule_date),targetShift);
     const blocked=await assertAssignable(scheduleId,Number(source.guard_id),interval.start,interval.end,0);
     if(blocked)return Response.json({error:blocked.error},{status:blocked.status});
@@ -584,7 +594,7 @@ export async function POST(request: Request) {
     const created=await env.DB.prepare(`INSERT INTO assignments
       (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,work_kind,status,request_ref,is_reassigned,reassignment_note)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .bind(scheduleId,source.guard_id,postId,vehicleId,targetShift,role,interval.start,interval.end,"shift",String(source.status)==="time_bank"?"time_bank":"normal",source.request_ref||null,source.is_reassigned||0,source.reassignment_note||null).run();
+      .bind(scheduleId,source.guard_id,postId,vehicleId,targetShift,role,interval.start,interval.end,"shift",["normal","overtime","time_bank","swap"].includes(String(source.status))?source.status:"normal",source.request_ref||null,source.is_reassigned||0,source.reassignment_note||null).run();
     const assignment=await env.DB.prepare("SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id=?").bind(created.meta.last_row_id).first<Record<string,unknown>>();
     const auditEventId=await writeAudit(request,{action:"create",entityType:"assignment",entityId:Number(created.meta.last_row_id),summary:`Colou ${source.guard_name} no ${targetShift}º turno`,after:assignment,undoable:true});
     return Response.json({ok:true,assignment,auditEventId,message:`${source.guard_name} copiado para o ${targetShift}º turno com o horário ajustado.`});

@@ -1,14 +1,33 @@
 "use client";
 
-import type { AnchorHTMLAttributes, ReactNode } from "react";
+import { useEffect, type AnchorHTMLAttributes, type ReactNode } from "react";
 
 type FullPageLinkProps = Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href"> & {
   href: string;
   children: ReactNode;
 };
 
+const prefetchedPages = new Set<string>();
+
+function prefetchPage(href: string) {
+  if (prefetchedPages.has(href)) return;
+  prefetchedPages.add(href);
+  const link=document.createElement("link");
+  link.rel="prefetch";
+  link.href=href;
+  link.dataset.prefetch=href;
+  document.head.appendChild(link);
+}
+
 export function FullPageLink({ href, children, ...props }: FullPageLinkProps) {
-  const prefetch=()=>{if(document.querySelector(`link[data-prefetch="${href}"]`))return;const link=document.createElement("link");link.rel="prefetch";link.href=href;link.dataset.prefetch=href;document.head.appendChild(link)};
+  useEffect(()=>{
+    const schedule=()=>prefetchPage(href);
+    const idle="requestIdleCallback" in window
+      ? window.requestIdleCallback(schedule,{timeout:1800})
+      : window.setTimeout(schedule,700);
+    return()=>{if("cancelIdleCallback" in window)window.cancelIdleCallback(idle);else window.clearTimeout(idle)};
+  },[href]);
+  const prefetch=()=>prefetchPage(href);
   return <a href={href} {...props} onClick={(event) => {
     props.onClick?.(event);
     if (event.defaultPrevented) return;
