@@ -496,7 +496,7 @@ async function upsertAssignment(
   let assignmentId = id;
   if (id)
     await env.DB.prepare(
-      "UPDATE assignments SET guard_id=?,post_id=?,vehicle_id=?,shift=?,role=?,starts_at=?,ends_at=?,regular_ends_at=COALESCE(?,regular_ends_at),break_starts_at=COALESCE(?,break_starts_at),break_ends_at=COALESCE(?,break_ends_at),work_kind=COALESCE(?,work_kind),status=?,request_ref=?,is_reassigned=?,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+      "UPDATE assignments SET guard_id=?,post_id=?,vehicle_id=?,shift=?,role=?,starts_at=?,ends_at=?,regular_ends_at=?,break_starts_at=COALESCE(?,break_starts_at),break_ends_at=COALESCE(?,break_ends_at),work_kind=COALESCE(?,work_kind),status=?,request_ref=?,is_reassigned=?,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
     )
       .bind(
         opts.guardId,
@@ -923,6 +923,30 @@ export async function POST(request: Request) {
     const assignments = (await env.DB.prepare("SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id IN (?,?) ORDER BY a.starts_at").bind(regularId, extensionId).all<Record<string, unknown>>()).results;
     const auditEventId = await writeAudit(request, { action: id ? "update" : "create", entityType: "assignment_group", entityId: `${regularId},${extensionId}`, summary: `Separou expediente e extensão de ${assignments[0]?.guard_name || "GM"}`, before: before ? { assignments: [before] } : undefined, after: { assignments }, undoable: true });
     return Response.json({ ok: true, assignments, auditEventId, message: "Expediente e extensão salvos separadamente. Cada bloco agora pode ser movido sozinho." });
+  }
+  if (b.action === "create_overtime_extension") {
+    const baseId=Number(b.baseAssignmentId||0),scheduleId=Number(b.scheduleId||0);
+    const base=await env.DB.prepare("SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id=? AND a.schedule_id=?").bind(baseId,scheduleId).first<Record<string,unknown>>();
+    if(!base)return Response.json({error:"Expediente de origem não encontrado."},{status:404});
+    const startsAt=String(b.startsAt||""),endsAt=String(b.endsAt||"");
+    const startMs=Date.parse(startsAt),endMs=Date.parse(endsAt);
+    if(!Number.isFinite(startMs)||!Number.isFinite(endMs)||endMs<=startMs)
+      return Response.json({error:"Informe um intervalo válido para a hora extra."},{status:400});
+    const normalEnd=String(base.regular_ends_at||base.ends_at);
+    if(startsAt<normalEnd)
+      return Response.json({error:`A hora extra deve começar às ${normalEnd.slice(11,16)} ou depois.`},{status:400});
+    const postId=Number(b.postId||0)||null,vehicleId=Number(b.vehicleId||0)||null;
+    if((postId?1:0)+(vehicleId?1:0)!==1)
+      return Response.json({error:"Escolha o local da extensão."},{status:400});
+    const conflict=await assertAssignable(scheduleId,Number(base.guard_id),startsAt,endsAt,0);
+    if(conflict)return Response.json({error:conflict.error},{status:conflict.status});
+    const created=await env.DB.prepare(`INSERT INTO assignments
+      (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,regular_ends_at,work_kind,status,request_ref,is_reassigned,reassignment_note)
+      VALUES (?,?,?,?,?,?,?,?,?,'overtime_extension','overtime',?,0,?)`)
+      .bind(scheduleId,base.guard_id,postId,vehicleId,b.shift||"4",b.role||(vehicleId?"third":"guard"),startsAt,endsAt,startsAt,b.requestRef||null,"Extensão independente do expediente").run();
+    const assignment=await env.DB.prepare("SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id=?").bind(created.meta.last_row_id).first<Record<string,unknown>>();
+    const auditEventId=await writeAudit(request,{action:"create",entityType:"assignment",entityId:Number(created.meta.last_row_id),summary:`Estendeu ${base.guard_name} em HE até ${endsAt.slice(11,16)}`,after:assignment,undoable:true});
+    return Response.json({ok:true,assignment,auditEventId,message:`HE de ${base.guard_name} adicionada como bloco independente.`});
   }
   if (b.action === "delete") {
     const before = await env.DB.prepare(
