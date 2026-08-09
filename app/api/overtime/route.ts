@@ -1,7 +1,6 @@
 import { env } from "cloudflare:workers";
 import { permitted } from "../../../lib/access";
 import { writeAudit } from "../../../lib/audit";
-import { syncScheduleOvertime } from "../../../lib/overtime-ledger";
 
 export const dynamic = "force-dynamic";
 
@@ -57,25 +56,43 @@ async function ensureMonthOpen(month: string) {
 export async function GET(request: Request) {
   if (!permitted(request))
     return Response.json({ error: "Não autorizado" }, { status: 401 });
-  await syncScheduleOvertime();
   const month =
     new URL(request.url).searchParams.get("month") ||
     new Date().toISOString().slice(0, 7);
   if (!validMonth(month))
     return Response.json({ error: "Mês inválido." }, { status: 400 });
   const period = bounds(month);
-  const [guards, entries, closure] = await Promise.all([
+  const [guards, entries, closure, suggestions] = await Promise.all([
     env.DB.prepare(
       "SELECT id,name,registration,platoon,overtime_eligible,overtime_note FROM guards WHERE active=1 ORDER BY name",
     ).all<Row>(),
     env.DB.prepare(
       `SELECT e.*,g.name guard_name,g.registration,g.platoon
        FROM overtime_entries e JOIN guards g ON g.id=e.guard_id
-       WHERE e.service_date>=? AND e.service_date<? ORDER BY e.service_date DESC,e.starts_at DESC`,
+       WHERE e.service_date>=? AND e.service_date<?
+         AND NOT (e.source='schedule' AND e.status='pending')
+       ORDER BY e.service_date DESC,e.starts_at DESC`,
     )
       .bind(period.previous, period.end)
       .all<Row>(),
     monthClosure(month),
+    env.DB.prepare(
+      `SELECT a.id assignment_id,a.guard_id,g.name guard_name,g.registration,g.platoon,
+        date(a.starts_at) service_date,COALESCE(a.regular_ends_at,a.starts_at) starts_at,a.ends_at,
+        CAST(ROUND((julianday(a.ends_at)-julianday(COALESCE(a.regular_ends_at,a.starts_at)))*1440) AS INTEGER) planned_minutes,
+        COALESCE(p.name,v.prefix,'Sem local') location,a.request_ref
+       FROM assignments a
+       JOIN guards g ON g.id=a.guard_id
+       LEFT JOIN posts p ON p.id=a.post_id
+       LEFT JOIN vehicles v ON v.id=a.vehicle_id
+       WHERE a.status='overtime' AND date(a.starts_at)>=? AND date(a.starts_at)<?
+         AND COALESCE(g.overtime_eligible,1)<>0
+         AND NOT EXISTS (
+           SELECT 1 FROM overtime_entries e
+           WHERE e.assignment_id=a.id AND e.status IN ('confirmed','partial')
+         )
+       ORDER BY date(a.starts_at) DESC,g.name`,
+    ).bind(period.start,period.end).all<Row>(),
   ]);
 
   const ranking = guards.results
@@ -130,6 +147,7 @@ export async function GET(request: Request) {
         String(entry.service_date) < period.end,
     ),
     closure,
+    suggestions: suggestions.results.filter((item)=>Number(item.planned_minutes)>0),
   });
 }
 
@@ -213,23 +231,22 @@ export async function POST(request: Request) {
       action: "update",
       entityType: "overtime_entry",
       entityId: id,
-      summary: `Conferiu HE de ${before.guard_name}: ${status}`,
+      summary: `Editou lançamento de HE de ${before.guard_name}`,
       before,
       after: entry as Record<string, unknown>,
       undoable: false,
     });
-    return Response.json({ ok: true, entry, message: "Conferência de HE salva." });
+    return Response.json({ ok: true, entry, message: "Lançamento de HE atualizado." });
   }
 
   if (body.action === "manual_create") {
     const guardId = Number(body.guardId);
-    const startsAt = String(body.startsAt || "");
-    const endsAt = String(body.endsAt || "");
-    const start = new Date(startsAt).getTime();
-    const end = new Date(endsAt).getTime();
-    if (!guardId || !Number.isFinite(start) || !Number.isFinite(end) || end <= start)
-      return Response.json({ error: "Informe GM e horários válidos." }, { status: 400 });
-    const entryMonth = startsAt.slice(0, 7);
+    const assignmentId = Number(body.assignmentId) || null;
+    const serviceDate = String(body.serviceDate || "");
+    const informedHours = Number(body.hours || 0);
+    if (!guardId || !/^\d{4}-\d{2}-\d{2}$/.test(serviceDate) || !Number.isFinite(informedHours) || informedHours <= 0 || informedHours > 24)
+      return Response.json({ error: "Informe GM, data e uma quantidade de horas entre 0 e 24." }, { status: 400 });
+    const entryMonth = serviceDate.slice(0, 7);
     if (!validMonth(entryMonth))
       return Response.json({ error: "Mês do lançamento inválido." }, { status: 400 });
     if (!(await ensureMonthOpen(entryMonth)))
@@ -237,29 +254,36 @@ export async function POST(request: Request) {
         { error: "Este mês de HE está fechado. Reabra-o antes de lançar novas horas." },
         { status: 409 },
       );
-    const plannedMinutes = Math.round((end - start) / 60000);
-    const status = body.confirmNow ? "confirmed" : "pending";
-    const created = await env.DB.prepare(
-      `INSERT INTO overtime_entries
-       (guard_id,service_date,starts_at,ends_at,planned_minutes,confirmed_minutes,status,source,location,request_ref,notes,confirmed_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,CASE WHEN ?='confirmed' THEN CURRENT_TIMESTAMP ELSE NULL END)`,
-    )
-      .bind(
-        guardId,
-        startsAt.slice(0, 10),
-        startsAt,
-        endsAt,
-        plannedMinutes,
-        status === "confirmed" ? plannedMinutes : null,
-        status,
-        "manual",
-        String(body.location || "").trim() || "Lançamento manual",
-        String(body.requestRef || "").trim() || null,
-        String(body.notes || "").trim() || null,
-        status,
-      )
-      .run();
-    const id = Number(created.meta.last_row_id);
+    const plannedMinutes = Math.round(informedHours * 60);
+    const startsAt = `${serviceDate}T00:00`;
+    const endDate = new Date(`${serviceDate}T00:00:00Z`);
+    endDate.setUTCMinutes(endDate.getUTCMinutes()+plannedMinutes);
+    const endsAt = endDate.toISOString().slice(0,16);
+    const status = "confirmed";
+    const location = String(body.location || "").trim() || "HE informada manualmente";
+    const requestRef = String(body.requestRef || "").trim() || null;
+    const notes = String(body.notes || "").trim() || null;
+    const existing = assignmentId
+      ? await env.DB.prepare("SELECT id,guard_id FROM overtime_entries WHERE assignment_id=?").bind(assignmentId).first<Row>()
+      : null;
+    if (existing && Number(existing.guard_id) !== guardId)
+      return Response.json({ error: "A sugestão de HE não pertence ao GM informado." }, { status: 409 });
+    let id: number;
+    if (existing && Number(existing.guard_id) === guardId) {
+      id = Number(existing.id);
+      await env.DB.prepare(
+        `UPDATE overtime_entries SET service_date=?,starts_at=?,ends_at=?,planned_minutes=?,confirmed_minutes=?,
+         status='confirmed',source='manual',location=?,request_ref=?,notes=?,confirmed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
+         WHERE id=?`,
+      ).bind(serviceDate,startsAt,endsAt,plannedMinutes,plannedMinutes,location,requestRef,notes,id).run();
+    } else {
+      const created = await env.DB.prepare(
+        `INSERT INTO overtime_entries
+         (assignment_id,guard_id,service_date,starts_at,ends_at,planned_minutes,confirmed_minutes,status,source,location,request_ref,notes,confirmed_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,CASE WHEN ?='confirmed' THEN CURRENT_TIMESTAMP ELSE NULL END)`,
+      ).bind(assignmentId,guardId,serviceDate,startsAt,endsAt,plannedMinutes,plannedMinutes,status,"manual",location,requestRef,notes,status).run();
+      id = Number(created.meta.last_row_id);
+    }
     const entry = await joinedEntry(id);
     await writeAudit(request, {
       action: "create",
@@ -272,14 +296,37 @@ export async function POST(request: Request) {
     return Response.json({ ok: true, entry, message: "HE manual lançada." });
   }
 
+  if (body.action === "balance_set") {
+    const guardId=Number(body.guardId),month=String(body.month||""),targetHours=Number(body.targetHours);
+    if(!guardId||!validMonth(month)||!Number.isFinite(targetHours)||targetHours<0||targetHours>500)
+      return Response.json({error:"Informe um total mensal válido."},{status:400});
+    if(!(await ensureMonthOpen(month)))return Response.json({error:"Este mês de HE está fechado."},{status:409});
+    const period=bounds(month);
+    const current=await env.DB.prepare(
+      `SELECT COALESCE(SUM(confirmed_minutes),0) total FROM overtime_entries
+       WHERE guard_id=? AND service_date>=? AND service_date<? AND status IN ('confirmed','partial')`,
+    ).bind(guardId,period.start,period.end).first<Row>();
+    const targetMinutes=Math.round(targetHours*60),delta=targetMinutes-Number(current?.total||0);
+    if(!delta)return Response.json({error:"O total informado já é o saldo atual."},{status:409});
+    const reason=String(body.notes||"").trim();
+    if(!reason)return Response.json({error:"Informe o motivo do ajuste."},{status:400});
+    const created=await env.DB.prepare(
+      `INSERT INTO overtime_entries
+       (guard_id,service_date,starts_at,ends_at,planned_minutes,confirmed_minutes,status,source,location,notes,confirmed_at)
+       VALUES (?,?,?,?,?,?,'confirmed','adjustment','Ajuste manual de saldo',?,CURRENT_TIMESTAMP)`,
+    ).bind(guardId,period.start,`${period.start}T00:00`,`${period.start}T00:00`,delta,delta,reason).run();
+    const id=Number(created.meta.last_row_id),entry=await joinedEntry(id);
+    await writeAudit(request,{action:"create",entityType:"overtime_entry",entityId:id,summary:`Ajustou o saldo de HE de ${entry?.guard_name} para ${targetHours}h`,after:entry as Record<string,unknown>,undoable:false});
+    return Response.json({ok:true,entry,message:`Saldo mensal ajustado para ${targetHours}h.`});
+  }
+
   if (body.action === "month_close") {
     const month = String(body.month || "");
     if (!validMonth(month))
       return Response.json({ error: "Mês inválido." }, { status: 400 });
-    await syncScheduleOvertime();
     const period = bounds(month);
     const pending = await env.DB.prepare(
-      "SELECT COUNT(*) total FROM overtime_entries WHERE service_date>=? AND service_date<? AND status='pending'",
+      "SELECT COUNT(*) total FROM overtime_entries WHERE service_date>=? AND service_date<? AND status='pending' AND source<>'schedule'",
     ).bind(period.start, period.end).first<Row>();
     const pendingCount = Number(pending?.total || 0);
     if (pendingCount)

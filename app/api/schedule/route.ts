@@ -10,7 +10,6 @@ import { permitted } from "../../../lib/access";
 import { isScheduleDate, todayScheduleDate } from "../../../lib/schedule-date";
 import { fullPeriodShifts, shiftTimes as periodShiftTimes, isDayShift, splitExtensionWindow } from "../../../lib/shift-rules";
 import { rankGuardSuggestions, describeReasons } from "../../../lib/suggest-gm";
-import { syncScheduleOvertime } from "../../../lib/overtime-ledger";
 import { hasRequiredVehicleCrew, hasUniqueCrewMembers } from "../../../lib/crew-rules";
 
 export const dynamic = "force-dynamic";
@@ -1010,7 +1009,6 @@ async function buildSuggestions(request: Request, date: string) {
   const role = url.searchParams.get("role") || null;
   const period = isDayShift(shift) ? "day" : "night";
   const periodShiftIds = period === "day" ? ["2", "3"] : ["4", "1"];
-  await syncScheduleOvertime();
 
   const monthStart = `${date.slice(0, 7)}-01`;
   const monthEnd = (() => {
