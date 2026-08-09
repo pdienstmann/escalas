@@ -38,6 +38,45 @@ export function shiftTimes(date: string, shift: string) {
   };
 }
 
+function nextDate(date: string) {
+  const tomorrow = new Date(`${date}T12:00:00Z`);
+  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+  return tomorrow.toISOString().slice(0, 10);
+}
+
+/** Real chronological window represented by each column of an operational date. */
+export function operationalShiftWindow(date: string, shift: string) {
+  const tomorrow = nextDate(date);
+  const windows: Record<string, { start: string; end: string }> = {
+    "2": { start: `${date}T07:00`, end: `${date}T13:00` },
+    "3": { start: `${date}T13:00`, end: `${date}T19:00` },
+    "4": { start: `${date}T19:00`, end: `${tomorrow}T01:00` },
+    "1": { start: `${tomorrow}T01:00`, end: `${tomorrow}T07:00` },
+  };
+  return windows[shift] || shiftTimes(date, shift);
+}
+
+export function assignmentOverlapsShift(
+  assignment: { shift?: unknown; starts_at?: unknown; ends_at?: unknown },
+  date: string,
+  shift: string,
+) {
+  if (String(assignment.shift) === shift) return true;
+  const start = Date.parse(String(assignment.starts_at || ""));
+  const end = Date.parse(String(assignment.ends_at || ""));
+  const window = operationalShiftWindow(date, shift);
+  const windowStart = Date.parse(window.start);
+  const windowEnd = Date.parse(window.end);
+  return [start, end, windowStart, windowEnd].every(Number.isFinite) && start < windowEnd && end > windowStart;
+}
+
+export function coveredOperationalShifts(
+  assignment: { shift?: unknown; starts_at?: unknown; ends_at?: unknown },
+  date: string,
+) {
+  return SHIFT_DEFS.filter((shift) => assignmentOverlapsShift(assignment, date, shift.id)).map((shift) => shift.id);
+}
+
 export function fullPeriodLabel(shift: string) {
   if (isDayShift(shift)) return "Turno inteiro diurno · 07:00–19:00";
   if (isNightShift(shift)) return "Turno inteiro noturno · 19:00–07:00";

@@ -451,6 +451,15 @@ async function upsertAssignment(
   },
 ) {
   const id = Number(opts.id || 0);
+  const startMs = Date.parse(opts.start), endMs = Date.parse(opts.end);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs)
+    return { error: "Informe um intervalo válido; a saída deve ocorrer depois da entrada.", status: 400 as const };
+  const regularEnd = String(b.regularEndsAt || "");
+  if (regularEnd) {
+    const regularMs = Date.parse(regularEnd);
+    if (!Number.isFinite(regularMs) || regularMs < startMs || regularMs > endMs)
+      return { error: "O fim do horário normal deve ficar entre a entrada e a saída.", status: 400 as const };
+  }
   const blocked = await assertAssignable(opts.scheduleId, opts.guardId, opts.start, opts.end, id);
   if (blocked) return blocked;
   const before = id

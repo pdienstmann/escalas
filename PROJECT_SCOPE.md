@@ -4,6 +4,7 @@
 
 - Escala diária única, com 2º/3º turnos diurnos e 4º/1º turnos noturnos.
 - Postos, viaturas, zonas, guardas, horários individuais e funções de motorista/patrulheiro.
+- Horários contínuos entre turnos: uma designação como `13:00–01:00` aparece no 3º e 4º turnos. Extensões após o expediente mostram somente o trecho de HE na coluna noturna e entram como reforço, sem ocupar as posições obrigatórias da dupla motorista/patrulheiro.
 - Regras contra dupla escala, indisponibilidade e conflitos de horário.
 - Sinalização de hora extra, banco de horas, troca de serviço e furos.
 - Movimentações: reserva técnica, folga, férias, curso, atestado/licença, banco de horas e troca, com requerimento associado.

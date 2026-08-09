@@ -8,7 +8,7 @@ import {
   withScheduleDate,
 } from "../lib/schedule-date.ts";
 import { orderScheduleResources } from "../lib/schedule-sections.ts";
-import { formatHoursDuration, fullPeriodWindow, fullPeriodShifts } from "../lib/shift-rules.ts";
+import { assignmentOverlapsShift, coveredOperationalShifts, formatHoursDuration, fullPeriodWindow, fullPeriodShifts } from "../lib/shift-rules.ts";
 import { rankGuardSuggestions, describeReasons } from "../lib/suggest-gm.ts";
 import { groupRedeploymentAssignments, mergeScheduleAssignments } from "../lib/schedule-state.ts";
 import { suggestionPosition } from "../lib/suggestion-position.ts";
@@ -104,6 +104,18 @@ test("fullPeriodWindow covers 07h-19h for day shifts and 19h-07h for night", () 
   assert.equal(night.end, "2026-08-13T07:00");
   assert.deepEqual(fullPeriodShifts("3"), ["2", "3"]);
   assert.deepEqual(fullPeriodShifts("1"), ["4", "1"]);
+});
+
+test("cross-turn assignment appears in every operational column it covers", () => {
+  const assignment = { shift: "3", starts_at: "2026-08-12T13:00", ends_at: "2026-08-13T01:00" };
+  assert.deepEqual(coveredOperationalShifts(assignment, "2026-08-12"), ["3", "4"]);
+  assert.equal(assignmentOverlapsShift(assignment, "2026-08-12", "2"), false);
+  assert.equal(assignmentOverlapsShift(assignment, "2026-08-12", "1"), false);
+});
+
+test("weekly overtime extension is also visible in the night period", () => {
+  const assignment = { shift: "W", starts_at: "2026-08-12T08:00", ends_at: "2026-08-12T23:00" };
+  assert.deepEqual(coveredOperationalShifts(assignment, "2026-08-12"), ["2", "3", "4"]);
 });
 
 test("formatHoursDuration renders 2h and 2h30 without decimals", () => {

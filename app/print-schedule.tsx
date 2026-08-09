@@ -1,10 +1,10 @@
 "use client";
-/* eslint-disable @next/next/no-html-link-for-pages */
 import { Fragment, useEffect, useState } from "react";
 import { ModuleLoading } from "./module-loading";
 import { useScheduleDate } from "./use-schedule-date";
 import { formatScheduleDate, withScheduleDate } from "../lib/schedule-date";
 import { orderScheduleResources } from "../lib/schedule-sections";
+import { assignmentOverlapsShift, operationalShiftWindow } from "../lib/shift-rules";
 type Rec = Record<string, string | number | null>;
 type State = {
   date: string;
@@ -31,6 +31,7 @@ export function PrintSchedule() {
     [error, setError] = useState("");
   useEffect(() => {
     const volumeTest = new URLSearchParams(location.search).get("teste") === "200";
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setData(null);
     fetch(`/api/schedule?date=${date}&_=${Date.now()}`, { cache: "no-store" })
       .then((r) => {
@@ -112,29 +113,31 @@ function PrintPage({
                       (a) =>
                         (kind === "vehicle"
                           ? a.vehicle_id === r.id
-                          : a.post_id === r.id) && belongsToShift(a,s.id),
+                          : a.post_id === r.id) && assignmentOverlapsShift(a,data.date,s.id),
                     ),
-                    required = kind === "vehicle" ? 2 : 1;
+                    missingRoles = kind === "vehicle"
+                      ? ["driver", "patrol"].filter((role) => !list.some((assignment) => String(assignment.role) === role && !isOvertimeExtensionCell(assignment,data.date,s.id)))
+                      : list.length ? [] : ["guard"];
                   return (
                     <td key={s.id}>
-                      {list.map((a) => (
-                        <div className={`print-person ${a.status}`} key={a.id}>
+                      {list.map((a) => {const visualStatus=statusInShift(a,data.date,s.id);return (
+                        <div className={`print-person ${visualStatus}`} key={a.id}>
                           {kind === "vehicle" && (
-                            <span>{a.role === "driver" ? "M" : "P"}</span>
+                            <span>{isOvertimeExtensionCell(a,data.date,s.id)?"R":a.role === "driver" ? "M" : a.role === "patrol" ? "P" : "R"}</span>
                           )}
                           <b>{a.guard_name}</b>
-                          {a.status !== "normal" && (
-                            <em>{String(a.work_kind)==="weekly"&&String(a.regular_ends_at||"")!==String(a.ends_at)?weeklyHeShort(a):status(String(a.status))}</em>
+                          {visualStatus !== "normal" && (
+                            <em>{visualStatus==="overtime"&&a.regular_ends_at?`HE após ${String(a.regular_ends_at).slice(11,16)}`:status(visualStatus)}</em>
                           )}
                           {Number(a.is_reassigned)===1&&<em className="print-rem">REM</em>}
                           <small>
-                            {weeklyDisplay(a)}
+                            {assignmentDisplayInShift(a,data.date,s.id)}
                           </small>
                         </div>
-                      ))}
-                      {list.length < required && (
+                      )})}
+                      {missingRoles.length > 0 && (
                         <strong className="print-hole">
-                          FURO · {required - list.length} vaga(s)
+                          FURO · {missingRoles.map((role)=>role==="driver"?"motorista":role==="patrol"?"patrulheiro":"GM").join(" + ")}
                         </strong>
                       )}
                     </td>
@@ -210,8 +213,9 @@ const status = (s: string) =>
   s === "overtime" ? "HE" : s === "time_bank" ? "BH" : "TROCA";
 const vehicleIcon=(type:string)=>type==="moto"?"🏍️":type==="pickup"?"🛻":type==="van"?"🚐":type==="suv"?"🚙":"🚓";
 function weeklyDisplay(a:Rec){const start=String(a.starts_at).slice(11,16),regular=String(a.regular_ends_at||"").slice(11,16),end=String(a.ends_at).slice(11,16),breakStart=String(a.break_starts_at||"").slice(11,16),breakEnd=String(a.break_ends_at||"").slice(11,16);if(String(a.work_kind)!=="weekly")return `${start}–${end}`;const base=breakStart&&breakEnd?`${start}–${breakStart}/${breakEnd}–${regular}`:`${start}–${regular}`;return end!==regular?`${base} + HE ${regular}–${end}`:base}
-function weeklyHeShort(a:Rec){const regular=String(a.regular_ends_at).slice(11,16),end=String(a.ends_at).slice(11,16);const minutes=(value:string)=>Number(value.slice(0,2))*60+Number(value.slice(3,5));return `HE semanal ${Math.max(0,(minutes(end)-minutes(regular))/60)}h`}
-function belongsToShift(a:Rec,shift:string){if(String(a.shift)===shift)return true;if(String(a.shift)!=="W")return false;const start=String(a.starts_at).slice(11,16),end=String(a.ends_at).slice(11,16);if(shift==="2")return start<"13:00"&&end>"07:00";if(shift==="3")return start<"19:00"&&end>"13:00";return false}
+function statusInShift(a:Rec,date:string,shift:string){const value=String(a.status||"normal"),regular=String(a.regular_ends_at||"");if(value!=="overtime"||!regular)return value;return operationalShiftWindow(date,shift).end<=regular?"normal":value}
+function isOvertimeExtensionCell(a:Rec,date:string,shift:string){const regular=String(a.regular_ends_at||"");return Boolean(regular)&&String(a.status)==="overtime"&&operationalShiftWindow(date,shift).start>=regular}
+function assignmentDisplayInShift(a:Rec,date:string,shift:string){if(String(a.work_kind)==="weekly"&&(shift==="2"||shift==="3"))return weeklyDisplay(a);const window=operationalShiftWindow(date,shift),start=String(a.starts_at),end=String(a.ends_at),segmentStart=start>window.start?start:window.start,segmentEnd=end<window.end?end:window.end,range=`${segmentStart.slice(11,16)}–${segmentEnd.slice(11,16)}`;return statusInShift(a,date,shift)==="overtime"&&a.regular_ends_at?`Extensão HE ${range}`:range}
 
 function makeVolumeData(data: State): State {
   const vehicles = data.vehicles.slice(0, 4);

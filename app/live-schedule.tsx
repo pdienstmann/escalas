@@ -12,10 +12,12 @@ import {
 } from "../lib/schedule-state";
 import { suggestionPosition, type SuggestionPosition } from "../lib/suggestion-position";
 import {
-  formatHoursDuration,
+  assignmentOverlapsShift,
+  coveredOperationalShifts,
   fullPeriodLabel,
   fullPeriodWindow,
   isDayShift,
+  operationalShiftWindow,
   shiftTimes,
   SHIFT_DEFS,
 } from "../lib/shift-rules";
@@ -114,7 +116,7 @@ export function LiveSchedule() {
     if (!data) return map;
     for (const a of data.assignments) {
       for (const s of shifts) {
-        if (!belongsToShift(a, s.id)) continue;
+        if (!assignmentOverlapsShift(a, data.date, s.id)) continue;
         if (a.post_id != null) {
           const key = assignmentKey("post", Number(a.post_id), s.id);
           const list = map.get(key) || [];
@@ -429,7 +431,9 @@ export function LiveSchedule() {
       sum +
       shifts.filter((s) => {
         const list = assignmentIndex.get(assignmentKey(x.kind, Number(x.r.id), s.id)) || [];
-        return list.length < (x.kind === "vehicle" ? 2 : 1);
+        return x.kind === "vehicle"
+          ? !list.some((assignment)=>assignment.role==="driver"&&!isOvertimeExtensionCell(assignment,data.date,s.id)) || !list.some((assignment)=>assignment.role==="patrol"&&!isOvertimeExtensionCell(assignment,data.date,s.id))
+          : list.length < 1;
       }).length,
     0,
   );
@@ -875,18 +879,20 @@ function Row({
         </td>
         {visibleShifts.map((s) => {
           const list = assignmentIndex.get(assignmentKey(kind, Number(resource.id), s.id)) || [];
-          const need = kind === "vehicle" ? 2 : 1;
+          const missingRoles = kind === "vehicle"
+            ? ["driver", "patrol"].filter((role) => !list.some((assignment) => String(assignment.role) === role && !isOvertimeExtensionCell(assignment,data.date,s.id)))
+            : list.length ? [] : ["guard"];
           return (
             <td
               key={s.id}
-              className={`${list.length < need ? "furo" : ""} drop-cell`}
+              className={`${missingRoles.length ? "furo" : ""} drop-cell`}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => drop(e, s.id)}
             >
-              {list.map((a) => (
+              {list.map((a) => {const visualStatus=statusInShift(a,data.date,s.id);return (
                 <button
                   draggable
-                  className={`live-person ${a.status} ${Number(a.is_reassigned)?"reassigned":""} ${Number(a.id) === selectedId ? "is-selected" : ""}`}
+                  className={`live-person ${visualStatus} ${Number(a.is_reassigned)?"reassigned":""} ${Number(a.id) === selectedId ? "is-selected" : ""}`}
                   key={a.id}
                   onDragStart={(e) => {
                     e.dataTransfer.effectAllowed = "move";
@@ -898,31 +904,29 @@ function Row({
                 >
                   {kind === "vehicle" && (
                     <span className="role">
-                      {a.role === "driver" ? "M" : "P"}
+                      {isOvertimeExtensionCell(a,data.date,s.id)?"R":a.role === "driver" ? "M" : a.role === "patrol" ? "P" : "R"}
                     </span>
                   )}
                   <b>{a.guard_name}</b>
-                  {a.status !== "normal" && (
-                    <span className={`badge ${statusClass(String(a.status))}`}>
-                      {String(a.work_kind)==="weekly"&&String(a.regular_ends_at||"")!==String(a.ends_at)?weeklyHeShort(a):statusShort(String(a.status))}
+                  {visualStatus !== "normal" && (
+                    <span className={`badge ${statusClass(visualStatus)}`}>
+                      {visualStatus==="overtime"&&a.regular_ends_at?`HE · após ${String(a.regular_ends_at).slice(11,16)}`:statusShort(visualStatus)}
                     </span>
                   )}
                   {Number(a.is_reassigned)===1&&<span className="badge remanejamento">REM</span>}
                   <small>
-                    {weeklyDisplay(a)}
+                    {assignmentDisplayInShift(a,data.date,s.id)}
                   </small>
                 </button>
-              ))}
-              {list.length < need && (
+              )})}
+              {missingRoles.length > 0 && (
                 <button
                   className="live-hole"
                   onClick={(e) => onHolePick(kind, resource, s.id, e)}
                 >
                   <span>FURO</span>＋ Selecionar{" "}
                   {kind === "vehicle"
-                    ? list.length === 0
-                      ? "motorista"
-                      : "patrulheiro"
+                    ? missingRoles[0] === "driver" ? "motorista" : "patrulheiro"
                     : "GM"}
                 </button>
               )}
@@ -955,7 +959,14 @@ function Editor({
     t = fillingHole ? fullPeriodWindow(data.date, pick.shift) : times(data.date, pick.shift),
     [guardId, setGuardId] = useState(String(a?.guard_id || "")),
     [guardQuery, setGuardQuery] = useState(""),
+    [shiftId, setShiftId] = useState(String(a?.shift || pick.shift)),
+    [startsAt, setStartsAt] = useState(String(a?.starts_at || t.start)),
+    [endsAt, setEndsAt] = useState(String(a?.ends_at || t.end)),
+    [regularEndsAt, setRegularEndsAt] = useState(String(a?.regular_ends_at || "")),
+    [assignmentStatus, setAssignmentStatus] = useState(String(a?.status || "normal")),
     guard = data.guards.find((g) => String(g.id) === guardId);
+  const tomorrow=new Date(`${data.date}T12:00:00Z`);tomorrow.setUTCDate(tomorrow.getUTCDate()+1);const tomorrowDate=tomorrow.toISOString().slice(0,10);
+  const covered=coveredOperationalShifts({shift:shiftId,starts_at:startsAt,ends_at:endsAt},data.date);
   const eligibleGuards = useMemo(() => {
     const q = guardQuery.toLowerCase().trim();
     return data.guards.filter((g) => {
@@ -1001,6 +1012,7 @@ function Editor({
           <span>Escolha GM, destino, turno, função e horário.</span>
         </div>
       )}
+      {!fillingHole&&<div className="cross-shift-tools"><div><b>Horário atravessando turnos</b><small>O GM aparecerá automaticamente em todas as colunas cobertas.</small></div><button type="button" onClick={()=>{if(shiftId!=="W")setShiftId("3");setStartsAt(`${data.date}T13:00`);setEndsAt(`${tomorrowDate}T01:00`);setRegularEndsAt("")}}>13h até 01h</button><button type="button" onClick={()=>{setRegularEndsAt(`${data.date}T19:00`);setEndsAt(`${data.date}T23:00`);setAssignmentStatus("overtime")}}>HE após 19h</button><p><span>Aparecerá em:</span> {covered.length?covered.map((shift)=>`${shift}º`).join(" + "):"revise os horários"}</p></div>}
       <div className="editing-alert">
         <b>Confira antes de salvar:</b>
         <span>{guard?.name || "nenhum GM selecionado"}</span>
@@ -1049,7 +1061,8 @@ function Editor({
       </label>
       <label>
         Turno de referência
-        <select name="shift" defaultValue={pick.shift}>
+        <select name="shift" value={shiftId} onChange={(event)=>setShiftId(event.target.value)}>
+          {shiftId==="W"&&<option value="W">Semanal / expediente</option>}
           {shifts.map((s) => (
             <option key={s.id} value={s.id}>
               {s.label} · {s.time}
@@ -1077,7 +1090,7 @@ function Editor({
           <option value="guard">GM do posto</option>
           <option value="driver">M — Motorista</option>
           <option value="patrol">P — Patrulheiro</option>
-          <option value="third">3º integrante</option>
+          <option value="third">R — Reforço / extensão</option>
         </select>
       </label>
       <div className="two">
@@ -1086,7 +1099,8 @@ function Editor({
           <input
             name="startsAt"
             type="datetime-local"
-            defaultValue={String(a?.starts_at || t.start)}
+            value={startsAt}
+            onChange={(event)=>setStartsAt(event.target.value)}
             required
             readOnly={fillingHole}
           />
@@ -1096,7 +1110,8 @@ function Editor({
           <input
             name="endsAt"
             type="datetime-local"
-            defaultValue={String(a?.ends_at || t.end)}
+            value={endsAt}
+            onChange={(event)=>setEndsAt(event.target.value)}
             required
             readOnly={fillingHole}
           />
@@ -1109,9 +1124,10 @@ function Editor({
             : "Horário fixo do furo noturno: 19:00 às 07:00 (4º + 1º turnos)."}
         </p>
       )}
+      {!fillingHole&&<label>Fim do horário normal <small>Preencha somente quando o trecho seguinte for hora extra.</small><input name="regularEndsAt" type="datetime-local" value={regularEndsAt} onChange={(event)=>setRegularEndsAt(event.target.value)}/></label>}
       <label>
         Situação
-        <select name="status" defaultValue={String(a?.status || "normal")}>
+        <select name="status" value={assignmentStatus} onChange={(event)=>setAssignmentStatus(event.target.value)}>
           <option value="normal">Normal</option>
           <option value="overtime">Hora extra</option>
           <option value="time_bank">Banco de horas</option>
@@ -1151,10 +1167,17 @@ const statusClass = (s: string) =>
 const statusShort = (s: string) =>
   s === "overtime" ? "HE" : s === "time_bank" ? "BH" : "TROCA";
 function weeklyDisplay(a:Rec){const start=String(a.starts_at).slice(11,16),regular=String(a.regular_ends_at||"").slice(11,16),end=String(a.ends_at).slice(11,16),breakStart=String(a.break_starts_at||"").slice(11,16),breakEnd=String(a.break_ends_at||"").slice(11,16);if(String(a.work_kind)!=="weekly")return `${start}–${end}`;const base=breakStart&&breakEnd?`${start}–${breakStart} / ${breakEnd}–${regular}`:`${start}–${regular}`;return end!==regular?`${base} + HE semanal ${regular}–${end}`:base}
-function weeklyHeShort(a:Rec){
-  const start=String(a.regular_ends_at).slice(11,16),end=String(a.ends_at).slice(11,16);
-  const minutes=(value:string)=>Number(value.slice(0,2))*60+Number(value.slice(3,5));
-  const hours=Math.max(0,(minutes(end)-minutes(start))/60);
-  return `HE SEMANAL · ${formatHoursDuration(hours)}`;
+function statusInShift(a:Rec,date:string,shift:string){
+  const status=String(a.status||"normal"),regular=String(a.regular_ends_at||"");
+  if(status!=="overtime"||!regular)return status;
+  const window=operationalShiftWindow(date,shift);
+  return window.end<=regular?"normal":status;
 }
-function belongsToShift(a:Rec,shift:string){if(String(a.shift)===shift)return true;if(String(a.shift)!=="W")return false;const start=String(a.starts_at).slice(11,16),end=String(a.ends_at).slice(11,16);if(shift==="2")return start<"13:00"&&end>"07:00";if(shift==="3")return start<"19:00"&&end>"13:00";return false}
+function isOvertimeExtensionCell(a:Rec,date:string,shift:string){const regular=String(a.regular_ends_at||"");return Boolean(regular)&&String(a.status)==="overtime"&&operationalShiftWindow(date,shift).start>=regular}
+function assignmentDisplayInShift(a:Rec,date:string,shift:string){
+  if(String(a.work_kind)==="weekly"&&(shift==="2"||shift==="3"))return weeklyDisplay(a);
+  const window=operationalShiftWindow(date,shift),start=String(a.starts_at),end=String(a.ends_at);
+  const segmentStart=start>window.start?start:window.start,segmentEnd=end<window.end?end:window.end;
+  const range=`${segmentStart.slice(11,16)}–${segmentEnd.slice(11,16)}`;
+  return statusInShift(a,date,shift)==="overtime"&&a.regular_ends_at?`Extensão HE ${range}`:range;
+}
