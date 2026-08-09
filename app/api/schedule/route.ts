@@ -8,7 +8,7 @@ import {
 import { writeAudit } from "../../../lib/audit";
 import { permitted } from "../../../lib/access";
 import { isScheduleDate, todayScheduleDate } from "../../../lib/schedule-date";
-import { fullPeriodShifts, shiftTimes as periodShiftTimes, isDayShift, splitExtensionWindow } from "../../../lib/shift-rules";
+import { fullPeriodShifts, fullPeriodWindow, shiftTimes as periodShiftTimes, isDayShift, splitExtensionWindow } from "../../../lib/shift-rules";
 import { rankGuardSuggestions, describeReasons } from "../../../lib/suggest-gm";
 import { hasRequiredVehicleCrew, hasUniqueCrewMembers } from "../../../lib/crew-rules";
 
@@ -1122,6 +1122,10 @@ async function buildSuggestions(request: Request, date: string) {
     .map(([guardId, assignments]) => {
       const first = assignments[0];
       const compatibleRole = !vehicleId || !role || assignments.some((item) => String(item.role) === role);
+      const coversFullPeriod = periodShiftIds.every((shiftId) =>
+        assignments.some((item) => String(item.shift) === shiftId),
+      );
+      const periodWindow = coversFullPeriod ? fullPeriodWindow(date, shift) : null;
       return {
         guardId,
         name: String(first.guard_name),
@@ -1129,8 +1133,8 @@ async function buildSuggestions(request: Request, date: string) {
         assignmentIds: assignments.map((item) => Number(item.id)),
         origins: [...new Set(assignments.map((item) => String(item.origin_label)))],
         roles: [...new Set(assignments.map((item) => String(item.role || "guard")))],
-        startsAt: String(assignments[0].starts_at),
-        endsAt: String(assignments[assignments.length - 1].ends_at),
+        startsAt: periodWindow?.start || String(assignments[0].starts_at),
+        endsAt: periodWindow?.end || String(assignments[assignments.length - 1].ends_at),
         compatibleRole,
         availableForRedeployment: assignments.some((item) => Number(item.awaiting_redeploy) === 1),
       };
