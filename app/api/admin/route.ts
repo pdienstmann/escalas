@@ -164,6 +164,7 @@ export async function POST(request: Request) {
         .run();
       const after = await env.DB.prepare("SELECT * FROM guards WHERE id=?").bind(created.meta.last_row_id).first();
       await writeAudit(request,{action:"create",entityType:"guard",entityId:Number(created.meta.last_row_id),summary:`Cadastrou o GM ${body.name}`,after:after as Record<string,unknown>});
+      return Response.json({ok:true,entity:after,message:`GM ${body.name} cadastrado e disponível para escalar.`});
     } else if (body.action === "post") {
       const created = await env.DB.prepare(
         "INSERT INTO posts (name,group_name,sort_order) VALUES (?,?,?)",
@@ -171,7 +172,10 @@ export async function POST(request: Request) {
         .bind(body.name, body.groupName, body.sortOrder || 99)
         .run();
       const after = await env.DB.prepare("SELECT * FROM posts WHERE id=?").bind(created.meta.last_row_id).first();
+      await env.DB.prepare("INSERT OR IGNORE INTO schedule_sections (section_key,label,sort_order) VALUES (?,?,?)")
+        .bind(`POST:${body.groupName}`,body.groupName,Number(body.sortOrder||99)).run();
       await writeAudit(request,{action:"create",entityType:"post",entityId:Number(created.meta.last_row_id),summary:`Cadastrou o posto ${body.name}`,after:after as Record<string,unknown>});
+      return Response.json({ok:true,entity:after,message:`Posto ${body.name} adicionado à escala.`});
     } else if (body.action === "vehicle") {
       const created = await env.DB.prepare(
         "INSERT INTO vehicles (prefix,type,zone) VALUES (?,?,?)",
@@ -180,6 +184,17 @@ export async function POST(request: Request) {
         .run();
       const after = await env.DB.prepare("SELECT * FROM vehicles WHERE id=?").bind(created.meta.last_row_id).first();
       await writeAudit(request,{action:"create",entityType:"vehicle",entityId:Number(created.meta.last_row_id),summary:`Cadastrou a viatura ${body.prefix}`,after:after as Record<string,unknown>});
+      return Response.json({ok:true,entity:after,message:`Viatura ${body.prefix} adicionada à escala.`});
+    } else if (body.action === "section_create") {
+      const label=String(body.label||"").trim();
+      if(!label)return Response.json({error:"Informe o nome da seção."},{status:400});
+      const sectionKey=`POST:${label}`;
+      const maximum=await env.DB.prepare("SELECT COALESCE(MAX(sort_order),0) maximum FROM schedule_sections").first<{maximum:number}>();
+      await env.DB.prepare("INSERT INTO schedule_sections (section_key,label,sort_order) VALUES (?,?,?)")
+        .bind(sectionKey,label,Number(maximum?.maximum||0)+10).run();
+      const after=await env.DB.prepare("SELECT section_key,label,sort_order FROM schedule_sections WHERE section_key=?").bind(sectionKey).first();
+      await writeAudit(request,{action:"create",entityType:"section_config",entityId:sectionKey,summary:`Criou a seção ${label}`,after:after as Record<string,unknown>});
+      return Response.json({ok:true,entity:after,message:`Seção ${label} criada. Agora adicione postos nela.`});
     } else if (body.action === "vehicle_outage") {
       const vehicleId = Number(body.vehicleId);
       const startsOn = String(body.startsOn);

@@ -521,7 +521,7 @@ async function upsertAssignment(
   )
     .bind(assignmentId)
     .first();
-  await writeAudit(request, {
+  const auditEventId = await writeAudit(request, {
     action: id ? "update" : "create",
     entityType: "assignment",
     entityId: assignmentId,
@@ -532,7 +532,7 @@ async function upsertAssignment(
     after: assignment as Record<string, unknown>,
     undoable: true,
   });
-  return { ok: true as const, assignment };
+  return { ok: true as const, assignment, auditEventId };
 }
 
 export async function POST(request: Request) {
@@ -716,7 +716,7 @@ export async function POST(request: Request) {
     if (!before)
       return Response.json({ error: "Designação não encontrada." }, { status: 404 });
     await env.DB.prepare("DELETE FROM assignments WHERE id=?").bind(b.id).run();
-    await writeAudit(request, {
+    const auditEventId = await writeAudit(request, {
       action: "delete",
       entityType: "assignment",
       entityId: Number(b.id),
@@ -724,7 +724,7 @@ export async function POST(request: Request) {
       before,
       undoable: true,
     });
-    return Response.json({ ok: true, deletedId: Number(b.id) });
+    return Response.json({ ok: true, deletedId: Number(b.id), auditEventId, message: "GM removido da escala." });
   }
 
   const id = Number(b.id || 0);
@@ -788,7 +788,7 @@ export async function POST(request: Request) {
   });
   if ("error" in result)
     return Response.json({ error: result.error }, { status: result.status });
-  return Response.json({ ok: true, assignment: result.assignment });
+  return Response.json({ ok: true, assignment: result.assignment, auditEventId: result.auditEventId });
 }
 
 async function buildSuggestions(request: Request, date: string) {

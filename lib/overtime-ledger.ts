@@ -2,6 +2,11 @@ import { env } from "cloudflare:workers";
 
 export async function syncScheduleOvertime() {
   await env.DB.prepare(
+    `DELETE FROM overtime_entries
+     WHERE source='schedule' AND status='pending'
+       AND (assignment_id IS NULL OR assignment_id NOT IN (SELECT id FROM assignments WHERE status='overtime'))`,
+  ).run();
+  await env.DB.prepare(
     `INSERT INTO overtime_entries
       (assignment_id,guard_id,service_date,starts_at,ends_at,planned_minutes,status,source,location,request_ref)
      SELECT a.id,a.guard_id,date(a.starts_at),COALESCE(a.regular_ends_at,a.starts_at),a.ends_at,

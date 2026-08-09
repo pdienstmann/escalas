@@ -24,7 +24,7 @@ export async function writeAudit(request: Request, event: {
   undoable?: boolean;
 }) {
   const actor = actorFromRequest(request);
-  await env.DB.prepare(
+  const created = await env.DB.prepare(
     "INSERT INTO audit_events (action,entity_type,entity_id,summary,before_json,after_json,actor_id,actor_email,actor_name,undoable) VALUES (?,?,?,?,?,?,?,?,?,?)",
   ).bind(
     event.action,
@@ -38,4 +38,5 @@ export async function writeAudit(request: Request, event: {
     actor.name,
     event.undoable ? 1 : 0,
   ).run();
+  return Number(created.meta.last_row_id);
 }

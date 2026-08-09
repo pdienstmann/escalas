@@ -78,6 +78,10 @@
 
 ### Fase 2 — desempenho e experiência da escala
 
+- Primeiro pacote implementado: menu de ações rápidas dentro da célula do GM, marcação direta de HE/BH, remoção contextual, acesso ao editor completo somente quando necessário e desfazer seguro ligado à auditoria.
+- Cadastro contextual implementado na escala: criar GM, posto, viatura e seção sem navegar até Cadastros; o novo registro entra imediatamente nos dados exibidos.
+- Transição de datas aprimorada: a escala anterior permanece montada, porém bloqueada e claramente identificada enquanto a nova data carrega. Linhas operacionais usam contenção de renderização para reduzir o custo em escalas extensas.
+
 #### Diretriz central de interação
 
 - Tratar a própria escala como a principal superfície de trabalho. As ações frequentes — localizar, adicionar, substituir, mover e remanejar GMs — deverão acontecer dentro da célula, linha ou card selecionado, sem obrigar o escalante a usar o painel lateral.

@@ -65,6 +65,7 @@ type HolePick = {
   position: SuggestionPosition | null;
 };
 type RedeployPick = { assignments: Rec[] };
+type UndoState = { id: number; label: string };
 type ViewFilter = "all" | "day" | "night" | "holes" | "redeploy";
 const shifts = SHIFT_DEFS;
 function times(date: string, shift: string) {
@@ -79,7 +80,10 @@ export function LiveSchedule() {
     [pick, setPick] = useState<Pick | null>(null),
     [holePick, setHolePick] = useState<HolePick | null>(null),
     [redeployPick, setRedeployPick] = useState<RedeployPick | null>(null),
+    [contextPick, setContextPick] = useState<Pick | null>(null),
     [vehicleEdit, setVehicleEdit] = useState<Rec | null>(null),
+    [createOpen, setCreateOpen] = useState(false),
+    [undoEvent, setUndoEvent] = useState<UndoState | null>(null),
     [message, setMessage] = useState(""),
     [query, setQuery] = useState(""),
     [view, setView] = useState<ViewFilter>("all"),
@@ -92,7 +96,7 @@ export function LiveSchedule() {
     const sequence=++loadSequence.current;
     try {
       setPick(null);
-      setData(null);
+      setContextPick(null);
       setLoadError("");
       const r = await fetch(`/api/schedule?date=${date}&_=${Date.now()}`, {
         cache: "no-store",
@@ -172,6 +176,7 @@ export function LiveSchedule() {
       const j = await r.json();
       setMessage(r.ok ? (j.message || "Alteração salva e já exibida na escala.") : j.error);
       if (r.ok) {
+        if (j.auditEventId) setUndoEvent({id:Number(j.auditEventId),label:String(j.message||"Desfazer a última alteração")});
         const changedAssignments: Rec[] = Array.isArray(j.assignments)
           ? j.assignments
           : j.assignment
@@ -195,6 +200,7 @@ export function LiveSchedule() {
           );
         }
         setPick(null);
+        setContextPick(null);
         setHolePick(null);
         setRedeployPick(null);
       }
@@ -229,6 +235,19 @@ export function LiveSchedule() {
       action: "delete",
       id: Number(pick.assignment.id),
     });
+  }
+  async function quickStatus(assignment:Rec,status:string){
+    if(!data)return;
+    await postAssignment({id:assignment.id,scheduleId:data.schedule.id,guardId:assignment.guard_id,postId:assignment.post_id||null,vehicleId:assignment.vehicle_id||null,shift:assignment.shift,role:assignment.role,startsAt:assignment.starts_at,endsAt:assignment.ends_at,regularEndsAt:assignment.regular_ends_at||null,workKind:assignment.work_kind||"shift",status,requestRef:assignment.request_ref||null,isReassigned:Number(assignment.is_reassigned)===1,reassignmentNote:assignment.reassignment_note||null});
+  }
+  async function undoLast(){
+    if(!undoEvent||saving)return;
+    setSaving(true);
+    try{const response=await fetch("/api/history",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"undo",id:undoEvent.id})});const result=await response.json();setMessage(response.ok?result.message:result.error);if(response.ok){setUndoEvent(null);await load()}}finally{setSaving(false)}
+  }
+  async function createCatalogItem(event:FormEvent<HTMLFormElement>,kind:"guard"|"post"|"vehicle"|"section"){
+    event.preventDefault();if(!data||saving)return;setSaving(true);
+    try{const values=Object.fromEntries(new FormData(event.currentTarget));const response=await fetch("/api/admin",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({...values,action:kind==="section"?"section_create":kind})});const result=await response.json();setMessage(response.ok?result.message:result.error);if(!response.ok)return;const entity=result.entity as Rec;setData(current=>{if(!current)return current;if(kind==="guard")return{...current,guards:[...current.guards,entity].sort((a,b)=>String(a.name).localeCompare(String(b.name),"pt-BR"))};if(kind==="post")return{...current,posts:[...current.posts,entity]};if(kind==="vehicle")return{...current,vehicles:[...current.vehicles,entity],allVehicles:[...current.allVehicles,entity]};return{...current,sections:[...current.sections,entity]}});setCreateOpen(false)}finally{setSaving(false)}
   }
   async function confirmHoleSuggestion(guardId: number) {
     if (!data || !holePick) return;
@@ -499,8 +518,9 @@ export function LiveSchedule() {
           <button type="button" className={view==="holes"||view==="redeploy"?"active":""} onClick={()=>jump("pending")}>Pendências</button>
         </div>
         <button type="button" className="toolbar-add" onClick={startManualAdd}>
-          + Adicionar GM
+          + Escalar GM
         </button>
+        <button type="button" className="toolbar-create" onClick={()=>setCreateOpen(true)}>+ Criar na escala</button>
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -523,11 +543,13 @@ export function LiveSchedule() {
       {message && (
         <div className="schedule-toast" role="status">
           {message}
+          {undoEvent&&<button className="toast-undo" disabled={saving} onClick={undoLast}>↶ Desfazer</button>}
           <button onClick={() => setMessage("")}>×</button>
         </div>
       )}
       <div className="workspace">
-        <section className="schedule-wrap">
+        <section className={`schedule-wrap ${data.date!==date?"is-switching":""}`}>
+          {data.date!==date&&<div className="schedule-switching" role="status"><b>Abrindo escala de {formatScheduleDate(date)}</b><span>A escala anterior permanece bloqueada até a nova data terminar de carregar.</span></div>}
           <div className="drag-help">
             Arraste um GM para outra célula ou clique para editar. Ao preencher um furo diurno, o GM é escalado no turno inteiro (07:00–19:00).
           </div>
@@ -574,8 +596,11 @@ export function LiveSchedule() {
                   assignmentIndex={assignmentIndex}
                   availableForRedeployment={data.availableForRedeployment}
                   redeploymentGroups={redeploymentGroups}
-                  selectedId={Number(pick?.assignment?.id || 0)}
-                  onPick={setPick}
+                  selectedId={Number(contextPick?.assignment?.id || pick?.assignment?.id || 0)}
+                  onContextPick={setContextPick}
+                  onEdit={setPick}
+                  onQuickStatus={quickStatus}
+                  onQuickDelete={(assignment)=>confirm(`Remover ${assignment.guard_name} da escala?`)&&postAssignment({action:"delete",id:assignment.id})}
                   onMove={move}
                   onMoveGroup={moveGroup}
                   onHolePick={openHoleSuggest}
@@ -706,8 +731,20 @@ export function LiveSchedule() {
           onSave={saveRedeployment}
         />
       )}
+      {createOpen&&<QuickCreateDialog data={data} saving={saving} onClose={()=>setCreateOpen(false)} onSave={createCatalogItem}/>}
     </main>
   );
+}
+
+function QuickCreateDialog({data,saving,onClose,onSave}:{data:State;saving:boolean;onClose:()=>void;onSave:(event:FormEvent<HTMLFormElement>,kind:"guard"|"post"|"vehicle"|"section")=>void}){
+  const [kind,setKind]=useState<"guard"|"post"|"vehicle"|"section">("guard");
+  const sectionLabels=[...new Set(data.sections.filter(section=>String(section.section_key).startsWith("POST:")).map(section=>String(section.label)))];
+  return <div className="quick-create-backdrop"><section className="quick-create-dialog" role="dialog" aria-modal="true" aria-labelledby="quick-create-title"><header><div><small>CRIAR SEM SAIR DA ESCALA</small><h2 id="quick-create-title">Adicionar estrutura ou efetivo</h2><p>O novo item aparece imediatamente na escala aberta.</p></div><button type="button" onClick={onClose} aria-label="Fechar">×</button></header><nav>{([['guard','GM'],['post','Posto'],['vehicle','Viatura'],['section','Seção']] as const).map(option=><button type="button" className={kind===option[0]?"active":""} key={option[0]} onClick={()=>setKind(option[0])}>{option[1]}</button>)}</nav>
+    {kind==="guard"&&<form onSubmit={event=>onSave(event,"guard")}><label>Nome operacional<input name="name" required placeholder="Ex.: SILVA"/></label><label>Matrícula<input name="registration" required placeholder="Identificação única"/></label><label>Equipe / padrão<input name="platoon" placeholder="D1, D2, N1, N2…"/></label><label>Escala de trabalho<select name="workRegime" defaultValue="12x36"><option value="12x36">Plantão 12x36</option><option value="weekly">Expediente semanal</option></select></label><input type="hidden" name="baseShift" value={kind==="guard"?"12x36":""}/><footer><button type="button" onClick={onClose}>Cancelar</button><button className="save" disabled={saving}>{saving?"Criando…":"Cadastrar GM"}</button></footer></form>}
+    {kind==="post"&&<form onSubmit={event=>onSave(event,"post")}><label>Nome do posto<input name="name" required placeholder="Ex.: Recepção"/></label><label>Seção<select name="groupName" required defaultValue=""><option value="">Selecionar seção</option>{sectionLabels.map(label=><option key={label} value={label}>{label}</option>)}</select></label><label>Ordem<input name="sortOrder" type="number" defaultValue="99"/></label><footer><button type="button" onClick={onClose}>Cancelar</button><button className="save" disabled={saving}>Adicionar posto</button></footer></form>}
+    {kind==="vehicle"&&<form onSubmit={event=>onSave(event,"vehicle")}><label>Prefixo<input name="prefix" required placeholder="VTR 1400"/></label><label>Tipo<select name="type" defaultValue="sedan"><option value="sedan">Sedan</option><option value="pickup">Caminhonete</option><option value="suv">SUV</option><option value="van">Furgão</option><option value="moto">Moto</option><option value="other">Outro</option></select></label><label>Zona / área<input name="zone" placeholder="Área de atuação"/></label><footer><button type="button" onClick={onClose}>Cancelar</button><button className="save" disabled={saving}>Adicionar viatura</button></footer></form>}
+    {kind==="section"&&<form onSubmit={event=>onSave(event,"section")}><label>Nome da nova seção<input name="label" required placeholder="Ex.: Escolas e operações"/></label><p className="quick-create-help">Depois de criar, use “Posto” para adicionar os locais que ficarão dentro desta seção.</p><footer><button type="button" onClick={onClose}>Cancelar</button><button className="save" disabled={saving}>Criar seção</button></footer></form>}
+  </section></div>
 }
 
 function RedeployQuickEditor({data,assignments,saving,onClose,onSave}:{data:State;assignments:Rec[];saving:boolean;onClose:()=>void;onSave:(e:FormEvent<HTMLFormElement>)=>void}) {
@@ -783,7 +820,10 @@ function Row({
   availableForRedeployment,
   redeploymentGroups,
   selectedId,
-  onPick,
+  onContextPick,
+  onEdit,
+  onQuickStatus,
+  onQuickDelete,
   onMove,
   onMoveGroup,
   onHolePick,
@@ -800,7 +840,10 @@ function Row({
   availableForRedeployment: Rec[];
   redeploymentGroups: RedeploymentGroup[];
   selectedId: number;
-  onPick: (p: Pick) => void;
+  onContextPick: (p: Pick) => void;
+  onEdit: (p: Pick) => void;
+  onQuickStatus: (assignment:Rec,status:string) => void;
+  onQuickDelete: (assignment:Rec) => void;
   onMove: (a: Rec, k: "post" | "vehicle", r: Rec, s: string) => void;
   onMoveGroup: (a: Rec[], k: "post" | "vehicle", r: Rec) => void;
   onHolePick: (
@@ -889,17 +932,16 @@ function Row({
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => drop(e, s.id)}
             >
-              {list.map((a) => {const visualStatus=statusInShift(a,data.date,s.id);return (
+              {list.map((a) => {const visualStatus=statusInShift(a,data.date,s.id);return (<Fragment key={String(a.id)}>
                 <button
                   draggable
                   className={`live-person ${visualStatus} ${Number(a.is_reassigned)?"reassigned":""} ${Number(a.id) === selectedId ? "is-selected" : ""}`}
-                  key={a.id}
                   onDragStart={(e) => {
                     e.dataTransfer.effectAllowed = "move";
                     e.dataTransfer.setData("text/assignment", String(a.id));
                   }}
                   onClick={() =>
-                    onPick({ kind, resource, shift: s.id, assignment: a })
+                    onContextPick({ kind, resource, shift: s.id, assignment: a })
                   }
                 >
                   {kind === "vehicle" && (
@@ -918,6 +960,7 @@ function Row({
                     {assignmentDisplayInShift(a,data.date,s.id)}
                   </small>
                 </button>
+                {Number(a.id)===selectedId&&<div className="cell-quick-actions" role="group" aria-label={`Ações rápidas de ${String(a.guard_name)}`}><b>{a.guard_name}</b><button type="button" onClick={()=>onEdit({kind,resource,shift:s.id,assignment:a})}>Trocar / mover / horário</button><button type="button" className={a.status==="overtime"?"active":""} onClick={()=>onQuickStatus(a,a.status==="overtime"?"normal":"overtime")}>HE</button><button type="button" className={a.status==="time_bank"?"active":""} onClick={()=>onQuickStatus(a,a.status==="time_bank"?"normal":"time_bank")}>BH</button><button type="button" className="danger" onClick={()=>onQuickDelete(a)}>Remover</button><button type="button" aria-label="Fechar ações" onClick={()=>onContextPick({kind,resource,shift:s.id})}>×</button></div>}</Fragment>
               )})}
               {missingRoles.length > 0 && (
                 <button

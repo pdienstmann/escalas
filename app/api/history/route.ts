@@ -39,7 +39,10 @@ export async function POST(request: Request) {
   const type = String(event.entity_type), action = String(event.action), rawEntityId = String(event.entity_id), id = Number(rawEntityId);
 
   if (type === "assignment") {
-    if (action === "create") statements.push(env.DB.prepare("DELETE FROM assignments WHERE id=?").bind(id));
+    if (action === "create") {
+      statements.push(env.DB.prepare("DELETE FROM overtime_entries WHERE assignment_id=? AND status='pending'").bind(id));
+      statements.push(env.DB.prepare("DELETE FROM assignments WHERE id=?").bind(id));
+    }
     else if (action === "update" && before) statements.push(assignmentUpdate(before,id));
     else if (action === "delete" && before) statements.push(assignmentInsert(before,id));
     else return Response.json({error:"Não foi possível reconstruir esta designação."},{status:409});
