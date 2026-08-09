@@ -142,6 +142,17 @@ async function restoreVehiclePatternCrew(scheduleId:number,date:string,vehicleId
       ON CONFLICT(schedule_id,guard_id,starts_at) DO UPDATE SET post_id=NULL,vehicle_id=excluded.vehicle_id,shift=excluded.shift,role=excluded.role,ends_at=excluded.ends_at,is_reassigned=0,reassignment_note=NULL,updated_at=CURRENT_TIMESTAMP`)
       .bind(scheduleId,slot.guard_id,vehicleId,shift,slot.role,interval.start,interval.end));
   }
+  const weekday=new Date(`${date}T12:00:00Z`).getUTCDay();
+  const weekly=(await env.DB.prepare(`SELECT * FROM weekly_slots
+    WHERE vehicle_id=? AND active=1 AND instr(','||weekdays||',',','||?||',')>0`).bind(vehicleId,String(weekday)).all<Record<string,unknown>>()).results;
+  for(const slot of weekly){
+    const end=String(slot.overtime_end||slot.regular_end);
+    statements.push(env.DB.prepare(`INSERT INTO assignments
+      (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,regular_ends_at,break_starts_at,break_ends_at,work_kind,status,request_ref,is_reassigned,reassignment_note)
+      VALUES (?,?,NULL,?,?,?,?,?,?,?,?,?,?,?,?,NULL)
+      ON CONFLICT(schedule_id,guard_id,starts_at) DO UPDATE SET post_id=NULL,vehicle_id=excluded.vehicle_id,shift='W',role=excluded.role,ends_at=excluded.ends_at,regular_ends_at=excluded.regular_ends_at,break_starts_at=excluded.break_starts_at,break_ends_at=excluded.break_ends_at,work_kind='weekly',status=excluded.status,request_ref=excluded.request_ref,is_reassigned=0,reassignment_note=NULL,updated_at=CURRENT_TIMESTAMP`)
+      .bind(scheduleId,slot.guard_id,vehicleId,"W",slot.role,`${date}T${slot.starts_at}`,`${date}T${end}`,`${date}T${slot.regular_end}`,slot.break_start?`${date}T${slot.break_start}`:null,slot.break_end?`${date}T${slot.break_end}`:null,"weekly",slot.overtime_end?"overtime":"normal",slot.overtime_end?`HE semanal após ${slot.regular_end}`:null,0));
+  }
   if(statements.length)await env.DB.batch(statements);
   return statements.length;
 }
