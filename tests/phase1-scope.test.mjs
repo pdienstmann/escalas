@@ -11,6 +11,7 @@ import { orderScheduleResources } from "../lib/schedule-sections.ts";
 import { assignmentOverlapsShift, coveredOperationalShifts, formatHoursDuration, fullPeriodWindow, fullPeriodShifts, splitExtensionWindow } from "../lib/shift-rules.ts";
 import { rankGuardSuggestions, describeReasons } from "../lib/suggest-gm.ts";
 import { groupRedeploymentAssignments, mergeScheduleAssignments } from "../lib/schedule-state.ts";
+import { orderAssignmentsInResourceCell } from "../lib/schedule-lanes.ts";
 import { suggestionPosition } from "../lib/suggestion-position.ts";
 
 test("resolveScheduleDate prefers URL date over storage and today", () => {
@@ -255,4 +256,25 @@ test("groupRedeploymentAssignments joins both halves of each operational period"
   assert.equal(grouped.length, 2);
   assert.deepEqual(grouped[0].assignments.map((item) => item.shift), ["2", "3"]);
   assert.deepEqual(grouped[1].assignments.map((item) => item.shift), ["4", "1"]);
+});
+
+test("regular GMs keep the same visual order across shifts of one post", () => {
+  const shift2 = [
+    { id: 1, guard_id: 2, guard_name: "BRUNO", role: "guard", work_kind: "shift" },
+    { id: 2, guard_id: 1, guard_name: "ALMEIDA", role: "guard", work_kind: "shift" },
+  ];
+  const shift3 = [
+    { id: 3, guard_id: 1, guard_name: "ALMEIDA", role: "guard", work_kind: "shift" },
+    { id: 4, guard_id: 2, guard_name: "BRUNO", role: "guard", work_kind: "shift" },
+  ];
+  const all = [...shift2, ...shift3];
+  assert.deepEqual(orderAssignmentsInResourceCell(shift2, all, "post").map((item) => item.guard_name), ["ALMEIDA", "BRUNO"]);
+  assert.deepEqual(orderAssignmentsInResourceCell(shift3, all, "post").map((item) => item.guard_name), ["ALMEIDA", "BRUNO"]);
+});
+
+test("independent overtime stays outside regular alignment lanes", () => {
+  const regular = { id: 1, guard_id: 2, guard_name: "BRUNO", role: "guard", work_kind: "shift", starts_at: "2026-08-12T13:00" };
+  const extension = { id: 2, guard_id: 1, guard_name: "ALMEIDA", role: "guard", work_kind: "overtime_extension", starts_at: "2026-08-12T19:00" };
+  const ordered = orderAssignmentsInResourceCell([extension, regular], [extension, regular], "post");
+  assert.deepEqual(ordered.map((item) => item.id), [1, 2]);
 });

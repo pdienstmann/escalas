@@ -11,6 +11,7 @@ import {
   type RedeploymentGroup,
 } from "../lib/schedule-state";
 import { suggestionPosition, type SuggestionPosition } from "../lib/suggestion-position";
+import { orderAssignmentsInResourceCell } from "../lib/schedule-lanes";
 import {
   assignmentOverlapsShift,
   coveredOperationalShifts,
@@ -324,9 +325,27 @@ export function LiveSchedule() {
     await postAssignment({id:assignment.id,scheduleId:data.schedule.id,guardId:assignment.guard_id,postId:assignment.post_id||null,vehicleId:assignment.vehicle_id||null,shift:assignment.shift,role:assignment.role,startsAt:assignment.starts_at,endsAt:assignment.ends_at,regularEndsAt:assignment.regular_ends_at||null,workKind:assignment.work_kind||"shift",status,requestRef:assignment.request_ref||null,isReassigned:Number(assignment.is_reassigned)===1,reassignmentNote:assignment.reassignment_note||null});
   }
   async function undoLast(){
-    if(!undoEvent||saving)return;
-    setSaving(true);
-    try{const response=await fetch("/api/history",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"undo",id:undoEvent.id})});const result=await response.json();setMessage(response.ok?result.message:result.error);if(response.ok){setUndoEvent(null);await load()}}finally{setSaving(false)}
+    if(!undoEvent||savingRef.current)return;
+    savingRef.current=true;setSaving(true);
+    try{
+      const response=await fetch("/api/history",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"undo",id:undoEvent.id})});
+      const result=await response.json();
+      setMessage(response.ok?result.message:result.error);
+      if(!response.ok)return;
+      setUndoEvent(null);
+      const deletedIds=new Set<number>((result.deletedAssignmentIds||[]).map(Number));
+      const restored:Rec[]=result.assignments||[];
+      if(result.requiresReload){await load();return;}
+      setData(current=>{
+        if(!current)return current;
+        const active=current.assignments.filter(item=>!deletedIds.has(Number(item.id)));
+        const available=current.availableForRedeployment.filter(item=>!deletedIds.has(Number(item.id)));
+        return{...current,...mergeScheduleAssignments(active,available,restored)};
+      });
+      if(restored.length){const ids=restored.map(item=>Number(item.id));setRecentAssignmentIds(ids);window.setTimeout(()=>setRecentAssignmentIds(current=>current.filter(id=>!ids.includes(id))),1800)}
+      if(copiedAssignment&&deletedIds.has(Number(copiedAssignment.id)))setCopiedAssignment(null);
+    }catch{setMessage("Não foi possível desfazer agora. A escala exibida foi preservada.")}
+    finally{savingRef.current=false;setSaving(false)}
   }
   async function createCatalogItem(event:FormEvent<HTMLFormElement>,kind:"guard"|"post"|"vehicle"|"section"){
     event.preventDefault();if(!data||saving)return;setSaving(true);
@@ -1276,7 +1295,12 @@ function Row({
   onAddInSection: (kind: "post" | "vehicle", section: string) => void;
   onRemoveResource: (kind: "post" | "vehicle", resource: Rec) => void;
 }) {
-  const knownAssignments=[...new Map([...assignmentIndex.values()].flat().map(item=>[Number(item.id),item])).values()];
+  const knownAssignments=useMemo(()=>[...new Map([...assignmentIndex.values()].flat().map(item=>[Number(item.id),item])).values()],[assignmentIndex]);
+  const resourceAssignments=useMemo(()=>knownAssignments.filter(item=>kind==="post"?Number(item.post_id)===Number(resource.id):Number(item.vehicle_id)===Number(resource.id)),[kind,knownAssignments,resource.id]);
+  const alignedAssignmentsByShift=useMemo(()=>new Map(visibleShifts.map(shift=>[
+    shift.id,
+    orderAssignmentsInResourceCell(assignmentIndex.get(assignmentKey(kind,Number(resource.id),shift.id))||[],resourceAssignments,kind),
+  ])),[assignmentIndex,kind,resource.id,resourceAssignments,visibleShifts]);
   function showExtensionShortcut(assignment:Rec,shift:string){
     if(!isDayShift(shift))return false;
     if(String(assignment.work_kind)==="overtime_extension")return false;
@@ -1387,7 +1411,7 @@ function Row({
           </button>
         </td>
         {visibleShifts.map((s) => {
-          const list = assignmentIndex.get(assignmentKey(kind, Number(resource.id), s.id)) || [];
+          const list = alignedAssignmentsByShift.get(s.id) || [];
           const pasteAllowed=canPasteInShift(s.id);
           const missingRoles = kind === "vehicle"
             ? ["driver", "patrol"].filter((role) => !list.some((assignment) => String(assignment.role) === role && !isOvertimeExtensionCell(assignment,date,s.id)))

@@ -36,16 +36,37 @@ export async function POST(request: Request) {
   const before = event.before_json ? JSON.parse(String(event.before_json)) as Row : null;
   const after = event.after_json ? JSON.parse(String(event.after_json)) as Row : null;
   const statements: D1PreparedStatement[] = [];
+  const restoredAssignments: Row[] = [];
+  const deletedAssignmentIds: number[] = [];
+  let requiresReload = false;
   const type = String(event.entity_type), action = String(event.action), rawEntityId = String(event.entity_id), id = Number(rawEntityId);
 
   if (type === "assignment") {
     if (action === "create") {
       statements.push(env.DB.prepare("DELETE FROM overtime_entries WHERE assignment_id=? AND status='pending'").bind(id));
       statements.push(env.DB.prepare("DELETE FROM assignments WHERE id=?").bind(id));
+      deletedAssignmentIds.push(id);
     }
-    else if (action === "update" && before) statements.push(assignmentUpdate(before,id));
-    else if (action === "delete" && before) statements.push(assignmentInsert(before,id));
+    else if (action === "update" && before) { statements.push(assignmentUpdate(before,id)); restoredAssignments.push(before); }
+    else if (action === "delete" && before) { statements.push(assignmentInsert(before,id)); restoredAssignments.push(before); }
     else return Response.json({error:"Não foi possível reconstruir esta designação."},{status:409});
+  } else if (type === "assignment_group") {
+    const beforeAssignments = before && Array.isArray(before.assignments) ? before.assignments as Row[] : [];
+    const afterAssignments = after && Array.isArray(after.assignments) ? after.assignments as Row[] : [];
+    if (!beforeAssignments.length && !afterAssignments.length)
+      return Response.json({error:"Não foi possível reconstruir este grupo de horários."},{status:409});
+    const beforeIds = new Set(beforeAssignments.map((assignment) => Number(assignment.id)));
+    for (const assignment of afterAssignments) {
+      const assignmentId = Number(assignment.id);
+      if (beforeIds.has(assignmentId)) continue;
+      statements.push(env.DB.prepare("DELETE FROM overtime_entries WHERE assignment_id=? AND status='pending'").bind(assignmentId));
+      statements.push(env.DB.prepare("DELETE FROM assignments WHERE id=?").bind(assignmentId));
+      deletedAssignmentIds.push(assignmentId);
+    }
+    for (const assignment of beforeAssignments) {
+      statements.push(assignmentRestore(assignment));
+      restoredAssignments.push(assignment);
+    }
   } else if (type === "movement") {
     if (action === "create") statements.push(env.DB.prepare("DELETE FROM movements WHERE id=?").bind(id));
     else if (action === "update" && before) statements.push(movementUpdate(before,id));
@@ -79,6 +100,7 @@ export async function POST(request: Request) {
     if(parts.length!==3)return Response.json({error:"Não foi possível identificar o local retirado."},{status:409});
     statements.push(env.DB.prepare("DELETE FROM schedule_resource_exclusions WHERE schedule_id=? AND resource_kind=? AND resource_id=?").bind(Number(parts[0]),parts[1],Number(parts[2])));
     for(const assignment of before.assignments as Row[])statements.push(assignmentUpdate(assignment,Number(assignment.id)));
+    requiresReload = true;
   } else {
     return Response.json({error:"O desfazer seguro ainda não está disponível para este tipo de alteração."},{status:409});
   }
@@ -87,7 +109,7 @@ export async function POST(request: Request) {
   statements.push(env.DB.prepare("UPDATE audit_events SET undone_at=CURRENT_TIMESTAMP,undone_by_id=?,undone_by_email=? WHERE id=?").bind(actor.id,actor.email,event.id));
   await env.DB.batch(statements);
   await writeAudit(request,{action:"undo",entityType:type,entityId:event.entity_id as string,summary:`Desfez: ${event.summary}`,before:after,after:before,undoable:false});
-  return Response.json({ok:true,message:"Alteração desfeita com sucesso."});
+  return Response.json({ok:true,message:"Alteração desfeita com sucesso.",assignments:restoredAssignments,deletedAssignmentIds,requiresReload});
 }
 
 function assignmentUpdate(row: Row, id: number) {
@@ -95,6 +117,13 @@ function assignmentUpdate(row: Row, id: number) {
 }
 function assignmentInsert(row: Row, id: number) {
   return env.DB.prepare("INSERT INTO assignments (id,schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,regular_ends_at,break_starts_at,break_ends_at,work_kind,status,request_ref,is_reassigned,reassignment_note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(id,row.schedule_id,row.guard_id,row.post_id,row.vehicle_id,row.shift,row.role,row.starts_at,row.ends_at,row.regular_ends_at||null,row.break_starts_at||null,row.break_ends_at||null,row.work_kind||"shift",row.status,row.request_ref,row.is_reassigned||0,row.reassignment_note||null);
+}
+function assignmentRestore(row: Row) {
+  return env.DB.prepare(`INSERT INTO assignments
+    (id,schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,regular_ends_at,break_starts_at,break_ends_at,work_kind,status,request_ref,is_reassigned,reassignment_note)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(id) DO UPDATE SET schedule_id=excluded.schedule_id,guard_id=excluded.guard_id,post_id=excluded.post_id,vehicle_id=excluded.vehicle_id,shift=excluded.shift,role=excluded.role,starts_at=excluded.starts_at,ends_at=excluded.ends_at,regular_ends_at=excluded.regular_ends_at,break_starts_at=excluded.break_starts_at,break_ends_at=excluded.break_ends_at,work_kind=excluded.work_kind,status=excluded.status,request_ref=excluded.request_ref,is_reassigned=excluded.is_reassigned,reassignment_note=excluded.reassignment_note,updated_at=CURRENT_TIMESTAMP`)
+    .bind(row.id,row.schedule_id,row.guard_id,row.post_id,row.vehicle_id,row.shift,row.role,row.starts_at,row.ends_at,row.regular_ends_at||null,row.break_starts_at||null,row.break_ends_at||null,row.work_kind||"shift",row.status,row.request_ref,row.is_reassigned||0,row.reassignment_note||null);
 }
 function movementUpdate(row:Row,id:number){return env.DB.prepare("UPDATE movements SET guard_id=?,type=?,starts_at=?,ends_at=?,request_ref=?,notes=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(row.guard_id,row.type,row.starts_at,row.ends_at,row.request_ref,row.notes,row.status,id)}
 function movementInsert(row:Row,id:number){return env.DB.prepare("INSERT INTO movements (id,guard_id,type,starts_at,ends_at,request_ref,notes,status) VALUES (?,?,?,?,?,?,?,?)").bind(id,row.guard_id,row.type,row.starts_at,row.ends_at,row.request_ref,row.notes,row.status)}
