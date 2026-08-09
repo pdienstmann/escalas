@@ -57,6 +57,7 @@ type HolePick = {
   role: string | null;
   position: { top: number; left: number } | null;
 };
+type RedeployPick = { assignment: Rec };
 type ViewFilter = "all" | "day" | "night" | "holes" | "redeploy";
 const shifts = SHIFT_DEFS;
 function times(date: string, shift: string) {
@@ -70,6 +71,7 @@ export function LiveSchedule() {
   const [data, setData] = useState<State | null>(null),
     [pick, setPick] = useState<Pick | null>(null),
     [holePick, setHolePick] = useState<HolePick | null>(null),
+    [redeployPick, setRedeployPick] = useState<RedeployPick | null>(null),
     [vehicleEdit, setVehicleEdit] = useState<Rec | null>(null),
     [message, setMessage] = useState(""),
     [query, setQuery] = useState(""),
@@ -183,6 +185,7 @@ export function LiveSchedule() {
         }
         setPick(null);
         setHolePick(null);
+        setRedeployPick(null);
       }
       return r.ok;
     } finally {
@@ -290,6 +293,7 @@ export function LiveSchedule() {
   ) {
     if (!data) return;
     const t = times(data.date, shift),
+      sameShift = String(assignment.shift) === shift,
       currentCount = data.assignments.filter(
         (a) =>
           (kind === "post"
@@ -305,13 +309,29 @@ export function LiveSchedule() {
       shift,
       role:
         kind === "post" ? "guard" : currentCount === 0 ? "driver" : "patrol",
-      startsAt: t.start,
-      endsAt: t.end,
+      startsAt: sameShift ? assignment.starts_at : t.start,
+      endsAt: sameShift ? assignment.ends_at : t.end,
       status: assignment.status,
       requestRef: assignment.request_ref || null,
       isReassigned: 1,
       reassignmentNote: assignment.reassignment_note || "Remanejamento na escala",
     });
+  }
+  async function saveRedeployment(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!data || !redeployPick) return;
+    const body = Object.fromEntries(new FormData(e.currentTarget));
+    const [kind, resourceId] = String(body.destination).split(":");
+    const resource = (kind === "vehicle" ? data.vehicles : data.posts).find(
+      (item) => Number(item.id) === Number(resourceId),
+    );
+    if (!resource) return;
+    await move(
+      redeployPick.assignment,
+      kind === "vehicle" ? "vehicle" : "post",
+      resource,
+      String(body.shift),
+    );
   }
   async function saveVehicleQuick(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -526,6 +546,7 @@ export function LiveSchedule() {
                   }
                   shifts={visibleShifts}
                   assignmentIndex={assignmentIndex}
+                  availableForRedeployment={data.availableForRedeployment}
                   selectedId={Number(pick?.assignment?.id || 0)}
                   onPick={setPick}
                   onMove={move}
@@ -569,7 +590,21 @@ export function LiveSchedule() {
               <p>Nenhum afastamento nesta data.</p>
             )}
           </section>
-          {showRedeploy && data.availableForRedeployment.length>0&&<section className="redeployment-pool"><header><div><span>VIATURA INDISPONÍVEL</span><h2>GMs à disposição para remanejamento</h2><p>Estas designações foram retiradas de uma VTR em FA ou desativada; escolha um novo destino antes de fechar a escala.</p></div><b>{data.availableForRedeployment.length}</b></header><div>{data.availableForRedeployment.map(a=><article key={String(a.id)}><div><b>{String(a.guard_name)}</b><small>{String(a.starts_at).slice(11,16)}–{String(a.ends_at).slice(11,16)} · aguardando destino</small></div><button onClick={()=>data.posts[0]&&setPick({kind:"post",resource:data.posts[0],shift:String(a.shift)==="W"?"2":String(a.shift),assignment:a})}>Remanejar</button></article>)}</div></section>}
+          {showRedeploy && data.availableForRedeployment.length > 0 && (
+            <section className="redeployment-pool">
+              <header><div><span>VIATURA INDISPONÍVEL</span><h2>GMs à disposição para remanejamento</h2><p>Arraste o GM diretamente para uma célula da escala ou escolha o destino.</p></div><b>{data.availableForRedeployment.length}</b></header>
+              <div>{data.availableForRedeployment.map((a) => (
+                <article key={String(a.id)} draggable onDragStart={(event) => {
+                  event.dataTransfer.effectAllowed = "move";
+                  event.dataTransfer.setData("text/assignment", String(a.id));
+                }}>
+                  <span className="redeploy-drag" aria-hidden="true">⋮⋮</span>
+                  <div><b>{String(a.guard_name)}</b><small>{String(a.starts_at).slice(11,16)}–{String(a.ends_at).slice(11,16)} · {shiftName(String(a.shift))}</small></div>
+                  <button type="button" onClick={() => setRedeployPick({ assignment: a })}>Escolher destino</button>
+                </article>
+              ))}</div>
+            </section>
+          )}
         </section>
         <aside className={`editor ${pick ? "editor-active" : ""}`}>
           {pick ? (
@@ -633,9 +668,42 @@ export function LiveSchedule() {
           onSave={saveVehicleQuick}
         />
       )}
+      {redeployPick && (
+        <RedeployQuickEditor
+          data={data}
+          assignment={redeployPick.assignment}
+          saving={saving}
+          onClose={() => setRedeployPick(null)}
+          onSave={saveRedeployment}
+        />
+      )}
     </main>
   );
 }
+
+function RedeployQuickEditor({data,assignment,saving,onClose,onSave}:{data:State;assignment:Rec;saving:boolean;onClose:()=>void;onSave:(e:FormEvent<HTMLFormElement>)=>void}) {
+  const [query,setQuery]=useState("");
+  const destinations=useMemo(()=>{
+    const value=query.toLowerCase().trim();
+    const items=[
+      ...data.posts.map(resource=>({kind:"post",resource,label:String(resource.name),detail:String(resource.group_name||"Posto")})),
+      ...data.vehicles.map(resource=>({kind:"vehicle",resource,label:String(resource.prefix),detail:String(resource.zone||"Zona não definida")})),
+    ];
+    return items.filter(item=>!value||`${item.label} ${item.detail}`.toLowerCase().includes(value));
+  },[data.posts,data.vehicles,query]);
+  const defaultDestination=destinations[0];
+  return <div className="redeploy-quick-backdrop"><form className="redeploy-quick-editor" role="dialog" aria-modal="true" aria-labelledby="redeploy-title" onSubmit={onSave}>
+    <header><div><small>REMANEJAMENTO RÁPIDO</small><h2 id="redeploy-title">{String(assignment.guard_name)}</h2><p>{String(assignment.starts_at).slice(11,16)}–{String(assignment.ends_at).slice(11,16)} · {shiftName(String(assignment.shift))}</p></div><button type="button" onClick={onClose} aria-label="Fechar remanejamento">×</button></header>
+    <div className="redeploy-alert"><b>GM à disposição</b><span>O horário atual será preservado se o turno não mudar.</span></div>
+    <label>Buscar posto, viatura ou zona<input value={query} onChange={event=>setQuery(event.target.value)} placeholder="Ex.: Sala de Operações, VTR 1337, Centro…" /></label>
+    <label>Destino<select name="destination" key={defaultDestination?`${defaultDestination.kind}-${defaultDestination.resource.id}`:"empty"} required>{destinations.length?destinations.map(item=><option key={`${item.kind}-${item.resource.id}`} value={`${item.kind}:${item.resource.id}`}>{item.kind==="vehicle"?vehicleIcon(String(item.resource.type)):"◆"} {item.label} — {item.detail}</option>):<option value="">Nenhum destino encontrado</option>}</select></label>
+    <label>Turno<select name="shift" defaultValue={String(assignment.shift)==="W"?"2":String(assignment.shift)}>{shifts.map(shift=><option key={shift.id} value={shift.id}>{shift.label} · {shift.time}</option>)}</select></label>
+    <p className="redeploy-help">Também é possível fechar esta janela e arrastar o card diretamente para o turno desejado na tabela.</p>
+    <footer><button type="button" onClick={onClose}>Cancelar</button><button className="save" disabled={saving||!destinations.length}>{saving?"Movendo…":"Confirmar remanejamento"}</button></footer>
+  </form></div>;
+}
+
+function shiftName(shift:string){return shifts.find(item=>item.id===shift)?.label||`${shift}º turno`}
 
 function movementDetail(m: Rec) {
   const start = new Date(String(m.starts_at));
@@ -683,6 +751,7 @@ function Row({
   onToggleSection,
   shifts: visibleShifts,
   assignmentIndex,
+  availableForRedeployment,
   selectedId,
   onPick,
   onMove,
@@ -697,6 +766,7 @@ function Row({
   onToggleSection: () => void;
   shifts: typeof SHIFT_DEFS;
   assignmentIndex: Map<string, Rec[]>;
+  availableForRedeployment: Rec[];
   selectedId: number;
   onPick: (p: Pick) => void;
   onMove: (a: Rec, k: "post" | "vehicle", r: Rec, s: string) => void;
@@ -718,6 +788,8 @@ function Row({
         return;
       }
     }
+    const available = availableForRedeployment.find((a) => Number(a.id) === id);
+    if (available) void onMove(available, kind, resource, shift);
   }
   return (
     <Fragment>
