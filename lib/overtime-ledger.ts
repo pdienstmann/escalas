@@ -10,7 +10,8 @@ export async function syncScheduleOvertime() {
      FROM assignments a
      LEFT JOIN posts p ON p.id=a.post_id
      LEFT JOIN vehicles v ON v.id=a.vehicle_id
-     WHERE a.status='overtime'
+     LEFT JOIN overtime_month_closures c ON c.month=substr(date(a.starts_at),1,7)
+     WHERE a.status='overtime' AND COALESCE(c.status,'open')<>'closed'
      ON CONFLICT(assignment_id) DO UPDATE SET
        guard_id=excluded.guard_id,
        service_date=excluded.service_date,

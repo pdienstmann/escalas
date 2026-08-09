@@ -46,6 +46,12 @@ export const overtimeEntries = sqliteTable("overtime_entries", {
   index("idx_overtime_entries_guard_date").on(t.guardId,t.serviceDate),
   index("idx_overtime_entries_status_date").on(t.status,t.serviceDate),
 ]);
+export const overtimeMonthClosures = sqliteTable("overtime_month_closures", {
+  month:text("month").primaryKey(),
+  status:text("status",{enum:["open","closed"]}).notNull().default("open"),
+  closedAt:text("closed_at"),closureNote:text("closure_note"),reopenedAt:text("reopened_at"),reopenReason:text("reopen_reason"),
+  updatedAt:text("updated_at").notNull().default("CURRENT_TIMESTAMP"),
+},t=>[index("idx_overtime_month_closures_status").on(t.status)]);
 export const weeklySlots = sqliteTable("weekly_slots", {id:integer("id").primaryKey({autoIncrement:true}),guardId:integer("guard_id").notNull().references(()=>guards.id),weekdays:text("weekdays").notNull().default("1,2,3,4,5"),postId:integer("post_id").references(()=>posts.id),vehicleId:integer("vehicle_id").references(()=>vehicles.id),role:text("role").notNull().default("guard"),startsAt:text("starts_at").notNull().default("08:00"),breakStart:text("break_start"),breakEnd:text("break_end"),regularEnd:text("regular_end").notNull().default("17:00"),overtimeEnd:text("overtime_end"),active:integer("active",{mode:"boolean"}).notNull().default(true),...audit},t=>[uniqueIndex("idx_weekly_slots_guard").on(t.guardId)]);
 export const vehicleOutages = sqliteTable("vehicle_outages", {id:integer("id").primaryKey({autoIncrement:true}),vehicleId:integer("vehicle_id").notNull().references(()=>vehicles.id),startsOn:text("starts_on").notNull(),endsOn:text("ends_on"),reason:text("reason"),active:integer("active",{mode:"boolean"}).notNull().default(true),...audit});
 export const scheduleSections=sqliteTable("schedule_sections",{sectionKey:text("section_key").primaryKey(),label:text("label").notNull(),sortOrder:integer("sort_order").notNull().default(0),updatedAt:text("updated_at").notNull().default("CURRENT_TIMESTAMP")});
