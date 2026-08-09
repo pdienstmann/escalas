@@ -89,7 +89,13 @@ export async function GET(request: Request) {
          AND COALESCE(g.overtime_eligible,1)<>0
          AND NOT EXISTS (
            SELECT 1 FROM overtime_entries e
-           WHERE e.assignment_id=a.id AND e.status IN ('confirmed','partial')
+           JOIN assignments ea ON ea.id=e.assignment_id
+           WHERE e.status IN ('confirmed','partial')
+             AND ea.guard_id=a.guard_id AND date(ea.starts_at)=date(a.starts_at)
+             AND COALESCE(ea.post_id,0)=COALESCE(a.post_id,0)
+             AND COALESCE(ea.vehicle_id,0)=COALESCE(a.vehicle_id,0)
+             AND (CASE WHEN CAST(substr(ea.starts_at,12,2) AS INTEGER)>=7 AND CAST(substr(ea.starts_at,12,2) AS INTEGER)<19 THEN 'day' ELSE 'night' END)
+               =(CASE WHEN CAST(substr(a.starts_at,12,2) AS INTEGER)>=7 AND CAST(substr(a.starts_at,12,2) AS INTEGER)<19 THEN 'day' ELSE 'night' END)
          )
        ORDER BY date(a.starts_at) DESC,g.name`,
     ).bind(period.start,period.end).all<Row>(),
@@ -138,6 +144,15 @@ export async function GET(request: Request) {
           (Number(b.currentHours) + Number(b.pendingHours)) ||
         String(a.lastOvertime || "").localeCompare(String(b.lastOvertime || "")),
     );
+  const groupedSuggestions = new Map<string, Row>();
+  for (const item of suggestions.results) {
+    const hour = Number(String(item.starts_at).slice(11, 13));
+    const periodKey = hour >= 7 && hour < 19 ? "day" : "night";
+    const key = `${item.guard_id}|${item.service_date}|${item.location}|${periodKey}`;
+    const current = groupedSuggestions.get(key);
+    if (current) current.planned_minutes = Number(current.planned_minutes) + Number(item.planned_minutes);
+    else groupedSuggestions.set(key, { ...item, period_key: periodKey });
+  }
   return Response.json({
     month,
     ranking,
@@ -147,7 +162,7 @@ export async function GET(request: Request) {
         String(entry.service_date) < period.end,
     ),
     closure,
-    suggestions: suggestions.results.filter((item)=>Number(item.planned_minutes)>0),
+    suggestions: [...groupedSuggestions.values()].filter((item)=>Number(item.planned_minutes)>0),
   });
 }
 
