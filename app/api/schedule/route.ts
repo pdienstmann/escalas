@@ -565,6 +565,30 @@ export async function POST(request: Request) {
   if (!permitted(request))
     return Response.json({ error: "Não autorizado" }, { status: 401 });
   const b = (await request.json()) as Record<string, string | number | boolean | null>;
+  if (b.action === "copy_assignment_to_cell") {
+    const sourceId=Number(b.sourceAssignmentId||0),scheduleId=Number(b.scheduleId||0),targetShift=String(b.shift||"");
+    const source=await env.DB.prepare("SELECT a.*,g.name guard_name,s.date schedule_date FROM assignments a JOIN guards g ON g.id=a.guard_id JOIN schedules s ON s.id=a.schedule_id WHERE a.id=? AND a.schedule_id=?").bind(sourceId,scheduleId).first<Record<string,unknown>>();
+    if(!source)return Response.json({error:"O GM copiado não foi encontrado nesta escala."},{status:404});
+    if(!["1","2","3","4"].includes(targetShift))return Response.json({error:"Escolha um quadrante válido para colar."},{status:400});
+    const postId=Number(b.postId||0)||null,vehicleId=Number(b.vehicleId||0)||null;
+    if((postId?1:0)+(vehicleId?1:0)!==1)return Response.json({error:"Escolha um único destino para colar."},{status:400});
+    const interval=periodShiftTimes(String(source.schedule_date),targetShift);
+    const blocked=await assertAssignable(scheduleId,Number(source.guard_id),interval.start,interval.end,0);
+    if(blocked)return Response.json({error:blocked.error},{status:blocked.status});
+    let role=postId?"guard":String(source.role||"third");
+    if(vehicleId){
+      const occupied=(await env.DB.prepare("SELECT role FROM assignments WHERE schedule_id=? AND vehicle_id=? AND starts_at<? AND ends_at>?").bind(scheduleId,vehicleId,interval.end,interval.start).all<{role:string}>()).results;
+      const roles=new Set(occupied.map(item=>String(item.role)));
+      role=!roles.has("driver")?"driver":!roles.has("patrol")?"patrol":"third";
+    }
+    const created=await env.DB.prepare(`INSERT INTO assignments
+      (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,work_kind,status,request_ref,is_reassigned,reassignment_note)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .bind(scheduleId,source.guard_id,postId,vehicleId,targetShift,role,interval.start,interval.end,"shift",String(source.status)==="time_bank"?"time_bank":"normal",source.request_ref||null,source.is_reassigned||0,source.reassignment_note||null).run();
+    const assignment=await env.DB.prepare("SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id=?").bind(created.meta.last_row_id).first<Record<string,unknown>>();
+    const auditEventId=await writeAudit(request,{action:"create",entityType:"assignment",entityId:Number(created.meta.last_row_id),summary:`Colou ${source.guard_name} no ${targetShift}º turno`,after:assignment,undoable:true});
+    return Response.json({ok:true,assignment,auditEventId,message:`${source.guard_name} copiado para o ${targetShift}º turno com o horário ajustado.`});
+  }
   if (b.action === "remove_resource_from_day") {
     const scheduleId = Number(b.scheduleId);
     const resourceId = Number(b.resourceId);
@@ -759,21 +783,9 @@ export async function POST(request: Request) {
         return Response.json({ error: "A viatura selecionada está em FA nesta data." }, { status: 409 });
     }
 
-    const shifts = [...new Set(before.map((item) => String(item.shift)))];
-    for (const shift of shifts) {
-      const occupied = await env.DB.prepare(
-        `SELECT COUNT(*) total FROM assignments WHERE schedule_id=? AND shift=? AND ${postId ? "post_id" : "vehicle_id"}=? AND id NOT IN (${placeholders})`,
-      )
-        .bind(scheduleId, shift, postId || vehicleId, ...assignmentIds)
-        .first<{ total: number }>();
-      const capacity = postId ? 1 : 2;
-      const incoming = before.filter((item) => String(item.shift) === shift).length;
-      if (Number(occupied?.total || 0) + incoming > capacity)
-        return Response.json(
-          { error: `${destination.label} já está completo no ${shift}º turno.` },
-          { status: 409 },
-        );
-    }
+    // Postos podem receber reforços e viaturas podem operar com terceiro ou mais
+    // integrantes. A validação relevante aqui é a disponibilidade do próprio GM,
+    // não uma capacidade fixa do destino.
 
     const requestedRole = vehicleId && ["driver", "patrol", "third"].includes(String(b.role))
       ? String(b.role)
@@ -932,9 +944,12 @@ export async function POST(request: Request) {
     const startMs=Date.parse(startsAt),endMs=Date.parse(endsAt);
     if(!Number.isFinite(startMs)||!Number.isFinite(endMs)||endMs<=startMs)
       return Response.json({error:"Informe um intervalo válido para a hora extra."},{status:400});
-    const normalEnd=String(base.regular_ends_at||base.ends_at);
-    if(startsAt<normalEnd)
+    const direction=String(b.direction||"after")==="before"?"before":"after";
+    const normalStart=String(base.starts_at),normalEnd=String(base.regular_ends_at||base.ends_at);
+    if(direction==="after"&&startsAt<normalEnd)
       return Response.json({error:`A hora extra deve começar às ${normalEnd.slice(11,16)} ou depois.`},{status:400});
+    if(direction==="before"&&endsAt>normalStart)
+      return Response.json({error:`A hora extra antecipada deve terminar às ${normalStart.slice(11,16)} ou antes.`},{status:400});
     const postId=Number(b.postId||0)||null,vehicleId=Number(b.vehicleId||0)||null;
     if((postId?1:0)+(vehicleId?1:0)!==1)
       return Response.json({error:"Escolha o local da extensão."},{status:400});
@@ -943,9 +958,9 @@ export async function POST(request: Request) {
     const created=await env.DB.prepare(`INSERT INTO assignments
       (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,regular_ends_at,work_kind,status,request_ref,is_reassigned,reassignment_note)
       VALUES (?,?,?,?,?,?,?,?,?,'overtime_extension','overtime',?,0,?)`)
-      .bind(scheduleId,base.guard_id,postId,vehicleId,b.shift||"4",b.role||(vehicleId?"third":"guard"),startsAt,endsAt,startsAt,b.requestRef||null,"Extensão independente do expediente").run();
+      .bind(scheduleId,base.guard_id,postId,vehicleId,b.shift||(direction==="before"?"3":"4"),b.role||(vehicleId?"third":"guard"),startsAt,endsAt,startsAt,b.requestRef||null,direction==="before"?"Antecipação independente em hora extra":"Extensão independente do expediente").run();
     const assignment=await env.DB.prepare("SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id=?").bind(created.meta.last_row_id).first<Record<string,unknown>>();
-    const auditEventId=await writeAudit(request,{action:"create",entityType:"assignment",entityId:Number(created.meta.last_row_id),summary:`Estendeu ${base.guard_name} em HE até ${endsAt.slice(11,16)}`,after:assignment,undoable:true});
+    const auditEventId=await writeAudit(request,{action:"create",entityType:"assignment",entityId:Number(created.meta.last_row_id),summary:direction==="before"?`Antecipou ${base.guard_name} em HE desde ${startsAt.slice(11,16)}`:`Estendeu ${base.guard_name} em HE até ${endsAt.slice(11,16)}`,after:assignment,undoable:true});
     return Response.json({ok:true,assignment,auditEventId,message:`HE de ${base.guard_name} adicionada como bloco independente.`});
   }
   if (b.action === "delete") {
@@ -1040,6 +1055,7 @@ async function buildSuggestions(request: Request, date: string) {
   const role = url.searchParams.get("role") || null;
   const period = isDayShift(shift) ? "day" : "night";
   const periodShiftIds = period === "day" ? ["2", "3"] : ["4", "1"];
+  const periodWindow = fullPeriodWindow(date, shift);
 
   const monthStart = `${date.slice(0, 7)}-01`;
   const monthEnd = (() => {
@@ -1095,10 +1111,12 @@ async function buildSuggestions(request: Request, date: string) {
          JOIN guards g ON g.id=a.guard_id
          LEFT JOIN posts p ON p.id=a.post_id
          LEFT JOIN vehicles v ON v.id=a.vehicle_id
-         WHERE a.schedule_id=? AND a.shift IN (?,?) AND COALESCE(a.work_kind,'shift')!='overtime_extension'
+         WHERE a.schedule_id=?
+           AND a.starts_at<? AND a.ends_at>?
+           AND COALESCE(a.work_kind,'shift')!='overtime_extension'
          ORDER BY g.name,a.starts_at`,
       )
-      .bind(date, date, scheduleId, ...periodShiftIds)
+      .bind(date, date, scheduleId, periodWindow.end, periodWindow.start)
       .all<Record<string, unknown>>(),
     env.DB
       .prepare(
@@ -1112,10 +1130,9 @@ async function buildSuggestions(request: Request, date: string) {
     env.DB
       .prepare(
         `SELECT guard_id, post_id, vehicle_id, role FROM assignments
-         WHERE post_id=? OR vehicle_id=?
+         WHERE post_id IS NOT NULL OR vehicle_id IS NOT NULL
          GROUP BY guard_id, post_id, vehicle_id, role`,
       )
-      .bind(postId ?? 0, vehicleId ?? 0)
       .all<{
         guard_id: number;
         post_id: number | null;
@@ -1170,8 +1187,11 @@ async function buildSuggestions(request: Request, date: string) {
         availableForRedeployment: assignments.some((item) => Number(item.awaiting_redeploy) === 1),
       };
     })
-    .sort((a, b) => Number(b.compatibleRole) - Number(a.compatibleRole) || a.name.localeCompare(b.name, "pt-BR"))
-    .slice(0, 8);
+    .sort((a, b) =>
+      Number(b.availableForRedeployment) - Number(a.availableForRedeployment) ||
+      Number(b.compatibleRole) - Number(a.compatibleRole) ||
+      a.name.localeCompare(b.name, "pt-BR"),
+    );
 
   const guardHeHours = new Map<number, number>();
   const guardLastHe = new Map<number, string | null>();

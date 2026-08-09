@@ -26,6 +26,8 @@ export type SuggestedGM = {
    */
   reasons: string[];
   rank: number;
+  oppositeVehicle: boolean;
+  oppositeTeam: boolean;
 };
 
 function sameResource(
@@ -85,6 +87,9 @@ export function rankGuardSuggestions(
     // Prefer 12x36 GMs for fill-in HE (NOT weekly regime).
     if (g.work_regime && g.work_regime !== "12x36") continue;
 
+    const oppositeTeam = period === "day"
+      ? Boolean(g.platoon?.startsWith("D") && dayCodes.size && !dayCodes.has(g.platoon))
+      : Boolean(g.platoon?.startsWith("N") && nightCodes.size && !nightCodes.has(g.platoon));
     const isOffToday = (() => {
       if (period === "day") {
         // GM is "off" today if his day-team is the opposite of today's applied day pattern.
@@ -107,6 +112,7 @@ export function rankGuardSuggestions(
     })();
 
     const sameSpot = sameResource(guardHistory, ctx);
+    const oppositeVehicle = oppositeTeam && guardHistory.some((assignment) => assignment.vehicle_id != null);
     if (isOffToday && sameSpot) {
       // Strongest signal: actually off today and normally works at this resource.
       reasons.push("opposite_day");
@@ -138,6 +144,8 @@ export function rankGuardSuggestions(
       daysSinceLastHe: daysSince,
       reasons,
       rank: 0,
+      oppositeVehicle,
+      oppositeTeam,
     });
   }
 
@@ -146,6 +154,7 @@ export function rankGuardSuggestions(
       item.reasons.includes(reason) ? 0 : 1;
     return (
       signal(a, "opposite_day") - signal(b, "opposite_day") ||
+      Number(b.oppositeVehicle) - Number(a.oppositeVehicle) ||
       signal(a, "off_today") - signal(b, "off_today") ||
       signal(a, "function_fit") - signal(b, "function_fit") ||
       a.currentHeHours - b.currentHeHours ||
@@ -155,13 +164,15 @@ export function rankGuardSuggestions(
     );
   });
   eligible.forEach((item, index) => (item.rank = index + 1));
-  return eligible.slice(0, 8);
+  return eligible;
 }
 
 export function describeReasons(reasons: string[], guard: SuggestedGM) {
   const labels: string[] = [];
   if (reasons.includes("opposite_day"))
     labels.push("Equipe do dia oposto — costuma trabalhar neste posto/viatura");
+  if (guard.oppositeVehicle)
+    labels.push("Lotado em viatura na equipe do dia oposto");
   if (reasons.includes("off_today")) labels.push("De folga nesta data (regime 12x36)");
   if (reasons.includes("function_fit")) labels.push("Compatível com a função necessária");
   if (reasons.includes("fewest_he"))

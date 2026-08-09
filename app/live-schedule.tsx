@@ -66,7 +66,7 @@ type HolePick = {
   position: SuggestionPosition | null;
 };
 type RedeployPick = { assignments: Rec[] };
-type ExtensionPick = Pick & { assignment: Rec };
+type ExtensionPick = Pick & { assignment: Rec; extensionMode: "after" | "before" };
 type ResourceRemovalPick = { kind: "post" | "vehicle"; resource: Rec; assignments: Rec[] };
 type UndoState = { id: number; label: string };
 type ViewFilter = "all" | "day" | "night" | "holes" | "redeploy";
@@ -114,6 +114,7 @@ export function LiveSchedule() {
     [view, setView] = useState<ViewFilter>(()=>{const value=readUiSetting("view");return value&&["all","day","night","holes","redeploy"].includes(value)?value as ViewFilter:"all"}),
     [movementEdit, setMovementEdit] = useState<MovementEdit | null>(null),
     [swapPick,setSwapPick]=useState<SwapPick|null>(null),
+    [copiedAssignment,setCopiedAssignment]=useState<Rec|null>(null),
     [recentAssignmentIds,setRecentAssignmentIds]=useState<number[]>([]),
     [collapsed, setCollapsed] = useState<Record<string, boolean>>({}),
     [saving, setSaving] = useState(false),
@@ -295,6 +296,7 @@ export function LiveSchedule() {
       shift:values.shift,
       role:values.role,
       requestRef:values.requestRef||null,
+      direction:extensionPick.extensionMode,
       postId:destination==="post"?Number(id):null,
       vehicleId:destination==="vehicle"?Number(id):null,
     });
@@ -452,10 +454,16 @@ export function LiveSchedule() {
     setCreateKind(kind);
     setCreateOpen(true);
   }
-  function startExtension(assignment: Rec, kind: "post" | "vehicle", resource: Rec, shift: string) {
-    setExtensionPick({ kind, resource, shift, assignment });
+  function startExtension(assignment: Rec, kind: "post" | "vehicle", resource: Rec, shift: string, extensionMode:"after"|"before"="after") {
+    setExtensionPick({ kind, resource, shift, assignment, extensionMode });
     setPick(null);
     setContextPick(null);
+  }
+  function copyAssignment(assignment:Rec){setCopiedAssignment(assignment);setContextPick(null);setMessage(`${assignment.guard_name} copiado. Escolha “Colar” no quadrante de destino.`)}
+  async function pasteAssignment(kind:"post"|"vehicle",resource:Rec,shift:string){
+    if(!data||!copiedAssignment)return;
+    const saved=await postAssignment({action:"copy_assignment_to_cell",sourceAssignmentId:copiedAssignment.id,scheduleId:data.schedule.id,postId:kind==="post"?resource.id:null,vehicleId:kind==="vehicle"?resource.id:null,shift});
+    if(saved)setCopiedAssignment(null);
   }
   function openQuickSwap(assignment:Rec,kind:"post"|"vehicle",resource:Rec,shift:string){
     if(!data)return;
@@ -827,6 +835,9 @@ export function LiveSchedule() {
                   onSwap={openQuickSwap}
                   onQuickStatus={quickStatus}
                   onExtend={startExtension}
+                  copiedAssignment={copiedAssignment}
+                  onCopy={copyAssignment}
+                  onPaste={pasteAssignment}
                   onQuickDelete={(assignment)=>confirm(`Remover ${assignment.guard_name} da escala?`)&&postAssignment({action:"delete",id:assignment.id})}
                   onMove={move}
                   onMoveGroup={moveGroup}
@@ -995,12 +1006,15 @@ export function LiveSchedule() {
 function QuickExtensionDialog({pick,data,saving,onClose,onSave}:{pick:ExtensionPick;data:State;saving:boolean;onClose:()=>void;onSave:(event:FormEvent<HTMLFormElement>)=>void}){
   const period=isDayShift(pick.shift)?"day":"night";
   const related=data.assignments.filter(item=>Number(item.guard_id)===Number(pick.assignment.guard_id)&&String(item.work_kind)!=="overtime_extension"&&coveredOperationalShifts(item,data.date).some(id=>(isDayShift(id)?"day":"night")===period));
+  const normalStart=related.reduce((earliest,item)=>String(item.starts_at)<earliest?String(item.starts_at):earliest,String(pick.assignment.starts_at));
   const normalEnd=related.reduce((latest,item)=>{const value=String(item.regular_ends_at||item.ends_at);return value>latest?value:latest},String(pick.assignment.regular_ends_at||pick.assignment.ends_at));
-  const defaultEndDate=addLocalHours(normalEnd,3);
-  const[start,setStart]=useState(normalEnd),[end,setEnd]=useState(defaultEndDate),[destination,setDestination]=useState(`${pick.kind}:${pick.resource.id}`);
+  const before=pick.extensionMode==="before";
+  const[start,setStart]=useState(before?addLocalHours(normalStart,-3):normalEnd),[end,setEnd]=useState(before?normalStart:addLocalHours(normalEnd,3)),[destination,setDestination]=useState(`${pick.kind}:${pick.resource.id}`);
   const destinationKind=destination.split(":")[0];
-  function duration(hours:number){setEnd(addLocalHours(start,hours))}
-  return <div className="quick-create-backdrop"><form className="quick-extension-dialog" role="dialog" aria-modal="true" aria-labelledby="quick-extension-title" onSubmit={onSave}><header><div><small>HORA EXTRA NA PRÓPRIA ESCALA</small><h2 id="quick-extension-title">Estender {pick.assignment.guard_name}</h2><p>O expediente normal permanece intacto. A HE poderá ser movida ou removida separadamente.</p></div><button type="button" onClick={onClose} aria-label="Fechar">×</button></header><div className="quick-extension-summary"><span>Fim do expediente</span><b>{normalEnd.slice(11,16)}</b></div><div className="quick-extension-durations" role="group" aria-label="Duração rápida"><button type="button" onClick={()=>duration(2)}>+ 2h</button><button type="button" onClick={()=>duration(3)}>+ 3h</button><button type="button" onClick={()=>duration(4)}>+ 4h</button><button type="button" onClick={()=>duration(6)}>+ 6h</button></div><label>Local da hora extra<select name="destination" value={destination} onChange={event=>setDestination(event.target.value)}>{data.vehicles.map(v=><option key={`hev${v.id}`} value={`vehicle:${v.id}`}>{vehicleIcon(String(v.type))} {v.prefix} · {v.zone}</option>)}{data.posts.map(p=><option key={`hep${p.id}`} value={`post:${p.id}`}>{p.group_name} · {p.name}</option>)}</select></label><label>Função<select name="role" defaultValue={destinationKind==="vehicle"?"third":"guard"} key={destinationKind}><option value="guard">GM do posto</option><option value="driver">M — Motorista</option><option value="patrol">P — Patrulheiro</option><option value="third">R — Reforço</option></select></label><div className="two"><label>Início da HE<input name="startsAt" type="datetime-local" value={start} onChange={event=>setStart(event.target.value)} required/></label><label>Fim da HE<input name="endsAt" type="datetime-local" value={end} onChange={event=>setEnd(event.target.value)} required/></label></div><input type="hidden" name="shift" value={isDayShift(pick.shift)?"4":"1"}/><label>Requerimento ou observação<input name="requestRef" placeholder="Opcional"/></label><footer><button type="button" onClick={onClose}>Cancelar</button><button className="save" disabled={saving}>{saving?"Adicionando…":"Adicionar HE"}</button></footer></form></div>
+  function duration(hours:number){if(before)setStart(addLocalHours(end,-hours));else setEnd(addLocalHours(start,hours))}
+  const heHours=Math.max(0,(Date.parse(end)-Date.parse(start))/3600000);
+  const heLabel=`${String(Math.round(heHours)).padStart(2,"0")} HE`;
+  return <div className="quick-create-backdrop"><form className="quick-extension-dialog" role="dialog" aria-modal="true" aria-labelledby="quick-extension-title" onSubmit={onSave}><header><div><small>HORA EXTRA NA PRÓPRIA ESCALA</small><h2 id="quick-extension-title">{before?"Antecipar":"Estender"} {pick.assignment.guard_name}</h2><p>O expediente normal permanece intacto. A HE poderá ter outro local e ser removida separadamente.</p></div><button type="button" onClick={onClose} aria-label="Fechar">×</button></header><div className="quick-extension-summary"><span>{before?"Início normal":"Fim do expediente"}</span><b>{(before?normalStart:normalEnd).slice(11,16)}</b><strong className="quick-extension-total">{heLabel}</strong></div><div className="quick-extension-durations" role="group" aria-label="Duração rápida"><button type="button" onClick={()=>duration(2)}>2h</button><button type="button" onClick={()=>duration(3)}>3h</button><button type="button" onClick={()=>duration(4)}>4h</button><button type="button" onClick={()=>duration(6)}>6h</button></div><label>Local da hora extra<select name="destination" value={destination} onChange={event=>setDestination(event.target.value)}>{data.vehicles.map(v=><option key={`hev${v.id}`} value={`vehicle:${v.id}`}>{vehicleIcon(String(v.type))} {v.prefix} · {v.zone}</option>)}{data.posts.map(p=><option key={`hep${p.id}`} value={`post:${p.id}`}>{p.group_name} · {p.name}</option>)}</select></label><label>Função<select name="role" defaultValue={destinationKind==="vehicle"?"third":"guard"} key={destinationKind}><option value="guard">GM do posto</option><option value="driver">M — Motorista</option><option value="patrol">P — Patrulheiro</option><option value="third">R — Reforço</option></select></label><div className="two"><label>Início da HE<input name="startsAt" type="datetime-local" value={start} onChange={event=>setStart(event.target.value)} required/></label><label>Fim da HE<input name="endsAt" type="datetime-local" value={end} onChange={event=>setEnd(event.target.value)} required/></label></div><input type="hidden" name="shift" value={before?"3":isDayShift(pick.shift)?"4":"1"}/><label>Requerimento ou observação<input name="requestRef" placeholder="Opcional"/></label><footer><button type="button" onClick={onClose}>Cancelar</button><button className="save" disabled={saving||heHours<=0}>{saving?"Adicionando…":`Adicionar ${heLabel}`}</button></footer></form></div>
 }
 
 function QuickCreateDialog({initialKind,data,saving,onClose,onSave}:{initialKind:"guard"|"post"|"vehicle"|"section";data:State;saving:boolean;onClose:()=>void;onSave:(event:FormEvent<HTMLFormElement>,kind:"guard"|"post"|"vehicle"|"section")=>void}){
@@ -1084,11 +1098,25 @@ function RedeployQuickEditor({data,assignments,saving,onClose,onSave}:{data:Stat
     return items.filter(item=>!value||`${item.label} ${item.detail}`.toLowerCase().includes(value));
   },[data.posts,data.vehicles,query]);
   const defaultDestination=destinations[0];
+  const [destination,setDestination]=useState("");
+  const selectedDestination=destination|| (defaultDestination?`${defaultDestination.kind}:${defaultDestination.resource.id}`:"");
+  const movingIds=new Set(assignments.map(item=>Number(item.id)));
+  function destinationStatus(item:{kind:string;resource:Rec}){
+    const matches=data.assignments.filter(current=>!movingIds.has(Number(current.id))&&(item.kind==="post"?Number(current.post_id)===Number(item.resource.id):Number(current.vehicle_id)===Number(item.resource.id))&&String(current.starts_at)<String(assignment.ends_at)&&String(current.ends_at)>String(assignment.starts_at));
+    if(!matches.length)return{label:"Livre no período",available:true};
+    if(item.kind==="vehicle"){
+      const roles=new Set(matches.map(current=>String(current.role)));
+      const hasHole=!roles.has("driver")||!roles.has("patrol");
+      return{label:hasHole?`Com furo · ${matches.length} GM(s)`:`Em serviço · ${matches.length} GM(s)`,available:hasHole};
+    }
+    return{label:`Com ${matches.length} GM(s) · aceita reforço`,available:true};
+  }
   return <div className="redeploy-quick-backdrop"><form className="redeploy-quick-editor" role="dialog" aria-modal="true" aria-labelledby="redeploy-title" onSubmit={onSave}>
     <header><div><small>REMANEJAMENTO DO PERÍODO COMPLETO</small><h2 id="redeploy-title">{String(assignment.guard_name)}</h2><p>{redeploymentTimeLabel(assignments)} · {assignments.length} horários vinculados</p></div><button type="button" onClick={onClose} aria-label="Fechar remanejamento">×</button></header>
     <div className="redeploy-alert"><b>Os horários serão movidos juntos</b><span>Funções e horários de cada metade serão preservados.</span></div>
     <label>Buscar posto, viatura ou zona<input value={query} onChange={event=>setQuery(event.target.value)} placeholder="Ex.: Sala de Operações, VTR 1337, Centro…" /></label>
-    <label>Destino<select name="destination" key={defaultDestination?`${defaultDestination.kind}-${defaultDestination.resource.id}`:"empty"} required>{destinations.length?destinations.map(item=><option key={`${item.kind}-${item.resource.id}`} value={`${item.kind}:${item.resource.id}`}>{item.kind==="vehicle"?vehicleIcon(String(item.resource.type)):"◆"} {item.label} — {item.detail}</option>):<option value="">Nenhum destino encontrado</option>}</select></label>
+    <input type="hidden" name="destination" value={selectedDestination}/>
+    <div className="redeploy-destination-grid" role="radiogroup" aria-label="Escolher destino">{destinations.length?destinations.map(item=>{const value=`${item.kind}:${item.resource.id}`,status=destinationStatus(item);return <button type="button" role="radio" aria-checked={selectedDestination===value} className={`${selectedDestination===value?"selected":""} ${status.available?"available":"busy"}`} key={value} onClick={()=>setDestination(value)}><span>{item.kind==="vehicle"?vehicleIcon(String(item.resource.type)):"◆"}</span><div><b>{item.label}</b><small>{item.detail}</small><em>{status.label}</em></div></button>}):<p>Nenhum destino encontrado</p>}</div>
     <p className="redeploy-help">Também é possível fechar esta janela e arrastar o card para qualquer célula do mesmo período. O destino receberá todas as metades exibidas acima.</p>
     <footer><button type="button" onClick={onClose}>Cancelar</button><button className="save" disabled={saving||!destinations.length}>{saving?"Movendo…":"Confirmar remanejamento"}</button></footer>
   </form></div>;
@@ -1164,6 +1192,9 @@ function Row({
   onSwap,
   onQuickStatus,
   onExtend,
+  copiedAssignment,
+  onCopy,
+  onPaste,
   onQuickDelete,
   onMove,
   onMoveGroup,
@@ -1190,7 +1221,10 @@ function Row({
   onEdit: (p: Pick) => void;
   onSwap: (assignment:Rec,kind:"post"|"vehicle",resource:Rec,shift:string) => void;
   onQuickStatus: (assignment:Rec,status:string) => void;
-  onExtend: (assignment: Rec, kind: "post" | "vehicle", resource: Rec, shift: string) => void;
+  onExtend: (assignment: Rec, kind: "post" | "vehicle", resource: Rec, shift: string, extensionMode?:"after"|"before") => void;
+  copiedAssignment: Rec | null;
+  onCopy: (assignment:Rec) => void;
+  onPaste: (kind:"post"|"vehicle",resource:Rec,shift:string) => void | Promise<void>;
   onQuickDelete: (assignment:Rec) => void;
   onMove: (a: Rec, k: "post" | "vehicle", r: Rec, s: string, sourceShift?: string) => void;
   onMoveGroup: (a: Rec[], k: "post" | "vehicle", r: Rec) => void;
@@ -1215,6 +1249,10 @@ function Row({
     const latest=related.reduce((value,item)=>{const end=String(item.regular_ends_at||item.ends_at);return end>value?end:value},String(assignment.regular_ends_at||assignment.ends_at));
     const window=operationalShiftWindow(date,shift);
     return window.start<latest&&window.end>=latest;
+  }
+  function showEarlyExtensionShortcut(assignment:Rec,shift:string){
+    if(shift!=="4"||String(assignment.work_kind)==="overtime_extension")return false;
+    return assignmentOverlapsShift(assignment,date,"4");
   }
   function drop(e: DragEvent, shift: string) {
     e.preventDefault();
@@ -1339,7 +1377,7 @@ function Row({
                   <b>{a.guard_name}</b>
                   {visualStatus !== "normal" && (
                     <span className={`badge ${statusClass(visualStatus)}`}>
-                      {visualStatus==="overtime"&&a.regular_ends_at?`HE · após ${String(a.regular_ends_at).slice(11,16)}`:statusShort(visualStatus)}
+                      {String(a.work_kind)==="overtime_extension"?overtimeHoursLabel(a):visualStatus==="overtime"&&a.regular_ends_at?`HE · após ${String(a.regular_ends_at).slice(11,16)}`:statusShort(visualStatus)}
                     </span>
                   )}
                   {Number(a.is_reassigned)===1&&<span className="badge remanejamento" title={String(a.reassignment_note||"Avisar sobre o remanejamento")}>AVISAR REM</span>}
@@ -1347,9 +1385,11 @@ function Row({
                     {assignmentDisplayInShift(a,date,s.id)}
                   </small>
                 </button>
-                {showExtensionShortcut(a,s.id)&&<button type="button" className="inline-he-extension" aria-label={`Estender ${String(a.guard_name)} em hora extra`} title="Adicionar hora extra após o expediente" onClick={()=>onExtend(a,kind,resource,s.id)}>＋ HE</button>}
-                {Number(a.id)===selectedId&&<div className="cell-quick-actions" role="group" aria-label={`Ações rápidas de ${String(a.guard_name)}`}><b>{a.guard_name}</b><button type="button" className="swap-action" onClick={()=>onSwap(a,kind,resource,s.id)}><span aria-hidden="true">⇄</span> Trocar GM</button><button type="button" onClick={()=>onEdit({kind,resource,shift:s.id,assignment:a})}><span aria-hidden="true">✎</span> Alterar / mover</button>{showExtensionShortcut(a,s.id)&&<button type="button" className="extend-action" onClick={()=>onExtend(a,kind,resource,s.id)}><span aria-hidden="true">＋</span> Estender HE</button>}<button type="button" className={a.status==="time_bank"?"active":""} onClick={()=>onQuickStatus(a,a.status==="time_bank"?"normal":"time_bank")}><span aria-hidden="true">◷</span> BH</button><button type="button" className="danger" onClick={()=>onQuickDelete(a)}><span aria-hidden="true">×</span> Remover</button><button type="button" aria-label="Fechar ações" onClick={()=>onContextPick({kind,resource,shift:s.id})}>×</button></div>}</Fragment>
+                {showExtensionShortcut(a,s.id)&&<button type="button" className="inline-he-extension" aria-label={`Estender ${String(a.guard_name)} em hora extra`} title="Adicionar hora extra após o expediente" onClick={()=>onExtend(a,kind,resource,s.id,"after")}>＋ HE depois</button>}
+                {showEarlyExtensionShortcut(a,s.id)&&<button type="button" className="inline-he-extension early" aria-label={`Antecipar ${String(a.guard_name)} em hora extra`} title="Fazer o GM da noite começar mais cedo em HE" onClick={()=>onExtend(a,kind,resource,s.id,"before")}>＋ HE antes</button>}
+                {Number(a.id)===selectedId&&<div className="cell-quick-actions" role="group" aria-label={`Ações rápidas de ${String(a.guard_name)}`}><b>{a.guard_name}</b><button type="button" className="swap-action" onClick={()=>onSwap(a,kind,resource,s.id)}><span aria-hidden="true">⇄</span> Trocar GM</button><button type="button" onClick={()=>onEdit({kind,resource,shift:s.id,assignment:a})}><span aria-hidden="true">✎</span> Alterar / mover</button>{showExtensionShortcut(a,s.id)&&<button type="button" className="extend-action" onClick={()=>onExtend(a,kind,resource,s.id,"after")}><span aria-hidden="true">＋</span> HE depois</button>}{showEarlyExtensionShortcut(a,s.id)&&<button type="button" className="extend-action" onClick={()=>onExtend(a,kind,resource,s.id,"before")}><span aria-hidden="true">＋</span> HE antes</button>}<button type="button" className={a.status==="time_bank"?"active":""} onClick={()=>onQuickStatus(a,a.status==="time_bank"?"normal":"time_bank")}><span aria-hidden="true">◷</span> BH</button><button type="button" className="copy-action" onClick={()=>onCopy(a)}><span aria-hidden="true">▣</span> Copiar</button><button type="button" className="danger" onClick={()=>onQuickDelete(a)}><span aria-hidden="true">×</span> Remover</button><button type="button" aria-label="Fechar ações" onClick={()=>onContextPick({kind,resource,shift:s.id})}>×</button></div>}</Fragment>
               )})}
+              {copiedAssignment&&<button type="button" className="cell-paste-assignment" onClick={()=>onPaste(kind,resource,s.id)}><span aria-hidden="true">▣</span> Colar {String(copiedAssignment.guard_name)} aqui</button>}
               {missingRoles.length > 0 && (
                 <button
                   className="live-hole"
@@ -1624,6 +1664,7 @@ function statusInShift(a:Rec,date:string,shift:string){
   return window.end<=regular?"normal":status;
 }
 function isOvertimeExtensionCell(a:Rec,date:string,shift:string){const regular=String(a.regular_ends_at||"");return Boolean(regular)&&String(a.status)==="overtime"&&operationalShiftWindow(date,shift).start>=regular}
+function overtimeHoursLabel(a:Rec){const hours=Math.max(0,(Date.parse(String(a.ends_at))-Date.parse(String(a.starts_at)))/3600000);return `${String(Math.round(hours)).padStart(2,"0")} HE`}
 function assignmentDisplayInShift(a:Rec,date:string,shift:string){
   if(String(a.work_kind)==="weekly"&&(shift==="2"||shift==="3"))return weeklyDisplay(a);
   const window=operationalShiftWindow(date,shift),start=String(a.starts_at),end=String(a.ends_at);

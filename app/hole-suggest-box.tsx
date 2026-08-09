@@ -15,6 +15,8 @@ type Suggested = {
   daysSinceLastHe: number | null;
   reasons: string[];
   rank: number;
+  oppositeVehicle?: boolean;
+  oppositeTeam?: boolean;
 };
 
 export type SameDayCandidate = {
@@ -78,6 +80,8 @@ export function HoleSuggestBox({
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [selectedRedeployId, setSelectedRedeployId] = useState<number | null>(null);
+  const [showOppositeTeam, setShowOppositeTeam] = useState(false);
+  const [oppositeSort, setOppositeSort] = useState<"priority" | "most_he" | "last_he">("priority");
   useEffect(() => {
     const controller = new AbortController();
     const params = new URLSearchParams({
@@ -150,6 +154,14 @@ export function HoleSuggestBox({
 
   const shown = filtered.slice(0, 6);
   const { primary, others } = separateByPriority(shown);
+  const oppositeTeam = useMemo(() => {
+    const list = (data?.suggestions || []).filter((guard) => guard.oppositeTeam);
+    return [...list].sort((a, b) => {
+      if (oppositeSort === "most_he") return b.currentHeHours - a.currentHeHours || a.name.localeCompare(b.name, "pt-BR");
+      if (oppositeSort === "last_he") return String(b.lastOvertime || "").localeCompare(String(a.lastOvertime || "")) || a.name.localeCompare(b.name, "pt-BR");
+      return Number(b.oppositeVehicle) - Number(a.oppositeVehicle) || a.rank - b.rank;
+    });
+  }, [data?.suggestions, oppositeSort]);
 
   const style = position
     ? {
@@ -160,6 +172,7 @@ export function HoleSuggestBox({
     : undefined;
 
   return (
+    <>
     <div
       className="hole-suggest-card"
       data-placement={position?.placement || "bottom-sheet"}
@@ -203,7 +216,7 @@ export function HoleSuggestBox({
               <section className="hole-suggest-group redeploy-suggestions available-suggestions">
                 <b>À disposição para escala</b>
                 <p>Estes GMs já estão aguardando destino e podem ser colocados diretamente neste local.</p>
-                {availableCandidates.slice(0, 6).map((candidate) => (
+                {availableCandidates.map((candidate) => (
                   <SameDayRow
                     key={candidate.guardId}
                     candidate={candidate}
@@ -219,7 +232,7 @@ export function HoleSuggestBox({
               <section className="hole-suggest-group redeploy-suggestions">
                 <b>Remanejar nesta escala</b>
                 <p>Move o período do GM de outro posto e marca automaticamente “Avisar remanejamento”.</p>
-                {assignedCandidates.slice(0, 5).map((candidate) => (
+                {assignedCandidates.map((candidate) => (
                   <SameDayRow
                     key={candidate.guardId}
                     candidate={candidate}
@@ -276,12 +289,27 @@ export function HoleSuggestBox({
         )}
       </div>
       {data && <footer>
-        <button type="button" className="hole-suggest-manual" onClick={onManual}>
-          Ver todos os GMs (manual)
+        <button type="button" className="hole-suggest-manual" onClick={() => setShowOppositeTeam(true)}>
+          Ver equipe do dia oposto ({oppositeTeam.length})
         </button>
+        <button type="button" className="hole-suggest-manual secondary" onClick={onManual}>Seleção manual completa</button>
         <small>A sugestão nunca é aplicada sem confirmação.</small>
       </footer>}
     </div>
+    {showOppositeTeam && <div className="opposite-team-backdrop">
+      <section className="opposite-team-dialog" role="dialog" aria-modal="true" aria-labelledby="opposite-team-title">
+        <header><div><small>HORA EXTRA · SOMENTE DIA OPOSTO</small><h2 id="opposite-team-title">Escolher GM</h2><p>{fullPeriodLabel(shift)} · {resourceLabel}</p></div><button type="button" onClick={() => setShowOppositeTeam(false)} aria-label="Fechar">×</button></header>
+        <div className="opposite-team-filters" role="group" aria-label="Ordenar GMs">
+          <button type="button" className={oppositeSort === "priority" ? "active" : ""} onClick={() => setOppositeSort("priority")}>Viaturas primeiro</button>
+          <button type="button" className={oppositeSort === "most_he" ? "active" : ""} onClick={() => setOppositeSort("most_he")}>Mais HE</button>
+          <button type="button" className={oppositeSort === "last_he" ? "active" : ""} onClick={() => setOppositeSort("last_he")}>Última HE</button>
+        </div>
+        <div className="opposite-team-list">
+          {oppositeTeam.length ? oppositeTeam.map((guard) => <SuggestionRow key={guard.id} guard={guard} selected={selectedId === guard.id} onSelect={() => setSelectedId(guard.id)} onConfirm={confirmSuggestion(guard)} busy={busy} highlight={Boolean(guard.oppositeVehicle)} />) : <p className="hole-suggest-empty">Nenhum GM da equipe oposta está elegível para HE neste período.</p>}
+        </div>
+      </section>
+    </div>}
+    </>
   );
 }
 
