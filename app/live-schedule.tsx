@@ -1360,7 +1360,7 @@ function Editor({
     [shiftId, setShiftId] = useState(String(a?.shift || pick.shift)),
     [startsAt, setStartsAt] = useState(String(a?.starts_at || t.start)),
     [endsAt, setEndsAt] = useState(String(pick.extension ? initialRegularEnd : a?.ends_at || t.end)),
-    [regularEndsAt, setRegularEndsAt] = useState(String(a?.regular_ends_at || "")),
+    [regularEndsAt] = useState(String(a?.regular_ends_at || "")),
     [assignmentStatus, setAssignmentStatus] = useState(String(pick.extension && a?.status === "overtime" ? "normal" : a?.status || "normal")),
     [extensionMode, setExtensionMode] = useState(Boolean(pick.extension)),
     [extensionStartsAt, setExtensionStartsAt] = useState(String(a?.regular_ends_at || `${data.date}T19:00`)),
@@ -1369,7 +1369,6 @@ function Editor({
     [advancedOpen,setAdvancedOpen]=useState(Boolean(pick.extension||(a?.status&&a.status!=="normal")||Number(a?.is_reassigned)===1||a?.request_ref)),
     guard = data.guards.find((g) => String(g.id) === guardId);
   const tomorrow=new Date(`${data.date}T12:00:00Z`);tomorrow.setUTCDate(tomorrow.getUTCDate()+1);const tomorrowDate=tomorrow.toISOString().slice(0,10);
-  const covered=coveredOperationalShifts({shift:shiftId,starts_at:startsAt,ends_at:endsAt},data.date);
   const eligibleGuards = useMemo(() => {
     const q = guardQuery.toLowerCase().trim();
     return data.guards.filter((g) => {
@@ -1415,7 +1414,6 @@ function Editor({
           <span>Escolha GM, destino, turno, função e horário.</span>
         </div>
       )}
-      {!fillingHole&&advancedOpen&&<div className="cross-shift-tools"><div><b>Expediente e extensão independentes</b><small>A HE pode ter outro posto ou VTR sem mover o horário normal.</small></div><button type="button" className={extensionMode?"active":""} onClick={()=>{if(shiftId!=="W")setShiftId("3");setStartsAt(`${data.date}T13:00`);setEndsAt(`${data.date}T19:00`);setRegularEndsAt("");setExtensionStartsAt(`${data.date}T19:00`);setExtensionEndsAt(`${tomorrowDate}T01:00`);setAssignmentStatus("normal");setExtensionMode(true)}}>13h–01h em 2 blocos</button><button type="button" className={extensionMode?"active":""} onClick={()=>{const boundary=`${data.date}T19:00`;if(endsAt>boundary)setEndsAt(boundary);setRegularEndsAt("");setExtensionStartsAt(boundary);if(extensionEndsAt<=boundary)setExtensionEndsAt(`${data.date}T23:00`);setAssignmentStatus("normal");setExtensionMode(true)}}>＋ HE depois das 19h</button><p><span>Horário normal:</span> {covered.length?covered.map((shift)=>`${shift}º`).join(" + "):"revise os horários"}</p></div>}
       <input type="hidden" name="saveMode" value={extensionMode ? "split" : "single"}/>
       <div className="editing-alert">
         <b>Confira antes de salvar:</b>
