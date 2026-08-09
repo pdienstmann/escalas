@@ -10,7 +10,7 @@ import {
 import { orderScheduleResources } from "../lib/schedule-sections.ts";
 import { formatHoursDuration, fullPeriodWindow, fullPeriodShifts } from "../lib/shift-rules.ts";
 import { rankGuardSuggestions, describeReasons } from "../lib/suggest-gm.ts";
-import { mergeScheduleAssignments } from "../lib/schedule-state.ts";
+import { groupRedeploymentAssignments, mergeScheduleAssignments } from "../lib/schedule-state.ts";
 import { suggestionPosition } from "../lib/suggestion-position.ts";
 
 test("resolveScheduleDate prefers URL date over storage and today", () => {
@@ -219,4 +219,16 @@ test("suggestionPosition keeps the suggestion panel inside the available viewpor
     ),
     null,
   );
+});
+
+test("groupRedeploymentAssignments joins both halves of each operational period", () => {
+  const grouped = groupRedeploymentAssignments([
+    { id: 2, guard_id: 8, guard_name: "ALMEIDA", shift: "3", starts_at: "2026-08-12T13:00", ends_at: "2026-08-12T19:00" },
+    { id: 1, guard_id: 8, guard_name: "ALMEIDA", shift: "2", starts_at: "2026-08-12T07:00", ends_at: "2026-08-12T13:00" },
+    { id: 4, guard_id: 9, guard_name: "VIEIRA", shift: "1", starts_at: "2026-08-13T01:00", ends_at: "2026-08-13T07:00" },
+    { id: 3, guard_id: 9, guard_name: "VIEIRA", shift: "4", starts_at: "2026-08-12T19:00", ends_at: "2026-08-13T01:00" },
+  ]);
+  assert.equal(grouped.length, 2);
+  assert.deepEqual(grouped[0].assignments.map((item) => item.shift), ["2", "3"]);
+  assert.deepEqual(grouped[1].assignments.map((item) => item.shift), ["4", "1"]);
 });

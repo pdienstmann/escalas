@@ -1,5 +1,51 @@
 type AssignmentRecord = Record<string, string | number | null>;
 
+export type RedeploymentGroup = {
+  key: string;
+  guardId: number;
+  guardName: string;
+  period: "day" | "night";
+  assignments: AssignmentRecord[];
+};
+
+function assignmentPeriod(assignment: AssignmentRecord): "day" | "night" {
+  const shift = String(assignment.shift);
+  if (shift === "2" || shift === "3") return "day";
+  if (shift === "4" || shift === "1") return "night";
+  const hour = Number(String(assignment.starts_at || "00:00").slice(11, 13));
+  return hour >= 7 && hour < 19 ? "day" : "night";
+}
+
+export function groupRedeploymentAssignments(
+  assignments: AssignmentRecord[],
+): RedeploymentGroup[] {
+  const groups = new Map<string, RedeploymentGroup>();
+  for (const assignment of assignments) {
+    const period = assignmentPeriod(assignment);
+    const key = `${Number(assignment.guard_id)}:${period}`;
+    const group = groups.get(key) || {
+      key,
+      guardId: Number(assignment.guard_id),
+      guardName: String(assignment.guard_name || "GM"),
+      period,
+      assignments: [],
+    };
+    group.assignments.push(assignment);
+    groups.set(key, group);
+  }
+  const order = { "2": 0, "3": 1, "4": 0, "1": 1, W: 0 };
+  return [...groups.values()]
+    .map((group) => ({
+      ...group,
+      assignments: group.assignments.sort(
+        (a, b) =>
+          (order[String(a.shift) as keyof typeof order] ?? 9) -
+          (order[String(b.shift) as keyof typeof order] ?? 9),
+      ),
+    }))
+    .sort((a, b) => a.guardName.localeCompare(b.guardName));
+}
+
 function hasDestination(assignment: AssignmentRecord) {
   return assignment.post_id != null || assignment.vehicle_id != null;
 }

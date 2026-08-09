@@ -5,7 +5,11 @@ import { ScheduleNav } from "./schedule-nav";
 import { useScheduleDate } from "./use-schedule-date";
 import { formatScheduleDate } from "../lib/schedule-date";
 import { orderScheduleResources } from "../lib/schedule-sections";
-import { mergeScheduleAssignments } from "../lib/schedule-state";
+import {
+  groupRedeploymentAssignments,
+  mergeScheduleAssignments,
+  type RedeploymentGroup,
+} from "../lib/schedule-state";
 import { suggestionPosition, type SuggestionPosition } from "../lib/suggestion-position";
 import {
   formatHoursDuration,
@@ -58,7 +62,7 @@ type HolePick = {
   role: string | null;
   position: SuggestionPosition | null;
 };
-type RedeployPick = { assignment: Rec };
+type RedeployPick = { assignments: Rec[] };
 type ViewFilter = "all" | "day" | "night" | "holes" | "redeploy";
 const shifts = SHIFT_DEFS;
 function times(date: string, shift: string) {
@@ -127,6 +131,10 @@ export function LiveSchedule() {
     }
     return map;
   }, [data]);
+  const redeploymentGroups = useMemo(
+    () => groupRedeploymentAssignments(data?.availableForRedeployment || []),
+    [data?.availableForRedeployment],
+  );
   const resources = useMemo(() => {
     if (!data) return [];
     const q = query.toLowerCase().trim();
@@ -327,12 +335,25 @@ export function LiveSchedule() {
       (item) => Number(item.id) === Number(resourceId),
     );
     if (!resource) return;
-    await move(
-      redeployPick.assignment,
+    await moveGroup(
+      redeployPick.assignments,
       kind === "vehicle" ? "vehicle" : "post",
       resource,
-      String(body.shift),
     );
+  }
+  async function moveGroup(
+    assignments: Rec[],
+    kind: "post" | "vehicle",
+    resource: Rec,
+  ) {
+    if (!data || !assignments.length) return;
+    await postAssignment({
+      action: "redeploy_group",
+      assignmentIds: assignments.map((assignment) => Number(assignment.id)),
+      scheduleId: data.schedule.id,
+      postId: kind === "post" ? Number(resource.id) : null,
+      vehicleId: kind === "vehicle" ? Number(resource.id) : null,
+    });
   }
   async function saveVehicleQuick(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -548,9 +569,11 @@ export function LiveSchedule() {
                   shifts={visibleShifts}
                   assignmentIndex={assignmentIndex}
                   availableForRedeployment={data.availableForRedeployment}
+                  redeploymentGroups={redeploymentGroups}
                   selectedId={Number(pick?.assignment?.id || 0)}
                   onPick={setPick}
                   onMove={move}
+                  onMoveGroup={moveGroup}
                   onHolePick={openHoleSuggest}
                   onEditVehicle={setVehicleEdit}
                 />
@@ -593,15 +616,16 @@ export function LiveSchedule() {
           </section>
           {showRedeploy && data.availableForRedeployment.length > 0 && (
             <section className="redeployment-pool">
-              <header><div><span>VIATURA INDISPONÍVEL</span><h2>GMs à disposição para remanejamento</h2><p>Arraste o GM diretamente para uma célula da escala ou escolha o destino.</p></div><b>{data.availableForRedeployment.length}</b></header>
-              <div>{data.availableForRedeployment.map((a) => (
-                <article key={String(a.id)} draggable onDragStart={(event) => {
+              <header><div><span>VIATURA INDISPONÍVEL</span><h2>GMs à disposição para remanejamento</h2><p>Cada card reúne os dois horários do mesmo período. Ao mover, ambos seguem juntos.</p></div><b title={`${data.availableForRedeployment.length} horários`}>{redeploymentGroups.length}</b></header>
+              <div>{redeploymentGroups.map((group) => (
+                <article key={group.key} draggable onDragStart={(event) => {
                   event.dataTransfer.effectAllowed = "move";
-                  event.dataTransfer.setData("text/assignment", String(a.id));
+                  event.dataTransfer.setData("text/assignment", String(group.assignments[0].id));
+                  event.dataTransfer.setData("text/assignment-group", group.assignments.map((assignment) => assignment.id).join(","));
                 }}>
                   <span className="redeploy-drag" aria-hidden="true">⋮⋮</span>
-                  <div><b>{String(a.guard_name)}</b><small>{String(a.starts_at).slice(11,16)}–{String(a.ends_at).slice(11,16)} · {shiftName(String(a.shift))}</small></div>
-                  <button type="button" onClick={() => setRedeployPick({ assignment: a })}>Escolher destino</button>
+                  <div><b>{group.guardName}</b><small>{redeploymentTimeLabel(group.assignments)} · {group.period === "day" ? "Diurno · 2º + 3º" : "Noturno · 4º + 1º"}</small></div>
+                  <button type="button" onClick={() => setRedeployPick({ assignments: group.assignments })}>Escolher destino</button>
                 </article>
               ))}</div>
             </section>
@@ -672,7 +696,7 @@ export function LiveSchedule() {
       {redeployPick && (
         <RedeployQuickEditor
           data={data}
-          assignment={redeployPick.assignment}
+          assignments={redeployPick.assignments}
           saving={saving}
           onClose={() => setRedeployPick(null)}
           onSave={saveRedeployment}
@@ -682,8 +706,9 @@ export function LiveSchedule() {
   );
 }
 
-function RedeployQuickEditor({data,assignment,saving,onClose,onSave}:{data:State;assignment:Rec;saving:boolean;onClose:()=>void;onSave:(e:FormEvent<HTMLFormElement>)=>void}) {
+function RedeployQuickEditor({data,assignments,saving,onClose,onSave}:{data:State;assignments:Rec[];saving:boolean;onClose:()=>void;onSave:(e:FormEvent<HTMLFormElement>)=>void}) {
   const [query,setQuery]=useState("");
+  const assignment=assignments[0];
   const destinations=useMemo(()=>{
     const value=query.toLowerCase().trim();
     const items=[
@@ -694,17 +719,16 @@ function RedeployQuickEditor({data,assignment,saving,onClose,onSave}:{data:State
   },[data.posts,data.vehicles,query]);
   const defaultDestination=destinations[0];
   return <div className="redeploy-quick-backdrop"><form className="redeploy-quick-editor" role="dialog" aria-modal="true" aria-labelledby="redeploy-title" onSubmit={onSave}>
-    <header><div><small>REMANEJAMENTO RÁPIDO</small><h2 id="redeploy-title">{String(assignment.guard_name)}</h2><p>{String(assignment.starts_at).slice(11,16)}–{String(assignment.ends_at).slice(11,16)} · {shiftName(String(assignment.shift))}</p></div><button type="button" onClick={onClose} aria-label="Fechar remanejamento">×</button></header>
-    <div className="redeploy-alert"><b>GM à disposição</b><span>O horário atual será preservado se o turno não mudar.</span></div>
+    <header><div><small>REMANEJAMENTO DO PERÍODO COMPLETO</small><h2 id="redeploy-title">{String(assignment.guard_name)}</h2><p>{redeploymentTimeLabel(assignments)} · {assignments.length} horários vinculados</p></div><button type="button" onClick={onClose} aria-label="Fechar remanejamento">×</button></header>
+    <div className="redeploy-alert"><b>Os horários serão movidos juntos</b><span>Funções e horários de cada metade serão preservados.</span></div>
     <label>Buscar posto, viatura ou zona<input value={query} onChange={event=>setQuery(event.target.value)} placeholder="Ex.: Sala de Operações, VTR 1337, Centro…" /></label>
     <label>Destino<select name="destination" key={defaultDestination?`${defaultDestination.kind}-${defaultDestination.resource.id}`:"empty"} required>{destinations.length?destinations.map(item=><option key={`${item.kind}-${item.resource.id}`} value={`${item.kind}:${item.resource.id}`}>{item.kind==="vehicle"?vehicleIcon(String(item.resource.type)):"◆"} {item.label} — {item.detail}</option>):<option value="">Nenhum destino encontrado</option>}</select></label>
-    <label>Turno<select name="shift" defaultValue={String(assignment.shift)==="W"?"2":String(assignment.shift)}>{shifts.map(shift=><option key={shift.id} value={shift.id}>{shift.label} · {shift.time}</option>)}</select></label>
-    <p className="redeploy-help">Também é possível fechar esta janela e arrastar o card diretamente para o turno desejado na tabela.</p>
+    <p className="redeploy-help">Também é possível fechar esta janela e arrastar o card para qualquer célula do mesmo período. O destino receberá todas as metades exibidas acima.</p>
     <footer><button type="button" onClick={onClose}>Cancelar</button><button className="save" disabled={saving||!destinations.length}>{saving?"Movendo…":"Confirmar remanejamento"}</button></footer>
   </form></div>;
 }
 
-function shiftName(shift:string){return shifts.find(item=>item.id===shift)?.label||`${shift}º turno`}
+function redeploymentTimeLabel(assignments:Rec[]){return assignments.map(assignment=>`${String(assignment.starts_at).slice(11,16)}–${String(assignment.ends_at).slice(11,16)}`).join(" + ")}
 
 function movementDetail(m: Rec) {
   const start = new Date(String(m.starts_at));
@@ -753,9 +777,11 @@ function Row({
   shifts: visibleShifts,
   assignmentIndex,
   availableForRedeployment,
+  redeploymentGroups,
   selectedId,
   onPick,
   onMove,
+  onMoveGroup,
   onHolePick,
   onEditVehicle,
 }: {
@@ -768,9 +794,11 @@ function Row({
   shifts: typeof SHIFT_DEFS;
   assignmentIndex: Map<string, Rec[]>;
   availableForRedeployment: Rec[];
+  redeploymentGroups: RedeploymentGroup[];
   selectedId: number;
   onPick: (p: Pick) => void;
   onMove: (a: Rec, k: "post" | "vehicle", r: Rec, s: string) => void;
+  onMoveGroup: (a: Rec[], k: "post" | "vehicle", r: Rec) => void;
   onHolePick: (
     kind: "post" | "vehicle",
     resource: Rec,
@@ -781,6 +809,21 @@ function Row({
 }) {
   function drop(e: DragEvent, shift: string) {
     e.preventDefault();
+    const groupIds = e.dataTransfer
+      .getData("text/assignment-group")
+      .split(",")
+      .map(Number)
+      .filter(Boolean);
+    if (groupIds.length) {
+      const group = redeploymentGroups.find((item) =>
+        item.assignments.every((assignment) => groupIds.includes(Number(assignment.id))),
+      );
+      const targetPeriod = isDayShift(shift) ? "day" : "night";
+      if (group && group.period === targetPeriod) {
+        void onMoveGroup(group.assignments, kind, resource);
+      }
+      return;
+    }
     const id = Number(e.dataTransfer.getData("text/assignment"));
     for (const list of assignmentIndex.values()) {
       const assignment = list.find((a) => Number(a.id) === id);

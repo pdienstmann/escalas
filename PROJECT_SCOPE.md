@@ -109,7 +109,7 @@
 - Permitir criar, editar, renomear, reordenar e desativar postos diretamente na escala, usando um painel lateral compacto. A área de Cadastros continuará disponível para manutenção em massa.
 - Ao excluir ou desativar um posto com GMs escalados, mostrar os envolvidos, oferecer transferência coletiva e impedir que as designações fiquem sem representação visual.
 - Transformar remanejamentos em uma fila operacional compacta: origem, destino sugerido, horário, motivo, requerimento, situação de aviso e ação direta para escolher uma vaga.
-- Quando uma VTR entrar em FA, permitir arrastar cada GM da fila de remanejamento diretamente até a célula de um posto/turno. Os destinos válidos deverão ser destacados durante o arraste e a mudança deverá preservar horário, situação e referência original.
+- Quando uma VTR entrar em FA, agrupar no mesmo card as duas metades do período de cada GM (`2º + 3º` no diurno ou `4º + 1º` no noturno). Permitir arrastar esse bloco diretamente até um posto ou VTR, movendo todos os horários juntos e preservando função, situação e referência original.
 - Como alternativa ao arrastar, disponibilizar no próprio card do GM o botão “Escolher posto”, abrindo uma caixa compacta com busca e seleção de seção, posto, turno e função, sem encaminhar o usuário ao painel lateral da direita.
 - Confirmar o remanejamento nessa caixa compacta, atualizar escala e fila imediatamente e oferecer “Desfazer”. Se houver conflito, afastamento ou incompatibilidade de horário, manter o GM na fila e explicar o impedimento sem perder os dados.
 - Ao clicar em um furo, abrir um preenchimento rápido junto à própria célula, sem exigir o painel lateral completo. A tela mostrará o destino, turno, horário, função necessária e uma busca curta de GMs elegíveis.

@@ -529,6 +529,99 @@ export async function POST(request: Request) {
   if (!permitted(request))
     return Response.json({ error: "Não autorizado" }, { status: 401 });
   const b = (await request.json()) as Record<string, string | number | boolean | null>;
+  if (b.action === "redeploy_group") {
+    const assignmentIds = [
+      ...new Set(
+        (((b as unknown as { assignmentIds?: unknown[] }).assignmentIds || [])
+          .map(Number)
+          .filter((id) => Number.isInteger(id) && id > 0)),
+      ),
+    ].slice(0, 4);
+    if (!assignmentIds.length)
+      return Response.json({ error: "Nenhuma designação selecionada." }, { status: 400 });
+    const placeholders = assignmentIds.map(() => "?").join(",");
+    const before = (
+      await env.DB.prepare(
+        `SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id IN (${placeholders}) ORDER BY a.shift`,
+      )
+        .bind(...assignmentIds)
+        .all<Record<string, unknown>>()
+    ).results;
+    if (before.length !== assignmentIds.length)
+      return Response.json({ error: "Uma das designações não foi encontrada." }, { status: 404 });
+    const scheduleIds = new Set(before.map((item) => Number(item.schedule_id)));
+    const guardIds = new Set(before.map((item) => Number(item.guard_id)));
+    if (scheduleIds.size !== 1 || guardIds.size !== 1)
+      return Response.json({ error: "Selecione somente os horários do mesmo GM e período." }, { status: 409 });
+
+    const scheduleId = Number(before[0].schedule_id);
+    const postId = Number(b.postId || 0) || null;
+    const vehicleId = Number(b.vehicleId || 0) || null;
+    if ((postId ? 1 : 0) + (vehicleId ? 1 : 0) !== 1)
+      return Response.json({ error: "Escolha um único destino." }, { status: 400 });
+    const schedule = await env.DB.prepare("SELECT date FROM schedules WHERE id=?")
+      .bind(scheduleId)
+      .first<{ date: string }>();
+    if (!schedule)
+      return Response.json({ error: "Escala não encontrada." }, { status: 404 });
+    const destination = postId
+      ? await env.DB.prepare("SELECT id,name label FROM posts WHERE id=? AND active=1").bind(postId).first<Record<string, unknown>>()
+      : await env.DB.prepare("SELECT id,prefix label FROM vehicles WHERE id=? AND active=1").bind(vehicleId).first<Record<string, unknown>>();
+    if (!destination)
+      return Response.json({ error: "Destino não encontrado ou desativado." }, { status: 404 });
+    if (vehicleId) {
+      const outage = await env.DB.prepare(
+        "SELECT id FROM vehicle_outages WHERE vehicle_id=? AND active=1 AND starts_on<=? AND (ends_on IS NULL OR ends_on>=?) LIMIT 1",
+      )
+        .bind(vehicleId, schedule?.date, schedule?.date)
+        .first();
+      if (outage)
+        return Response.json({ error: "A viatura selecionada está em FA nesta data." }, { status: 409 });
+    }
+
+    const shifts = [...new Set(before.map((item) => String(item.shift)))];
+    for (const shift of shifts) {
+      const occupied = await env.DB.prepare(
+        `SELECT COUNT(*) total FROM assignments WHERE schedule_id=? AND shift=? AND ${postId ? "post_id" : "vehicle_id"}=? AND id NOT IN (${placeholders})`,
+      )
+        .bind(scheduleId, shift, postId || vehicleId, ...assignmentIds)
+        .first<{ total: number }>();
+      const capacity = postId ? 1 : 2;
+      const incoming = before.filter((item) => String(item.shift) === shift).length;
+      if (Number(occupied?.total || 0) + incoming > capacity)
+        return Response.json(
+          { error: `${destination.label} já está completo no ${shift}º turno.` },
+          { status: 409 },
+        );
+    }
+
+    await env.DB.prepare(
+      `UPDATE assignments SET post_id=?,vehicle_id=?,role=CASE WHEN ? IS NOT NULL THEN 'guard' ELSE role END,is_reassigned=1,reassignment_note='Remanejamento do período completo',updated_at=CURRENT_TIMESTAMP WHERE id IN (${placeholders})`,
+    )
+      .bind(postId, vehicleId, postId, ...assignmentIds)
+      .run();
+    const assignments = (
+      await env.DB.prepare(
+        `SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id IN (${placeholders}) ORDER BY a.starts_at`,
+      )
+        .bind(...assignmentIds)
+        .all<Record<string, unknown>>()
+    ).results;
+    await writeAudit(request, {
+      action: "update",
+      entityType: "assignment_group",
+      entityId: assignmentIds.join(","),
+      summary: `Remanejou ${before[0].guard_name} com ${assignmentIds.length} horários para ${destination.label}`,
+      before: { assignments: before },
+      after: { assignments },
+      undoable: true,
+    });
+    return Response.json({
+      ok: true,
+      assignments,
+      message: `${before[0].guard_name} remanejado com todos os horários do período.`,
+    });
+  }
   if (b.action === "vehicle_quick_update") {
     const scheduleId = Number(b.scheduleId);
     const fromVehicleId = Number(b.fromVehicleId);
