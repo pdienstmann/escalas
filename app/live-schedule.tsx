@@ -918,11 +918,16 @@ export function LiveSchedule() {
                       : Number(assignment.vehicle_id)===Number(resource.id)),
                   })}
                 />
-                {kind === "vehicle" && last && !isCollapsed && (
-                  <tr className="vehicle-section-footer">
+                {last && !isCollapsed && (
+                  <tr className="resource-section-footer">
                     <td colSpan={visibleShifts.length + 1}>
-                      <button type="button" onClick={()=>setResourceDialog({kind:"vehicle",initialMode:"existing",initialShift:"2"})}>
-                        ＋ Adicionar viatura à escala
+                      <button type="button" onClick={()=>setResourceDialog({
+                        kind,
+                        initialMode:"existing",
+                        initialShift:"2",
+                        initialSection:kind==="post"?section:undefined,
+                      })}>
+                        ＋ Adicionar {kind==="vehicle"?"viatura à escala":`posto em ${section}`}
                       </button>
                     </td>
                   </tr>
@@ -1086,8 +1091,14 @@ function QuickCreateDialog({initialKind,data,saving,onClose,onSave}:{initialKind
 
 function ResourceCrewDialog({kind,initialResourceId,initialShift="2",initialMode,initialSection,data,saving,onClose,onSave}:ResourceDialogState&{data:State;saving:boolean;onClose:()=>void;onSave:(event:FormEvent<HTMLFormElement>,kind:"post"|"vehicle")=>void}){
   const resources=kind==="vehicle"?data.vehicles:data.posts;
-  const [mode,setMode]=useState<"existing"|"new">(initialMode||(resources.length?"existing":"new"));
-  const [resourceId,setResourceId]=useState(String(initialResourceId||resources[0]?.id||""));
+  const selectableResources=kind==="post"&&initialSection
+    ? resources.filter(resource=>{
+        const section=data.sections.find(item=>String(item.section_key)===`POST:${resource.group_name||"POSTOS"}`);
+        return String(section?.label||resource.group_name||"POSTOS")===initialSection;
+      })
+    : resources;
+  const [mode,setMode]=useState<"existing"|"new">(initialMode||(selectableResources.length?"existing":"new"));
+  const [resourceId,setResourceId]=useState(String(initialResourceId||selectableResources[0]?.id||resources[0]?.id||""));
   const [shift,setShift]=useState<"2"|"4">(initialShift);
   const firstHasPair=kind==="vehicle"&&vehicleHasPair(data,Number(resourceId),shift);
   const [extraCount,setExtraCount]=useState(kind==="post"||firstHasPair?1:0);
@@ -1095,8 +1106,8 @@ function ResourceCrewDialog({kind,initialResourceId,initialShift="2",initialMode
   const sectionLabels=[...new Set(data.sections.filter(section=>String(section.section_key).startsWith("POST:")).map(section=>String(section.label)))];
   function chooseExisting(id:string){setResourceId(id);setExtraCount(kind==="post"||vehicleHasPair(data,Number(id),shift)?1:0)}
   function chooseShift(value:"2"|"4"){setShift(value);setExtraCount(kind==="post"||(mode==="existing"&&vehicleHasPair(data,Number(resourceId),value))?1:0)}
-  return <div className="quick-create-backdrop"><form className="resource-crew-dialog" role="dialog" aria-modal="true" aria-labelledby="resource-crew-title" onSubmit={event=>onSave(event,kind)}><header><div><small>INCLUIR DIRETAMENTE NA ESCALA</small><h2 id="resource-crew-title">{kind==="vehicle"?"Viatura e guarnição":"Posto e efetivo"}</h2><p>Use um cadastro existente ou crie outro e já posicione os GMs.</p></div><button type="button" onClick={onClose} aria-label="Fechar">×</button></header><nav className="resource-mode"><button type="button" className={mode==="existing"?"active":""} disabled={!resources.length} onClick={()=>{setMode("existing");setExtraCount(kind==="post"||vehicleHasPair(data,Number(resourceId),shift)?1:0)}}>Usar {kind==="vehicle"?"VTR":"posto"} existente</button><button type="button" className={mode==="new"?"active":""} onClick={()=>{setMode("new");setExtraCount(kind==="post"?1:0)}}>＋ Criar {kind==="vehicle"?"nova VTR":"novo posto"}</button></nav><input type="hidden" name="resourceMode" value={mode}/>
-    {mode==="existing"&&<label>{kind==="vehicle"?"Viatura disponível na escala":"Posto existente"}<select name="resourceId" value={resourceId} onChange={event=>chooseExisting(event.target.value)} required>{resources.map(resource=>{const crew=kind==="vehicle"?uniqueCrewCount(data,Number(resource.id)):0;return <option key={String(resource.id)} value={String(resource.id)}>{kind==="vehicle"?`${vehicleIcon(String(resource.type))} ${resource.prefix} · ${resource.zone||"Sem zona"} · ${crew} GM(s)`:`${resource.group_name} · ${resource.name}`}</option>})}</select></label>}
+  return <div className="quick-create-backdrop"><form className="resource-crew-dialog" role="dialog" aria-modal="true" aria-labelledby="resource-crew-title" onSubmit={event=>onSave(event,kind)}><header><div><small>INCLUIR DIRETAMENTE NA ESCALA</small><h2 id="resource-crew-title">{kind==="vehicle"?"Viatura e guarnição":"Posto e efetivo"}</h2><p>Use um cadastro existente ou crie outro e já posicione os GMs.</p></div><button type="button" onClick={onClose} aria-label="Fechar">×</button></header><nav className="resource-mode"><button type="button" className={mode==="existing"?"active":""} disabled={!selectableResources.length} onClick={()=>{setMode("existing");setExtraCount(kind==="post"||vehicleHasPair(data,Number(resourceId),shift)?1:0)}}>Usar {kind==="vehicle"?"VTR":"posto"} existente</button><button type="button" className={mode==="new"?"active":""} onClick={()=>{setMode("new");setExtraCount(kind==="post"?1:0)}}>＋ Criar {kind==="vehicle"?"nova VTR":"novo posto"}</button></nav><input type="hidden" name="resourceMode" value={mode}/>
+    {mode==="existing"&&<label>{kind==="vehicle"?"Viatura disponível na escala":initialSection?`Posto existente em ${initialSection}`:"Posto existente"}<select name="resourceId" value={resourceId} onChange={event=>chooseExisting(event.target.value)} required>{selectableResources.map(resource=>{const crew=kind==="vehicle"?uniqueCrewCount(data,Number(resource.id)):0;return <option key={String(resource.id)} value={String(resource.id)}>{kind==="vehicle"?`${vehicleIcon(String(resource.type))} ${resource.prefix} · ${resource.zone||"Sem zona"} · ${crew} GM(s)`:`${resource.group_name} · ${resource.name}`}</option>})}</select></label>}
     {mode==="new"&&kind==="vehicle"&&<div className="new-resource-fields"><label>Prefixo<input name="prefix" required placeholder="Ex.: VTR 1400"/></label><label>Tipo<select name="type" defaultValue="sedan"><option value="sedan">Sedan</option><option value="pickup">Caminhonete</option><option value="suv">SUV</option><option value="van">Furgão</option><option value="moto">Moto</option><option value="other">Outro</option></select></label><label>Zona / área<input name="zone" placeholder="Área de atuação"/></label></div>}
     {mode==="new"&&kind==="post"&&<div className="new-resource-fields"><label>Nome do posto<input name="name" required placeholder="Ex.: Recepção"/></label><label>Seção<select name="groupName" required defaultValue={initialSection||""}><option value="">Selecionar seção</option>{sectionLabels.map(label=><option key={label} value={label}>{label}</option>)}</select></label><input type="hidden" name="sortOrder" value="99"/></div>}
     <label>Período da equipe<select name="shift" value={shift} onChange={event=>chooseShift(event.target.value as "2"|"4")}><option value="2">Diurno · 07h–19h</option><option value="4">Noturno · 19h–07h</option></select></label>

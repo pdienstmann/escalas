@@ -1,4 +1,6 @@
 ﻿import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import test from "node:test";
 import {
   formatScheduleDate,
@@ -277,4 +279,12 @@ test("independent overtime stays outside regular alignment lanes", () => {
   const extension = { id: 2, guard_id: 1, guard_name: "ALMEIDA", role: "guard", work_kind: "overtime_extension", starts_at: "2026-08-12T19:00" };
   const ordered = orderAssignmentsInResourceCell([extension, regular], [extension, regular], "post");
   assert.deepEqual(ordered.map((item) => item.id), [1, 2]);
+});
+
+test("every expanded schedule section ends with an inline resource action", () => {
+  const source = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  assert.match(source, /last && !isCollapsed/);
+  assert.match(source, /className="resource-section-footer"/);
+  assert.match(source, /initialSection:kind==="post"\?section:undefined/);
+  assert.match(source, /selectableResources=kind==="post"&&initialSection/);
 });
