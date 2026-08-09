@@ -8,6 +8,7 @@ import "./overtime.css";
 import "./overtime-enhancements.css";
 import "./drag-edit.css";
 import "./patterns.css";
+import "./patterns-enhanced.css";
 import "./usability.css";
 import "./notices.css";
 import "./history.css";

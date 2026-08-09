@@ -16,7 +16,9 @@
 - Padrão 1/Padrão 2, também apresentável como par/ímpar conforme o mês.
 - Tela para consultar a composição de cada padrão e aplicar o padrão correto em uma data.
 - Primeira edição visual implementada como `escala ideal`: composição agrupada por seções, postos e viaturas, busca, inclusão no próprio destino, edição/movimentação do GM e indicação de efetivo ainda sem posição.
-- Permanecem previstas comparação lado a lado, arrastar/soltar, validação visual de funções/furos e prévia completa antes de aplicar.
+- Comparação D1/D2 e N1/N2 lado a lado implementada, com arrastar/soltar GMs entre postos, viaturas e equipes.
+- Validação visual implementada para duplicidades, GM sem destino, motorista/patrulheiro ausente e funções repetidas na mesma VTR.
+- Prévia em quatro turnos implementada antes de aplicar o padrão, com resumo de efetivo, pendências e confirmação explícita.
 - Aplicação automática do padrão correto ao criar/abrir a escala de uma data.
 - A escala gerada permanece editável para receber folgas, afastamentos, HE, banco de horas e demais ajustes do dia.
 

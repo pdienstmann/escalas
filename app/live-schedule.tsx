@@ -581,6 +581,7 @@ export function LiveSchedule() {
                 return (
                 <Row
                   key={`${kind}-${r.id}`}
+                  date={data.date}
                   kind={kind}
                   resource={r}
                   section={section}
@@ -809,6 +810,7 @@ function VehicleQuickEditor({data,vehicle,saving,onClose,onSave}:{data:State;veh
   </form></div>
 }
 function Row({
+  date,
   kind,
   resource,
   section,
@@ -829,6 +831,7 @@ function Row({
   onHolePick,
   onEditVehicle,
 }: {
+  date: string;
   kind: "post" | "vehicle";
   resource: Rec;
   section: string;
@@ -923,7 +926,7 @@ function Row({
         {visibleShifts.map((s) => {
           const list = assignmentIndex.get(assignmentKey(kind, Number(resource.id), s.id)) || [];
           const missingRoles = kind === "vehicle"
-            ? ["driver", "patrol"].filter((role) => !list.some((assignment) => String(assignment.role) === role && !isOvertimeExtensionCell(assignment,data.date,s.id)))
+            ? ["driver", "patrol"].filter((role) => !list.some((assignment) => String(assignment.role) === role && !isOvertimeExtensionCell(assignment,date,s.id)))
             : list.length ? [] : ["guard"];
           return (
             <td
@@ -932,7 +935,7 @@ function Row({
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => drop(e, s.id)}
             >
-              {list.map((a) => {const visualStatus=statusInShift(a,data.date,s.id);return (<Fragment key={String(a.id)}>
+              {list.map((a) => {const visualStatus=statusInShift(a,date,s.id);return (<Fragment key={String(a.id)}>
                 <button
                   draggable
                   className={`live-person ${visualStatus} ${Number(a.is_reassigned)?"reassigned":""} ${Number(a.id) === selectedId ? "is-selected" : ""}`}
@@ -946,7 +949,7 @@ function Row({
                 >
                   {kind === "vehicle" && (
                     <span className="role">
-                      {isOvertimeExtensionCell(a,data.date,s.id)?"R":a.role === "driver" ? "M" : a.role === "patrol" ? "P" : "R"}
+                      {isOvertimeExtensionCell(a,date,s.id)?"R":a.role === "driver" ? "M" : a.role === "patrol" ? "P" : "R"}
                     </span>
                   )}
                   <b>{a.guard_name}</b>
@@ -957,7 +960,7 @@ function Row({
                   )}
                   {Number(a.is_reassigned)===1&&<span className="badge remanejamento">REM</span>}
                   <small>
-                    {assignmentDisplayInShift(a,data.date,s.id)}
+                    {assignmentDisplayInShift(a,date,s.id)}
                   </small>
                 </button>
                 {Number(a.id)===selectedId&&<div className="cell-quick-actions" role="group" aria-label={`Ações rápidas de ${String(a.guard_name)}`}><b>{a.guard_name}</b><button type="button" onClick={()=>onEdit({kind,resource,shift:s.id,assignment:a})}>Trocar / mover / horário</button><button type="button" className={a.status==="overtime"?"active":""} onClick={()=>onQuickStatus(a,a.status==="overtime"?"normal":"overtime")}>HE</button><button type="button" className={a.status==="time_bank"?"active":""} onClick={()=>onQuickStatus(a,a.status==="time_bank"?"normal":"time_bank")}>BH</button><button type="button" className="danger" onClick={()=>onQuickDelete(a)}>Remover</button><button type="button" aria-label="Fechar ações" onClick={()=>onContextPick({kind,resource,shift:s.id})}>×</button></div>}</Fragment>

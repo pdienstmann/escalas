@@ -77,9 +77,9 @@ export async function POST(request: Request) {
       const d = destination(body);
       const before = await env.DB.prepare("SELECT * FROM pattern_slots WHERE id=?").bind(body.id).first<Record<string,unknown>>();
       await env.DB.prepare(
-        "UPDATE pattern_slots SET guard_id=?,post_id=?,vehicle_id=?,role=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        "UPDATE pattern_slots SET pattern_id=COALESCE(?,pattern_id),guard_id=?,post_id=?,vehicle_id=?,role=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
       )
-        .bind(body.guardId, d.postId, d.vehicleId, body.role, body.id)
+        .bind(body.patternId || null, body.guardId, d.postId, d.vehicleId, body.role, body.id)
         .run();
       const after = await env.DB.prepare("SELECT * FROM pattern_slots WHERE id=?").bind(body.id).first();
       await writeAudit(request,{action:"update",entityType:"pattern_slot",entityId:Number(body.id),summary:"Alterou uma posição do padrão 12x36",before,after:after as Record<string,unknown>,undoable:true});
