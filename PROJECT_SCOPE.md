@@ -35,6 +35,24 @@
 - Elegibilidade conforme 12x36, limite por data/equipe/turno e lista de espera.
 - Aprovação integrada às movimentações e retirada automática da escala.
 
+## Controle de horas extras — reformulação aprovada
+
+- Separar `HE prevista` de `HE confirmada`. Uma designação marcada como HE na escala criará uma previsão, mas não aumentará automaticamente o total oficial do GM.
+- Criar o fechamento/conferência de HE por dia. O responsável verá as previsões do período e marcará cada uma como `Realizada integralmente`, `Realizada parcialmente`, `Não realizada`, `Cancelada` ou `Pendente`.
+- Permitir informar manualmente horário inicial/final ou quantidade de horas efetivamente cumprida, posto/VTR, requerimento, justificativa, observação e responsável pela conferência.
+- Contabilizar no ranking e no fechamento mensal somente horas confirmadas. As horas previstas e ainda pendentes aparecerão em coluna separada para evitar nova indicação excessiva antes da conferência.
+- Permitir lançamento totalmente manual de HE que não tenha nascido da escala, correção por ajuste positivo/negativo e estorno auditável. Não apagar silenciosamente valores já confirmados.
+- Manter histórico de criação, confirmação, alteração, cancelamento e estorno, com data, usuário, valor anterior e valor novo.
+- Criar flag permanente `Não realiza HE` no cadastro do GM. Esses GMs não aparecerão nas sugestões automáticas; na busca manual poderão ficar ocultos por padrão ou visíveis com indicação clara de impedimento administrativo.
+- Prever também restrição temporária para HE com data inicial/final e motivo, sem confundir essa situação com férias, licença ou afastamento da escala normal.
+- Permitir avisos e marcadores por GM em dois níveis: observação permanente do cadastro e anotação mensal do controle de HE. Exemplos: `Não realiza HE`, `Verificar`, `Restrição temporária`, `Preferência operacional` e texto livre.
+- A tela mensal será uma grade densa e editável por GM, com matrícula, equipe, horas confirmadas, horas pendentes, mês anterior, última HE, quantidade de serviços, elegibilidade, flags, aviso e ações rápidas.
+- Ao abrir um GM, mostrar um extrato cronológico do mês com cada lançamento, situação, duração, origem, posto/VTR, requerimento e observação; permitir editar ou conferir sem sair da tela.
+- Incluir filtros por nome, matrícula, equipe, elegibilidade, pendências, flags e faixa de horas; permitir ordenar por menor HE confirmada, maior tempo desde a última HE e quantidade de serviços.
+- Mostrar alertas operacionais no topo: previsões antigas ainda não conferidas, lançamentos sem requerimento, duração incomum, ajustes manuais, GMs sem HE habilitada e diferença excessiva de distribuição.
+- Oferecer fechamento mensal com resumo, pendências impeditivas, exportação CSV/PDF e bloqueio opcional do período após conferência. Reabertura exigirá justificativa e ficará no histórico.
+- Na sugestão de GM para um furo, usar como base principal as horas confirmadas, considerar as pendentes como carga já comprometida e excluir `Não realiza HE`, restrições temporárias, conflitos e afastamentos.
+
 ## Saídas
 
 - Validação e publicação da escala.
@@ -66,6 +84,8 @@
 - Durante arrastar, mover ou substituir, destacar visualmente o GM que está sendo manipulado, a origem e somente os destinos válidos. Antes de confirmar, exibir um resumo curto `GM/origem → destino`; depois, mostrar confirmação e opção `Desfazer`.
 - Projetar os fluxos para usuários com pouca familiaridade com informática: textos em linguagem operacional, ações principais sempre visíveis, ícones acompanhados de rótulos, poucos campos por etapa e informações avançadas reveladas apenas quando solicitadas.
 - Evitar diálogos grandes para tarefas rotineiras. Preferir menus contextuais, caixas ancoradas na célula, seleção direta, arrastar/soltar com alternativa por clique e edição em linha.
+- Corrigir a caixa dinâmica de sugestões para nunca ser cortada pela tabela ou pela janela: renderizá-la acima da estrutura rolável, escolher automaticamente abertura para cima/baixo, limitar sua altura ao espaço disponível e manter cabeçalho, busca e confirmação fixos com rolagem apenas na lista.
+- Em telas estreitas, transformar as sugestões em painel inferior de altura controlada, com rolagem completa, botão de fechar sempre visível e área de confirmação acessível sem depender da rolagem da página.
 
 #### Fluidez e continuidade de navegação
 
@@ -114,9 +134,16 @@
 
 ### Fase 4 — completar o roadmap funcional existente
 
-- Reformular a edição detalhada dos padrões 12x36 e semanais para usar uma matriz semelhante à escala diária: seções, postos, VTRs, zonas e posições de motorista/patrulheiro claramente alinhadas.
+- Tratar o editor de padrões como a `escala ideal`: a composição completa que existiria sem folgas, férias, cursos, atestados, licenças, faltas, trocas, banco de horas ou alterações específicas de uma data.
+- Reformular a edição detalhada dos padrões 12x36 e semanais para usar a mesma linguagem visual da escala diária: seções, postos, VTRs, zonas, turnos e posições de motorista/patrulheiro claramente alinhadas.
+- Exibir cada padrão como uma escala completa e navegável, com os 2º/3º turnos para as equipes diurnas e 4º/1º turnos para as noturnas. A escala semanal ficará em uma visualização paralela com dias úteis, expediente, intervalo e extensão prevista.
 - Permitir localizar, adicionar, mover e retirar GMs do padrão pela própria matriz, com arrastar/soltar e edição rápida, mostrando sempre em qual equipe, posto, viatura e função cada GM ficará.
+- Disponibilizar uma fila compacta de `GMs sem posição no padrão`, impedindo que alguém desapareça durante alterações e facilitando arrastá-lo para o destino correto.
+- Mostrar furos da composição ideal, duplicidades, motorista/patrulheiro ausente, GM repetido em padrões incompatíveis e postos/VTRs sem cobertura, sem misturar afastamentos ou ocorrências do dia.
+- Permitir duplicar um padrão, comparar D1/D2 ou N1/N2 lado a lado e copiar a composição de um posto/viatura entre equipes antes de ajustar os nomes.
+- Separar visualmente `Editar composição ideal` de `Aplicar padrão em uma data`. A aplicação copiará a base e, somente depois, a escala diária receberá folgas, afastamentos, FA de viatura, HE e remanejamentos.
 - Exibir uma prévia do dia que o padrão geraria antes de salvar/aplicar, com validação de duplicidades, posições vazias e GMs sem destino.
+- Implementar o novo livro de HE manual: previsões, conferência diária, extrato por GM, flags, elegibilidade, ajustes, fechamento mensal e auditoria.
 - Revisar autenticação e compartilhamento para acesso confiável pelo Chrome e Edge, mantendo o aplicativo privado.
 - Completar Alterações diversas com edição do registro, além de conferir, reabrir, excluir e manter histórico.
 - Fortalecer campanhas de folgas: limites por data/equipe/turno, lista de espera, publicação e integração automática com as escalas futuras.
@@ -129,7 +156,8 @@
 1. Data persistente, estado compartilhado, carregamentos não bloqueantes e correção da ordem/edição das seções.
 2. Tornar a escala a principal superfície de edição: menus contextuais, busca dentro das células, adição, troca e movimentação sem depender do painel lateral.
 3. Integridade ao retirar/recolocar GMs e viaturas, seguida da otimização da tabela, rolagem e separação visual das guarnições.
-4. Preenchimento rápido de furos, sugestão segura de HE e troca de GMs.
-5. Efetivo retirado compacto, agrupamentos e formatação da HE semanal.
-6. Nova aba Viaturas e edição rápida de VTR/zona dentro da escala.
-7. Edição visual dos padrões, folgas, validação/PDF, acesso externo e controles administrativos.
+4. Corrigir o painel de sugestões e concluir preenchimento rápido de furos, sugestão segura de HE e troca de GMs.
+5. Reformular o controle de HE com previsão separada, conferência manual, elegibilidade, flags, extrato e fechamento mensal.
+6. Efetivo retirado compacto, agrupamentos e formatação da HE semanal.
+7. Nova aba Viaturas e edição rápida de VTR/zona dentro da escala.
+8. Edição visual dos padrões como escala ideal, folgas, validação/PDF, acesso externo e controles administrativos.
