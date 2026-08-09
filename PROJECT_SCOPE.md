@@ -56,6 +56,28 @@
 
 ### Fase 2 — desempenho e experiência da escala
 
+#### Diretriz central de interação
+
+- Tratar a própria escala como a principal superfície de trabalho. As ações frequentes — localizar, adicionar, substituir, mover e remanejar GMs — deverão acontecer dentro da célula, linha ou card selecionado, sem obrigar o escalante a usar o painel lateral.
+- Manter o painel lateral como recurso secundário para detalhes e casos avançados, como horários excepcionais, requerimentos, observações, histórico e demais informações que não cabem em uma ação rápida.
+- Ao clicar em um GM, mostrar junto ao nome um menu contextual simples com as ações mais prováveis: `Trocar GM`, `Mover`, `Alterar horário`, `Marcar HE/BH/troca`, `Enviar para à disposição` e `Mais detalhes`.
+- Ao clicar em uma vaga ou furo, abrir no próprio ponto uma busca curta com sugestões, nomes elegíveis e botão de confirmação. A busca completa continuará disponível, mas não será o primeiro passo obrigatório.
+- Permitir adicionar um GM por busca direta dentro da seção ou turno desejado, com resultados por nome e matrícula e indicação clara de disponibilidade, equipe oposta, horas extras e impedimentos.
+- Durante arrastar, mover ou substituir, destacar visualmente o GM que está sendo manipulado, a origem e somente os destinos válidos. Antes de confirmar, exibir um resumo curto `GM/origem → destino`; depois, mostrar confirmação e opção `Desfazer`.
+- Projetar os fluxos para usuários com pouca familiaridade com informática: textos em linguagem operacional, ações principais sempre visíveis, ícones acompanhados de rótulos, poucos campos por etapa e informações avançadas reveladas apenas quando solicitadas.
+- Evitar diálogos grandes para tarefas rotineiras. Preferir menus contextuais, caixas ancoradas na célula, seleção direta, arrastar/soltar com alternativa por clique e edição em linha.
+
+#### Fluidez e continuidade de navegação
+
+- Manter a estrutura principal e a escala montadas durante trocas de abas e consultas. Não apagar a tela atual enquanto os novos dados carregam; indicar atualização no cabeçalho e substituir os dados somente quando a resposta estiver pronta.
+- Eliminar recarregamentos completos após adicionar, mover, trocar ou editar um GM. Aplicar a alteração imediatamente na interface, salvar em segundo plano e reverter com mensagem clara apenas se houver erro.
+- Compartilhar e armazenar temporariamente data, escala, cadastros, padrões, viaturas e totais de HE entre os módulos. Ao voltar para uma tela já consultada, exibir o conteúdo imediatamente e atualizar silenciosamente se necessário.
+- Antecipar o carregamento das abas operacionais mais usadas e carregar sob demanda apenas os conteúdos pesados. Escala, Movimentações, HE, Folgas e Viaturas deverão reutilizar os mesmos dados básicos, evitando consultas repetidas.
+- Reservar a tela cheia de carregamento para o primeiro acesso ou mudanças estruturais. Nas demais ações, usar indicadores pequenos junto ao botão, célula ou cabeçalho afetado, sem bloquear leitura e rolagem do restante da escala.
+- Preservar data, filtro, turno, seção aberta, posição de rolagem e GM selecionado ao alternar entre módulos e retornar à escala.
+- Definir como meta de experiência: resposta visual imediata ao clique, navegação percebida como instantânea quando houver dados em memória e nenhuma troca operacional dependente de reload completo da página.
+- Medir tempos de consulta, renderização, troca de abas e salvamento nos fluxos com volume real. As otimizações serão priorizadas pelos pontos que mais interrompem o trabalho do escalante.
+
 - Indexar previamente as designações por recurso e turno, evitando filtrar todos os GMs repetidamente em cada célula da tabela.
 - Renderizar somente as linhas próximas da área visível, ou aplicar contenção de renderização, mantendo cabeçalhos e primeira coluna fixos. A impressão continuará usando uma visualização própria, sem virtualização.
 - Permitir recolher/expandir seções, saltar diretamente para uma área e filtrar por posto, VTR, zona, GM, furo ou remanejamento.
@@ -104,9 +126,10 @@
 
 ### Ordem recomendada de execução
 
-1. Data persistente, carregamentos e correção da ordem/edição das seções.
-2. Integridade ao retirar/recolocar GMs e viaturas, seguida da otimização da tabela e separação visual das guarnições.
-3. Preenchimento rápido de furos, sugestão segura de HE e troca de GMs.
-4. Efetivo retirado compacto, agrupamentos e formatação da HE semanal.
-5. Nova aba Viaturas e edição rápida de VTR/zona dentro da escala.
-6. Edição visual dos padrões, folgas, validação/PDF, acesso externo e controles administrativos.
+1. Data persistente, estado compartilhado, carregamentos não bloqueantes e correção da ordem/edição das seções.
+2. Tornar a escala a principal superfície de edição: menus contextuais, busca dentro das células, adição, troca e movimentação sem depender do painel lateral.
+3. Integridade ao retirar/recolocar GMs e viaturas, seguida da otimização da tabela, rolagem e separação visual das guarnições.
+4. Preenchimento rápido de furos, sugestão segura de HE e troca de GMs.
+5. Efetivo retirado compacto, agrupamentos e formatação da HE semanal.
+6. Nova aba Viaturas e edição rápida de VTR/zona dentro da escala.
+7. Edição visual dos padrões, folgas, validação/PDF, acesso externo e controles administrativos.
