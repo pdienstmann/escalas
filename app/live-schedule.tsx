@@ -72,6 +72,13 @@ type ViewFilter = "all" | "day" | "night" | "holes" | "redeploy";
 type ScheduleDensity = "summary" | "detailed";
 type MovementEdit = { type: string; movement?: Rec };
 type SwapPick = { pick: Pick; assignments: Rec[] };
+type ResourceDialogState = {
+  kind: "post" | "vehicle";
+  initialResourceId?: number;
+  initialShift?: "2" | "4";
+  initialMode?: "existing" | "new";
+  initialSection?: string;
+};
 const shifts = SHIFT_DEFS;
 const scheduleCacheKey=(date:string)=>`gmnh:schedule:${date}`;
 function readScheduleCache(date:string):State|null{if(typeof window==="undefined")return null;try{const raw=sessionStorage.getItem(scheduleCacheKey(date));if(!raw)return null;const parsed=JSON.parse(raw) as {savedAt:number;data:State};return Date.now()-parsed.savedAt<5*60_000?parsed.data:null}catch{return null}}
@@ -95,7 +102,7 @@ export function LiveSchedule() {
     [resourceRemoval, setResourceRemoval] = useState<ResourceRemovalPick | null>(null),
     [createOpen, setCreateOpen] = useState(false),
     [createKind, setCreateKind] = useState<"guard" | "post" | "vehicle" | "section">("guard"),
-    [resourceDialog, setResourceDialog] = useState<"post" | "vehicle" | null>(null),
+    [resourceDialog, setResourceDialog] = useState<ResourceDialogState | null>(null),
     [addMenuOpen, setAddMenuOpen] = useState(false),
     [movementsExpanded, setMovementsExpanded] = useState(false),
     [redeploymentExpanded, setRedeploymentExpanded] = useState(false),
@@ -419,7 +426,7 @@ export function LiveSchedule() {
   }
   function openCreate(kind: "guard" | "post" | "vehicle" | "section") {
     if (kind === "post" || kind === "vehicle") {
-      setResourceDialog(kind);
+      setResourceDialog({ kind });
       return;
     }
     setCreateKind(kind);
@@ -808,6 +815,17 @@ export function LiveSchedule() {
                   onMoveGroup={moveGroup}
                   onHolePick={openHoleSuggest}
                   onEditVehicle={setVehicleEdit}
+                  onAddToResource={(kind,resource,shift)=>setResourceDialog({
+                    kind,
+                    initialResourceId:Number(resource.id),
+                    initialShift:isDayShift(shift)?"2":"4",
+                    initialMode:"existing",
+                  })}
+                  onAddInSection={(kind,section)=>setResourceDialog({
+                    kind,
+                    initialMode:"new",
+                    initialSection:kind==="post"?section:undefined,
+                  })}
                   onRemoveResource={(kind,resource)=>setResourceRemoval({
                     kind,
                     resource,
@@ -931,7 +949,14 @@ export function LiveSchedule() {
         />
       )}
       {createOpen&&<QuickCreateDialog key={createKind} initialKind={createKind} data={data} saving={saving} onClose={()=>setCreateOpen(false)} onSave={createCatalogItem}/>}
-      {resourceDialog&&<ResourceCrewDialog key={resourceDialog} kind={resourceDialog} data={data} saving={saving} onClose={()=>setResourceDialog(null)} onSave={saveResourceCrew}/>}
+      {resourceDialog&&<ResourceCrewDialog
+        key={`${resourceDialog.kind}-${resourceDialog.initialResourceId||"new"}-${resourceDialog.initialShift||"2"}-${resourceDialog.initialSection||""}`}
+        {...resourceDialog}
+        data={data}
+        saving={saving}
+        onClose={()=>setResourceDialog(null)}
+        onSave={saveResourceCrew}
+      />}
       {resourceRemoval&&<ResourceRemovalDialog pick={resourceRemoval} saving={saving} onClose={()=>setResourceRemoval(null)} onConfirm={removeResourceFromDay}/>} 
       {movementEdit&&<MovementDialog data={data} edit={movementEdit} saving={saving} onClose={()=>setMovementEdit(null)} onSave={saveMovement}/>} 
       {swapPick&&<GuardSwapDialog data={data} swap={swapPick} saving={saving} onClose={()=>setSwapPick(null)} onSelect={replaceGuard}/>}
@@ -950,11 +975,11 @@ function QuickCreateDialog({initialKind,data,saving,onClose,onSave}:{initialKind
   </section></div>
 }
 
-function ResourceCrewDialog({kind,data,saving,onClose,onSave}:{kind:"post"|"vehicle";data:State;saving:boolean;onClose:()=>void;onSave:(event:FormEvent<HTMLFormElement>,kind:"post"|"vehicle")=>void}){
+function ResourceCrewDialog({kind,initialResourceId,initialShift="2",initialMode,initialSection,data,saving,onClose,onSave}:ResourceDialogState&{data:State;saving:boolean;onClose:()=>void;onSave:(event:FormEvent<HTMLFormElement>,kind:"post"|"vehicle")=>void}){
   const resources=kind==="vehicle"?data.vehicles:data.posts;
-  const [mode,setMode]=useState<"existing"|"new">(resources.length?"existing":"new");
-  const [resourceId,setResourceId]=useState(String(resources[0]?.id||""));
-  const [shift,setShift]=useState<"2"|"4">("2");
+  const [mode,setMode]=useState<"existing"|"new">(initialMode||(resources.length?"existing":"new"));
+  const [resourceId,setResourceId]=useState(String(initialResourceId||resources[0]?.id||""));
+  const [shift,setShift]=useState<"2"|"4">(initialShift);
   const firstHasPair=kind==="vehicle"&&vehicleHasPair(data,Number(resourceId),shift);
   const [extraCount,setExtraCount]=useState(kind==="post"||firstHasPair?1:0);
   const needsPair=kind==="vehicle"&&(mode==="new"||!vehicleHasPair(data,Number(resourceId),shift));
@@ -964,14 +989,15 @@ function ResourceCrewDialog({kind,data,saving,onClose,onSave}:{kind:"post"|"vehi
   return <div className="quick-create-backdrop"><form className="resource-crew-dialog" role="dialog" aria-modal="true" aria-labelledby="resource-crew-title" onSubmit={event=>onSave(event,kind)}><header><div><small>INCLUIR DIRETAMENTE NA ESCALA</small><h2 id="resource-crew-title">{kind==="vehicle"?"Viatura e guarnição":"Posto e efetivo"}</h2><p>Use um cadastro existente ou crie outro e já posicione os GMs.</p></div><button type="button" onClick={onClose} aria-label="Fechar">×</button></header><nav className="resource-mode"><button type="button" className={mode==="existing"?"active":""} disabled={!resources.length} onClick={()=>{setMode("existing");setExtraCount(kind==="post"||vehicleHasPair(data,Number(resourceId),shift)?1:0)}}>Usar {kind==="vehicle"?"VTR":"posto"} existente</button><button type="button" className={mode==="new"?"active":""} onClick={()=>{setMode("new");setExtraCount(kind==="post"?1:0)}}>＋ Criar {kind==="vehicle"?"nova VTR":"novo posto"}</button></nav><input type="hidden" name="resourceMode" value={mode}/>
     {mode==="existing"&&<label>{kind==="vehicle"?"Viatura disponível na escala":"Posto existente"}<select name="resourceId" value={resourceId} onChange={event=>chooseExisting(event.target.value)} required>{resources.map(resource=>{const crew=kind==="vehicle"?uniqueCrewCount(data,Number(resource.id)):0;return <option key={String(resource.id)} value={String(resource.id)}>{kind==="vehicle"?`${vehicleIcon(String(resource.type))} ${resource.prefix} · ${resource.zone||"Sem zona"} · ${crew} GM(s)`:`${resource.group_name} · ${resource.name}`}</option>})}</select></label>}
     {mode==="new"&&kind==="vehicle"&&<div className="new-resource-fields"><label>Prefixo<input name="prefix" required placeholder="Ex.: VTR 1400"/></label><label>Tipo<select name="type" defaultValue="sedan"><option value="sedan">Sedan</option><option value="pickup">Caminhonete</option><option value="suv">SUV</option><option value="van">Furgão</option><option value="moto">Moto</option><option value="other">Outro</option></select></label><label>Zona / área<input name="zone" placeholder="Área de atuação"/></label></div>}
-    {mode==="new"&&kind==="post"&&<div className="new-resource-fields"><label>Nome do posto<input name="name" required placeholder="Ex.: Recepção"/></label><label>Seção<select name="groupName" required defaultValue=""><option value="">Selecionar seção</option>{sectionLabels.map(label=><option key={label} value={label}>{label}</option>)}</select></label><input type="hidden" name="sortOrder" value="99"/></div>}
+    {mode==="new"&&kind==="post"&&<div className="new-resource-fields"><label>Nome do posto<input name="name" required placeholder="Ex.: Recepção"/></label><label>Seção<select name="groupName" required defaultValue={initialSection||""}><option value="">Selecionar seção</option>{sectionLabels.map(label=><option key={label} value={label}>{label}</option>)}</select></label><input type="hidden" name="sortOrder" value="99"/></div>}
     <label>Período da equipe<select name="shift" value={shift} onChange={event=>chooseShift(event.target.value as "2"|"4")}><option value="2">Diurno · 07h–19h</option><option value="4">Noturno · 19h–07h</option></select></label>
-    <fieldset className="crew-builder"><legend>{kind==="vehicle"?"Composição da guarnição":"GMs do posto"}</legend>{needsPair&&<div className="crew-rule"><b>Dupla obrigatória</b><span>A VTR precisa sair com motorista e patrulheiro.</span></div>}{!needsPair&&kind==="vehicle"&&<div className="crew-rule complete"><b>Dupla já existente</b><span>Os novos nomes entrarão como reforço.</span></div>}{needsPair&&<><CrewGuardRow data={data} label="Motorista" crewRole="driver"/><CrewGuardRow data={data} label="Patrulheiro" crewRole="patrol"/></>}{Array.from({length:extraCount},(_,index)=><CrewGuardRow key={index} data={data} label={kind==="vehicle"?`Integrante adicional ${index+1}`:`GM ${index+1}`} crewRole={kind==="vehicle"?"third":"guard"} removable onRemove={()=>setExtraCount(count=>Math.max(0,count-1))}/>)}<button type="button" className="add-crew-member" disabled={extraCount>=6} onClick={()=>setExtraCount(count=>Math.min(6,count+1))}>＋ {kind==="vehicle"?"Adicionar terceiro integrante ou reforço":"Adicionar outro GM"}</button></fieldset>
+    <fieldset className="crew-builder"><legend>{kind==="vehicle"?"Composição da guarnição":"GMs do posto"}</legend>{needsPair&&<div className="crew-rule"><b>Dupla obrigatória</b><span>A VTR precisa sair com motorista e patrulheiro.</span></div>}{!needsPair&&kind==="vehicle"&&<div className="crew-rule complete"><b>Dupla já existente</b><span>Os novos nomes entrarão como reforço.</span></div>}{needsPair&&<><CrewGuardRow data={data} shift={shift} label="Motorista" crewRole="driver"/><CrewGuardRow data={data} shift={shift} label="Patrulheiro" crewRole="patrol"/></>}{Array.from({length:extraCount},(_,index)=><CrewGuardRow key={index} data={data} shift={shift} label={kind==="vehicle"?`Integrante adicional ${index+1}`:`GM ${index+1}`} crewRole={kind==="vehicle"?"third":"guard"} removable onRemove={()=>setExtraCount(count=>Math.max(0,count-1))}/>)}<button type="button" className="add-crew-member" disabled={extraCount>=6} onClick={()=>setExtraCount(count=>Math.min(6,count+1))}>＋ {kind==="vehicle"?"Adicionar terceiro integrante ou reforço":"Adicionar outro GM"}</button></fieldset>
     <footer><button type="button" onClick={onClose}>Cancelar</button><button className="save" disabled={saving}>{saving?"Incluindo…":mode==="new"?`Criar e escalar ${kind==="vehicle"?"guarnição":"efetivo"}`:`Adicionar à escala`}</button></footer></form></div>
 }
 
-function CrewGuardRow({data,label,crewRole,removable,onRemove}:{data:State;label:string;crewRole:string;removable?:boolean;onRemove?:()=>void}){
-  return <div className={`crew-guard-row ${crewRole}`}><span className="crew-role">{crewRole==="driver"?"M":crewRole==="patrol"?"P":crewRole==="third"?"R":"GM"}</span><label>{label}<select name="crewGuardId" required defaultValue=""><option value="">Selecionar GM</option>{data.guards.map(guard=><option key={String(guard.id)} value={String(guard.id)}>{guard.name} · {guard.registration}</option>)}</select></label><input type="hidden" name="crewRole" value={crewRole}/>{removable&&<button type="button" onClick={onRemove} aria-label={`Remover ${label}`}>×</button>}</div>
+function CrewGuardRow({data,shift,label,crewRole,removable,onRemove}:{data:State;shift:string;label:string;crewRole:string;removable?:boolean;onRemove?:()=>void}){
+  const candidates=data.guards.filter(guard=>guardAvailableForPeriod(data,Number(guard.id),shift));
+  return <div className={`crew-guard-row ${crewRole}`}><span className="crew-role">{crewRole==="driver"?"M":crewRole==="patrol"?"P":crewRole==="third"?"R":"GM"}</span><label>{label}<select name="crewGuardId" required defaultValue=""><option value="">Selecionar GM disponível</option>{candidates.map(guard=><option key={String(guard.id)} value={String(guard.id)}>{guard.name} · {guard.registration}</option>)}</select></label><input type="hidden" name="crewRole" value={crewRole}/>{removable&&<button type="button" onClick={onRemove} aria-label={`Remover ${label}`}>×</button>}</div>
 }
 
 function MovementDialog({data,edit,saving,onClose,onSave}:{data:State;edit:MovementEdit;saving:boolean;onClose:()=>void;onSave:(event:FormEvent<HTMLFormElement>)=>void}){
@@ -1001,6 +1027,11 @@ function GuardSwapDialog({data,swap,saving,onClose,onSelect}:{data:State;swap:Sw
 
 function vehicleHasPair(data:State,vehicleId:number,shift:string){const period=isDayShift(shift)?"day":"night";const crew=data.assignments.filter(assignment=>Number(assignment.vehicle_id)===vehicleId&&(isDayShift(String(assignment.shift))?"day":"night")===period);return crew.some(assignment=>assignment.role==="driver")&&crew.some(assignment=>assignment.role==="patrol")}
 function uniqueCrewCount(data:State,vehicleId:number){return new Set(data.assignments.filter(assignment=>Number(assignment.vehicle_id)===vehicleId).map(assignment=>Number(assignment.guard_id))).size}
+function guardAvailableForPeriod(data:State,guardId:number,shift:string){
+  const window=fullPeriodWindow(data.date,shift);
+  const overlaps=(item:Rec)=>Number(item.guard_id)===guardId&&String(item.starts_at)<window.end&&String(item.ends_at)>window.start;
+  return !data.assignments.some(overlaps)&&!data.availableForRedeployment.some(overlaps)&&!data.movements.some(overlaps);
+}
 
 function RedeployQuickEditor({data,assignments,saving,onClose,onSave}:{data:State;assignments:Rec[];saving:boolean;onClose:()=>void;onSave:(e:FormEvent<HTMLFormElement>)=>void}) {
   const [query,setQuery]=useState("");
@@ -1100,6 +1131,8 @@ function Row({
   onMoveGroup,
   onHolePick,
   onEditVehicle,
+  onAddToResource,
+  onAddInSection,
   onRemoveResource,
 }: {
   date: string;
@@ -1131,6 +1164,8 @@ function Row({
     event: ReactMouseEvent<HTMLButtonElement>,
   ) => void;
   onEditVehicle: (vehicle: Rec) => void;
+  onAddToResource: (kind: "post" | "vehicle", resource: Rec, shift: string) => void;
+  onAddInSection: (kind: "post" | "vehicle", section: string) => void;
   onRemoveResource: (kind: "post" | "vehicle", resource: Rec) => void;
 }) {
   function drop(e: DragEvent, shift: string) {
@@ -1169,9 +1204,14 @@ function Row({
           className={`group ${section === "SEDE DA GM" ? "headquarters" : ""}`}
         >
           <td colSpan={1 + (density==="detailed"?visibleShifts.length:new Set(visibleShifts.map(shift=>shift.period)).size)}>
-            <button type="button" className="section-toggle" onClick={onToggleSection}>
-              {collapsed ? "▸" : "▾"} {kind === "vehicle" ? "🚓" : "◆"} {section}
-            </button>
+            <div className="section-heading-actions">
+              <button type="button" className="section-toggle" onClick={onToggleSection}>
+                {collapsed ? "▸" : "▾"} {kind === "vehicle" ? "🚓" : "◆"} {section}
+              </button>
+              <button type="button" className="section-inline-add" onClick={()=>onAddInSection(kind,section)}>
+                ＋ {kind==="vehicle"?"Viatura":"Posto"}
+              </button>
+            </div>
           </td>
         </tr>
       )}
@@ -1201,6 +1241,15 @@ function Row({
           )}
           <button
             type="button"
+            className="resource-add-person"
+            aria-label={`Adicionar GM em ${String(kind === "vehicle" ? resource.prefix : resource.name)}`}
+            title="Adicionar GM neste local"
+            onClick={() => onAddToResource(kind, resource, visibleShifts[0]?.id || "2")}
+          >
+            ＋ GM
+          </button>
+          <button
+            type="button"
             className="resource-remove-button"
             aria-label={`Retirar ${String(kind === "vehicle" ? resource.prefix : resource.name)} desta escala`}
             title="Retirar somente desta escala"
@@ -1212,7 +1261,10 @@ function Row({
         {density==="summary"?[...new Set(visibleShifts.map(shift=>shift.period))].map(period=><td key={period} className="period-summary-cell"><div className="period-lanes">{visibleShifts.filter(shift=>shift.period===period).map(s=>{
           const list=assignmentIndex.get(assignmentKey(kind,Number(resource.id),s.id))||[];
           const missingRoles=kind==="vehicle"?["driver","patrol"].filter(role=>!list.some(assignment=>String(assignment.role)===role&&!isOvertimeExtensionCell(assignment,date,s.id))):list.length?[]:["guard"];
-          return <section key={s.id} className={`period-lane ${missingRoles.length?"furo":""}`} onDragOver={event=>event.preventDefault()} onDrop={event=>drop(event,s.id)}><header><b>{s.label}</b><span>{s.time}</span></header><div>{list.map(a=>{const visualStatus=statusInShift(a,date,s.id);return <button key={String(a.id)} draggable className={`live-person ${visualStatus} ${Number(a.is_reassigned)?"reassigned":""} ${Number(a.id)===selectedId?"is-selected":""} ${recentAssignmentIds.includes(Number(a.id))?"recent-update":""}`} onDragStart={event=>{event.dataTransfer.effectAllowed="move";event.dataTransfer.setData("text/assignment",String(a.id));event.dataTransfer.setData("text/assignment-source-shift",s.id)}} onClick={()=>onSwap(a,kind,resource,s.id)} title="Clique para trocar o GM; arraste para mover">{kind==="vehicle"&&<span className="role">{isOvertimeExtensionCell(a,date,s.id)?"R":a.role==="driver"?"M":a.role==="patrol"?"P":"R"}</span>}<b>{a.guard_name}</b>{visualStatus!=="normal"&&<span className={`badge ${statusClass(visualStatus)}`}>{visualStatus==="overtime"&&a.regular_ends_at?`HE · após ${String(a.regular_ends_at).slice(11,16)}`:statusShort(visualStatus)}</span>}{Number(a.is_reassigned)===1&&<span className="badge remanejamento">AVISAR REM</span>}<small>{assignmentDisplayInShift(a,date,s.id)}</small></button>})}{missingRoles.length>0&&<button className="live-hole" onClick={event=>onHolePick(kind,resource,s.id,event)}><span>FURO</span>＋ Selecionar {kind==="vehicle"?(missingRoles[0]==="driver"?"motorista":"patrulheiro"):"GM"}</button>}</div></section>})}</div></td>):visibleShifts.map((s) => {
+          return <section key={s.id} className={`period-lane ${missingRoles.length?"furo":""}`} onDragOver={event=>event.preventDefault()} onDrop={event=>drop(event,s.id)}>
+            <header><b>{s.label}</b><span>{s.time}</span>{missingRoles.length===0&&<button type="button" className="cell-inline-add" aria-label={`Adicionar GM em ${String(kind==="vehicle"?resource.prefix:resource.name)} no ${s.label}`} onClick={()=>onAddToResource(kind,resource,s.id)}>＋</button>}</header>
+            <div>{list.map(a=>{const visualStatus=statusInShift(a,date,s.id);return <button key={String(a.id)} draggable className={`live-person ${visualStatus} ${Number(a.is_reassigned)?"reassigned":""} ${Number(a.id)===selectedId?"is-selected":""} ${recentAssignmentIds.includes(Number(a.id))?"recent-update":""}`} onDragStart={event=>{event.dataTransfer.effectAllowed="move";event.dataTransfer.setData("text/assignment",String(a.id));event.dataTransfer.setData("text/assignment-source-shift",s.id)}} onClick={()=>onSwap(a,kind,resource,s.id)} title="Clique para trocar o GM; arraste para mover">{kind==="vehicle"&&<span className="role">{isOvertimeExtensionCell(a,date,s.id)?"R":a.role==="driver"?"M":a.role==="patrol"?"P":"R"}</span>}<b>{a.guard_name}</b>{visualStatus!=="normal"&&<span className={`badge ${statusClass(visualStatus)}`}>{visualStatus==="overtime"&&a.regular_ends_at?`HE · após ${String(a.regular_ends_at).slice(11,16)}`:statusShort(visualStatus)}</span>}{Number(a.is_reassigned)===1&&<span className="badge remanejamento">AVISAR REM</span>}<small>{assignmentDisplayInShift(a,date,s.id)}</small></button>})}{missingRoles.length>0&&<button className="live-hole" onClick={event=>onHolePick(kind,resource,s.id,event)}><span>FURO</span>＋ Selecionar {kind==="vehicle"?(missingRoles[0]==="driver"?"motorista":"patrulheiro"):"GM"}</button>}</div>
+          </section>})}</div></td>):visibleShifts.map((s) => {
           const list = assignmentIndex.get(assignmentKey(kind, Number(resource.id), s.id)) || [];
           const missingRoles = kind === "vehicle"
             ? ["driver", "patrol"].filter((role) => !list.some((assignment) => String(assignment.role) === role && !isOvertimeExtensionCell(assignment,date,s.id)))
@@ -1264,6 +1316,15 @@ function Row({
                   {kind === "vehicle"
                     ? missingRoles[0] === "driver" ? "motorista" : "patrulheiro"
                     : "GM"}
+                </button>
+              )}
+              {missingRoles.length === 0 && (
+                <button
+                  type="button"
+                  className="cell-add-member"
+                  onClick={() => onAddToResource(kind, resource, s.id)}
+                >
+                  ＋ GM
                 </button>
               )}
             </td>
