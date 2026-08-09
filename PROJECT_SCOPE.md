@@ -84,6 +84,7 @@
 - Primeiro pacote implementado: menu de ações rápidas dentro da célula do GM, marcação direta de HE/BH, remoção contextual, acesso ao editor completo somente quando necessário e desfazer seguro ligado à auditoria.
 - Cadastro contextual implementado na escala: criar GM, posto, viatura e seção sem navegar até Cadastros; o novo registro entra imediatamente nos dados exibidos.
 - Barra contextual com ícones e rótulos na própria escala para escalar/mover GM e criar viatura, posto ou seção.
+- Inclusão contextual de recursos reaproveita VTRs e postos existentes ou cria novos no mesmo fluxo. VTR nova/vazia exige motorista e patrulheiro, permite terceiro integrante e até seis reforços adicionais; VTR já guarnecida abre diretamente para adicionar reforços.
 - Transição de datas aprimorada: a escala anterior permanece montada, porém bloqueada e claramente identificada enquanto a nova data carrega. Linhas operacionais usam contenção de renderização para reduzir o custo em escalas extensas.
 
 #### Diretriz central de interação

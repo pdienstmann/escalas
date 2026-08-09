@@ -11,6 +11,7 @@ import { isScheduleDate, todayScheduleDate } from "../../../lib/schedule-date";
 import { fullPeriodShifts, shiftTimes as periodShiftTimes, isDayShift, splitExtensionWindow } from "../../../lib/shift-rules";
 import { rankGuardSuggestions, describeReasons } from "../../../lib/suggest-gm";
 import { syncScheduleOvertime } from "../../../lib/overtime-ledger";
+import { hasRequiredVehicleCrew, hasUniqueCrewMembers } from "../../../lib/crew-rules";
 
 export const dynamic = "force-dynamic";
 
@@ -539,6 +540,52 @@ export async function POST(request: Request) {
   if (!permitted(request))
     return Response.json({ error: "Não autorizado" }, { status: 401 });
   const b = (await request.json()) as Record<string, string | number | boolean | null>;
+  if (b.action === "assign_resource_group") {
+    const scheduleId = Number(b.scheduleId);
+    const postId = Number(b.postId || 0) || null;
+    const vehicleId = Number(b.vehicleId || 0) || null;
+    const requestedShift = String(b.shift || "2");
+    const members = ((b as unknown as { members?: Array<{ guardId?: number; role?: string }> }).members || [])
+      .map((member) => ({ guardId: Number(member.guardId), role: String(member.role || "guard") }))
+      .filter((member) => member.guardId > 0)
+      .slice(0, 8);
+    if ((postId ? 1 : 0) + (vehicleId ? 1 : 0) !== 1)
+      return Response.json({ error: "Escolha uma viatura ou posto." }, { status: 400 });
+    if (!members.length)
+      return Response.json({ error: "Adicione pelo menos um GM." }, { status: 400 });
+    if (!hasUniqueCrewMembers(members))
+      return Response.json({ error: "O mesmo GM foi selecionado mais de uma vez." }, { status: 400 });
+    const schedule = await env.DB.prepare("SELECT date FROM schedules WHERE id=?").bind(scheduleId).first<{ date: string }>();
+    if (!schedule)
+      return Response.json({ error: "Escala não encontrada." }, { status: 404 });
+    const periodShifts = fullPeriodShifts(requestedShift);
+    for (const member of members) {
+      for (const shift of periodShifts) {
+        const interval = periodShiftTimes(schedule.date, shift);
+        const blocked = await assertAssignable(scheduleId, member.guardId, interval.start, interval.end);
+        if (blocked) return Response.json({ error: blocked.error }, { status: blocked.status });
+      }
+    }
+    if (vehicleId) {
+      for (const shift of periodShifts) {
+        const existingRoles = (await env.DB.prepare("SELECT role FROM assignments WHERE schedule_id=? AND vehicle_id=? AND shift=?").bind(scheduleId, vehicleId, shift).all<{ role: string }>()).results.map((item) => item.role);
+        if (!hasRequiredVehicleCrew(existingRoles, members.map((member) => member.role)))
+          return Response.json({ error: "Toda viatura precisa ter motorista e patrulheiro. Selecione as duas funções antes de salvar." }, { status: 400 });
+      }
+    }
+    const statements = periodShifts.flatMap((shift) => {
+      const interval = periodShiftTimes(schedule.date, shift);
+      return members.map((member) => env.DB.prepare("INSERT INTO assignments (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,work_kind,status) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(scheduleId, member.guardId, postId, vehicleId, shift, vehicleId ? member.role : "guard", interval.start, interval.end, "shift", "normal"));
+    });
+    const results = await env.DB.batch(statements);
+    const ids = results.map((result) => Number(result.meta.last_row_id)).filter(Boolean);
+    const placeholders = ids.map(() => "?").join(",");
+    const assignments = ids.length
+      ? (await env.DB.prepare(`SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id IN (${placeholders}) ORDER BY a.starts_at,a.role`).bind(...ids).all<Record<string, unknown>>()).results
+      : [];
+    const auditEventId = await writeAudit(request, { action: "create", entityType: "assignment_group", entityId: ids.join(","), summary: `Escalou ${members.length} GM(s) em ${vehicleId ? "viatura" : "posto"}`, after: { assignments }, undoable: true });
+    return Response.json({ ok: true, assignments, auditEventId, message: vehicleId ? `Guarnição criada com ${members.length} integrantes.` : `${members.length} GM(s) adicionados ao posto.` });
+  }
   if (b.action === "redeploy_group") {
     const assignmentIds = [
       ...new Set(

@@ -85,6 +85,7 @@ export function LiveSchedule() {
     [vehicleEdit, setVehicleEdit] = useState<Rec | null>(null),
     [createOpen, setCreateOpen] = useState(false),
     [createKind, setCreateKind] = useState<"guard" | "post" | "vehicle" | "section">("guard"),
+    [resourceDialog, setResourceDialog] = useState<"post" | "vehicle" | null>(null),
     [undoEvent, setUndoEvent] = useState<UndoState | null>(null),
     [message, setMessage] = useState(""),
     [query, setQuery] = useState(""),
@@ -255,6 +256,49 @@ export function LiveSchedule() {
     event.preventDefault();if(!data||saving)return;setSaving(true);
     try{const values=Object.fromEntries(new FormData(event.currentTarget));const response=await fetch("/api/admin",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({...values,action:kind==="section"?"section_create":kind})});const result=await response.json();setMessage(response.ok?result.message:result.error);if(!response.ok)return;const entity=result.entity as Rec;setData(current=>{if(!current)return current;if(kind==="guard")return{...current,guards:[...current.guards,entity].sort((a,b)=>String(a.name).localeCompare(String(b.name),"pt-BR"))};if(kind==="post")return{...current,posts:[...current.posts,entity]};if(kind==="vehicle")return{...current,vehicles:[...current.vehicles,entity],allVehicles:[...current.allVehicles,entity]};return{...current,sections:[...current.sections,entity]}});setCreateOpen(false)}finally{setSaving(false)}
   }
+  async function saveResourceCrew(event: FormEvent<HTMLFormElement>, kind: "post" | "vehicle") {
+    event.preventDefault();
+    if (!data || saving) return;
+    setSaving(true);
+    try {
+      const form = new FormData(event.currentTarget);
+      const mode = String(form.get("resourceMode") || "existing");
+      let resourceId = Number(form.get("resourceId") || 0);
+      let entity: Rec | null = null;
+      if (mode === "new") {
+        const payload = kind === "vehicle"
+          ? { action: "vehicle", prefix: form.get("prefix"), type: form.get("type"), zone: form.get("zone") }
+          : { action: "post", name: form.get("name"), groupName: form.get("groupName"), sortOrder: form.get("sortOrder") || 99 };
+        const createResponse = await fetch("/api/admin", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
+        const created = await createResponse.json();
+        if (!createResponse.ok) { setMessage(created.error); return; }
+        entity = created.entity as Rec;
+        resourceId = Number(entity.id);
+      }
+      const guardIds = form.getAll("crewGuardId").map(Number);
+      const roles = form.getAll("crewRole").map(String);
+      const members = guardIds.map((guardId, index) => ({ guardId, role: kind === "vehicle" ? roles[index] || "third" : "guard" })).filter((member) => member.guardId > 0);
+      const assignResponse = await fetch("/api/schedule", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "assign_resource_group", scheduleId: data.schedule.id, shift: form.get("shift"), postId: kind === "post" ? resourceId : null, vehicleId: kind === "vehicle" ? resourceId : null, members }) });
+      const assigned = await assignResponse.json();
+      setMessage(assignResponse.ok ? assigned.message : assigned.error);
+      if (!assignResponse.ok) {
+        if (entity) await load();
+        return;
+      }
+      if (assigned.auditEventId) setUndoEvent({ id: Number(assigned.auditEventId), label: "Desfazer inclusão da equipe" });
+      setData((current) => {
+        if (!current) return current;
+        const merged = mergeScheduleAssignments(current.assignments, current.availableForRedeployment, assigned.assignments || []);
+        if (!entity) return { ...current, ...merged };
+        return kind === "vehicle"
+          ? { ...current, ...merged, vehicles: [...current.vehicles, entity], allVehicles: [...current.allVehicles, entity] }
+          : { ...current, ...merged, posts: [...current.posts, entity] };
+      });
+      setResourceDialog(null);
+    } finally {
+      setSaving(false);
+    }
+  }
   async function confirmHoleSuggestion(guardId: number) {
     if (!data || !holePick) return;
     const t = fullPeriodWindow(data.date, holePick.shift);
@@ -322,6 +366,10 @@ export function LiveSchedule() {
     setHolePick(null);
   }
   function openCreate(kind: "guard" | "post" | "vehicle" | "section") {
+    if (kind === "post" || kind === "vehicle") {
+      setResourceDialog(kind);
+      return;
+    }
     setCreateKind(kind);
     setCreateOpen(true);
   }
@@ -782,6 +830,7 @@ export function LiveSchedule() {
         />
       )}
       {createOpen&&<QuickCreateDialog key={createKind} initialKind={createKind} data={data} saving={saving} onClose={()=>setCreateOpen(false)} onSave={createCatalogItem}/>}
+      {resourceDialog&&<ResourceCrewDialog key={resourceDialog} kind={resourceDialog} data={data} saving={saving} onClose={()=>setResourceDialog(null)} onSave={saveResourceCrew}/>}
     </main>
   );
 }
@@ -789,13 +838,40 @@ export function LiveSchedule() {
 function QuickCreateDialog({initialKind,data,saving,onClose,onSave}:{initialKind:"guard"|"post"|"vehicle"|"section";data:State;saving:boolean;onClose:()=>void;onSave:(event:FormEvent<HTMLFormElement>,kind:"guard"|"post"|"vehicle"|"section")=>void}){
   const [kind,setKind]=useState<"guard"|"post"|"vehicle"|"section">(initialKind);
   const sectionLabels=[...new Set(data.sections.filter(section=>String(section.section_key).startsWith("POST:")).map(section=>String(section.label)))];
-  return <div className="quick-create-backdrop"><section className="quick-create-dialog" role="dialog" aria-modal="true" aria-labelledby="quick-create-title"><header><div><small>CRIAR SEM SAIR DA ESCALA</small><h2 id="quick-create-title">Adicionar estrutura ou efetivo</h2><p>O novo item aparece imediatamente na escala aberta.</p></div><button type="button" onClick={onClose} aria-label="Fechar">×</button></header><nav>{([['guard','GM'],['post','Posto'],['vehicle','Viatura'],['section','Seção']] as const).map(option=><button type="button" className={kind===option[0]?"active":""} key={option[0]} onClick={()=>setKind(option[0])}>{option[1]}</button>)}</nav>
+  return <div className="quick-create-backdrop"><section className="quick-create-dialog" role="dialog" aria-modal="true" aria-labelledby="quick-create-title"><header><div><small>CRIAR SEM SAIR DA ESCALA</small><h2 id="quick-create-title">Cadastrar GM ou seção</h2><p>Viaturas e postos são incluídos pelos botões próprios da barra da escala.</p></div><button type="button" onClick={onClose} aria-label="Fechar">×</button></header><nav>{([['guard','GM'],['section','Seção']] as const).map(option=><button type="button" className={kind===option[0]?"active":""} key={option[0]} onClick={()=>setKind(option[0])}>{option[1]}</button>)}</nav>
     {kind==="guard"&&<form onSubmit={event=>onSave(event,"guard")}><label>Nome operacional<input name="name" required placeholder="Ex.: SILVA"/></label><label>Matrícula<input name="registration" required placeholder="Identificação única"/></label><label>Equipe / padrão<input name="platoon" placeholder="D1, D2, N1, N2…"/></label><label>Escala de trabalho<select name="workRegime" defaultValue="12x36"><option value="12x36">Plantão 12x36</option><option value="weekly">Expediente semanal</option></select></label><input type="hidden" name="baseShift" value={kind==="guard"?"12x36":""}/><footer><button type="button" onClick={onClose}>Cancelar</button><button className="save" disabled={saving}>{saving?"Criando…":"Cadastrar GM"}</button></footer></form>}
     {kind==="post"&&<form onSubmit={event=>onSave(event,"post")}><label>Nome do posto<input name="name" required placeholder="Ex.: Recepção"/></label><label>Seção<select name="groupName" required defaultValue=""><option value="">Selecionar seção</option>{sectionLabels.map(label=><option key={label} value={label}>{label}</option>)}</select></label><label>Ordem<input name="sortOrder" type="number" defaultValue="99"/></label><footer><button type="button" onClick={onClose}>Cancelar</button><button className="save" disabled={saving}>Adicionar posto</button></footer></form>}
     {kind==="vehicle"&&<form onSubmit={event=>onSave(event,"vehicle")}><label>Prefixo<input name="prefix" required placeholder="VTR 1400"/></label><label>Tipo<select name="type" defaultValue="sedan"><option value="sedan">Sedan</option><option value="pickup">Caminhonete</option><option value="suv">SUV</option><option value="van">Furgão</option><option value="moto">Moto</option><option value="other">Outro</option></select></label><label>Zona / área<input name="zone" placeholder="Área de atuação"/></label><footer><button type="button" onClick={onClose}>Cancelar</button><button className="save" disabled={saving}>Adicionar viatura</button></footer></form>}
     {kind==="section"&&<form onSubmit={event=>onSave(event,"section")}><label>Nome da nova seção<input name="label" required placeholder="Ex.: Escolas e operações"/></label><p className="quick-create-help">Depois de criar, use “Posto” para adicionar os locais que ficarão dentro desta seção.</p><footer><button type="button" onClick={onClose}>Cancelar</button><button className="save" disabled={saving}>Criar seção</button></footer></form>}
   </section></div>
 }
+
+function ResourceCrewDialog({kind,data,saving,onClose,onSave}:{kind:"post"|"vehicle";data:State;saving:boolean;onClose:()=>void;onSave:(event:FormEvent<HTMLFormElement>,kind:"post"|"vehicle")=>void}){
+  const resources=kind==="vehicle"?data.vehicles:data.posts;
+  const [mode,setMode]=useState<"existing"|"new">(resources.length?"existing":"new");
+  const [resourceId,setResourceId]=useState(String(resources[0]?.id||""));
+  const [shift,setShift]=useState<"2"|"4">("2");
+  const firstHasPair=kind==="vehicle"&&vehicleHasPair(data,Number(resourceId),shift);
+  const [extraCount,setExtraCount]=useState(kind==="post"||firstHasPair?1:0);
+  const needsPair=kind==="vehicle"&&(mode==="new"||!vehicleHasPair(data,Number(resourceId),shift));
+  const sectionLabels=[...new Set(data.sections.filter(section=>String(section.section_key).startsWith("POST:")).map(section=>String(section.label)))];
+  function chooseExisting(id:string){setResourceId(id);setExtraCount(kind==="post"||vehicleHasPair(data,Number(id),shift)?1:0)}
+  function chooseShift(value:"2"|"4"){setShift(value);setExtraCount(kind==="post"||(mode==="existing"&&vehicleHasPair(data,Number(resourceId),value))?1:0)}
+  return <div className="quick-create-backdrop"><form className="resource-crew-dialog" role="dialog" aria-modal="true" aria-labelledby="resource-crew-title" onSubmit={event=>onSave(event,kind)}><header><div><small>INCLUIR DIRETAMENTE NA ESCALA</small><h2 id="resource-crew-title">{kind==="vehicle"?"Viatura e guarnição":"Posto e efetivo"}</h2><p>Use um cadastro existente ou crie outro e já posicione os GMs.</p></div><button type="button" onClick={onClose} aria-label="Fechar">×</button></header><nav className="resource-mode"><button type="button" className={mode==="existing"?"active":""} disabled={!resources.length} onClick={()=>{setMode("existing");setExtraCount(kind==="post"||vehicleHasPair(data,Number(resourceId),shift)?1:0)}}>Usar {kind==="vehicle"?"VTR":"posto"} existente</button><button type="button" className={mode==="new"?"active":""} onClick={()=>{setMode("new");setExtraCount(kind==="post"?1:0)}}>＋ Criar {kind==="vehicle"?"nova VTR":"novo posto"}</button></nav><input type="hidden" name="resourceMode" value={mode}/>
+    {mode==="existing"&&<label>{kind==="vehicle"?"Viatura disponível na escala":"Posto existente"}<select name="resourceId" value={resourceId} onChange={event=>chooseExisting(event.target.value)} required>{resources.map(resource=>{const crew=kind==="vehicle"?uniqueCrewCount(data,Number(resource.id)):0;return <option key={String(resource.id)} value={String(resource.id)}>{kind==="vehicle"?`${vehicleIcon(String(resource.type))} ${resource.prefix} · ${resource.zone||"Sem zona"} · ${crew} GM(s)`:`${resource.group_name} · ${resource.name}`}</option>})}</select></label>}
+    {mode==="new"&&kind==="vehicle"&&<div className="new-resource-fields"><label>Prefixo<input name="prefix" required placeholder="Ex.: VTR 1400"/></label><label>Tipo<select name="type" defaultValue="sedan"><option value="sedan">Sedan</option><option value="pickup">Caminhonete</option><option value="suv">SUV</option><option value="van">Furgão</option><option value="moto">Moto</option><option value="other">Outro</option></select></label><label>Zona / área<input name="zone" placeholder="Área de atuação"/></label></div>}
+    {mode==="new"&&kind==="post"&&<div className="new-resource-fields"><label>Nome do posto<input name="name" required placeholder="Ex.: Recepção"/></label><label>Seção<select name="groupName" required defaultValue=""><option value="">Selecionar seção</option>{sectionLabels.map(label=><option key={label} value={label}>{label}</option>)}</select></label><input type="hidden" name="sortOrder" value="99"/></div>}
+    <label>Período da equipe<select name="shift" value={shift} onChange={event=>chooseShift(event.target.value as "2"|"4")}><option value="2">Diurno · 07h–19h</option><option value="4">Noturno · 19h–07h</option></select></label>
+    <fieldset className="crew-builder"><legend>{kind==="vehicle"?"Composição da guarnição":"GMs do posto"}</legend>{needsPair&&<div className="crew-rule"><b>Dupla obrigatória</b><span>A VTR precisa sair com motorista e patrulheiro.</span></div>}{!needsPair&&kind==="vehicle"&&<div className="crew-rule complete"><b>Dupla já existente</b><span>Os novos nomes entrarão como reforço.</span></div>}{needsPair&&<><CrewGuardRow data={data} label="Motorista" crewRole="driver"/><CrewGuardRow data={data} label="Patrulheiro" crewRole="patrol"/></>}{Array.from({length:extraCount},(_,index)=><CrewGuardRow key={index} data={data} label={kind==="vehicle"?`Integrante adicional ${index+1}`:`GM ${index+1}`} crewRole={kind==="vehicle"?"third":"guard"} removable onRemove={()=>setExtraCount(count=>Math.max(0,count-1))}/>)}<button type="button" className="add-crew-member" disabled={extraCount>=6} onClick={()=>setExtraCount(count=>Math.min(6,count+1))}>＋ {kind==="vehicle"?"Adicionar terceiro integrante ou reforço":"Adicionar outro GM"}</button></fieldset>
+    <footer><button type="button" onClick={onClose}>Cancelar</button><button className="save" disabled={saving}>{saving?"Incluindo…":mode==="new"?`Criar e escalar ${kind==="vehicle"?"guarnição":"efetivo"}`:`Adicionar à escala`}</button></footer></form></div>
+}
+
+function CrewGuardRow({data,label,crewRole,removable,onRemove}:{data:State;label:string;crewRole:string;removable?:boolean;onRemove?:()=>void}){
+  return <div className={`crew-guard-row ${crewRole}`}><span className="crew-role">{crewRole==="driver"?"M":crewRole==="patrol"?"P":crewRole==="third"?"R":"GM"}</span><label>{label}<select name="crewGuardId" required defaultValue=""><option value="">Selecionar GM</option>{data.guards.map(guard=><option key={String(guard.id)} value={String(guard.id)}>{guard.name} · {guard.registration}</option>)}</select></label><input type="hidden" name="crewRole" value={crewRole}/>{removable&&<button type="button" onClick={onRemove} aria-label={`Remover ${label}`}>×</button>}</div>
+}
+
+function vehicleHasPair(data:State,vehicleId:number,shift:string){const period=isDayShift(shift)?"day":"night";const crew=data.assignments.filter(assignment=>Number(assignment.vehicle_id)===vehicleId&&(isDayShift(String(assignment.shift))?"day":"night")===period);return crew.some(assignment=>assignment.role==="driver")&&crew.some(assignment=>assignment.role==="patrol")}
+function uniqueCrewCount(data:State,vehicleId:number){return new Set(data.assignments.filter(assignment=>Number(assignment.vehicle_id)===vehicleId).map(assignment=>Number(assignment.guard_id))).size}
 
 function RedeployQuickEditor({data,assignments,saving,onClose,onSave}:{data:State;assignments:Rec[];saving:boolean;onClose:()=>void;onSave:(e:FormEvent<HTMLFormElement>)=>void}) {
   const [query,setQuery]=useState("");
