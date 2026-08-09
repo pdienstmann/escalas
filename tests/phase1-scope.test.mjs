@@ -8,7 +8,7 @@ import {
   withScheduleDate,
 } from "../lib/schedule-date.ts";
 import { orderScheduleResources } from "../lib/schedule-sections.ts";
-import { assignmentOverlapsShift, coveredOperationalShifts, formatHoursDuration, fullPeriodWindow, fullPeriodShifts } from "../lib/shift-rules.ts";
+import { assignmentOverlapsShift, coveredOperationalShifts, formatHoursDuration, fullPeriodWindow, fullPeriodShifts, splitExtensionWindow } from "../lib/shift-rules.ts";
 import { rankGuardSuggestions, describeReasons } from "../lib/suggest-gm.ts";
 import { groupRedeploymentAssignments, mergeScheduleAssignments } from "../lib/schedule-state.ts";
 import { suggestionPosition } from "../lib/suggestion-position.ts";
@@ -124,6 +124,17 @@ test("formatHoursDuration renders 2h and 2h30 without decimals", () => {
   assert.equal(formatHoursDuration(0), "0h");
   assert.equal(formatHoursDuration(0.25), "0h15");
   assert.equal(formatHoursDuration(6), "6h");
+});
+
+test("splitExtensionWindow keeps regular duty and overtime in independent blocks", () => {
+  assert.deepEqual(
+    splitExtensionWindow("2026-08-12T13:00", "2026-08-12T19:00", "2026-08-12T19:00", "2026-08-13T01:00"),
+    {
+      regular: { start: "2026-08-12T13:00", end: "2026-08-12T19:00" },
+      extension: { start: "2026-08-12T19:00", end: "2026-08-13T01:00" },
+    },
+  );
+  assert.equal(splitExtensionWindow("2026-08-12T13:00", "2026-08-12T19:00", "2026-08-12T18:00", "2026-08-12T23:00"), null);
 });
 
 test("rankGuardSuggestions prioritizes opposite-team GM from same spot", () => {

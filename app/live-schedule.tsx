@@ -56,6 +56,7 @@ type Pick = {
   shift: string;
   assignment?: Rec;
   manualAdd?: boolean;
+  extension?: boolean;
 };
 type HolePick = {
   kind: "post" | "vehicle";
@@ -83,6 +84,7 @@ export function LiveSchedule() {
     [contextPick, setContextPick] = useState<Pick | null>(null),
     [vehicleEdit, setVehicleEdit] = useState<Rec | null>(null),
     [createOpen, setCreateOpen] = useState(false),
+    [createKind, setCreateKind] = useState<"guard" | "post" | "vehicle" | "section">("guard"),
     [undoEvent, setUndoEvent] = useState<UndoState | null>(null),
     [message, setMessage] = useState(""),
     [query, setQuery] = useState(""),
@@ -218,8 +220,10 @@ export function LiveSchedule() {
     const t = fillingHole
       ? fullPeriodWindow(data.date, String(body.shift || pick.shift))
       : { start: String(body.startsAt), end: String(body.endsAt) };
+    const extensionDestination = String(body.extensionDestination || body.destination).split(":");
     await postAssignment({
       ...body,
+      action: body.saveMode === "split" ? "save_with_extension" : undefined,
       startsAt: fillingHole ? t.start : body.startsAt,
       endsAt: fillingHole ? t.end : body.endsAt,
       fillFullPeriod: fillingHole,
@@ -227,6 +231,8 @@ export function LiveSchedule() {
       scheduleId: data.schedule.id,
       postId: destination === "post" ? Number(id) : null,
       vehicleId: destination === "vehicle" ? Number(id) : null,
+      extensionPostId: extensionDestination[0] === "post" ? Number(extensionDestination[1]) : null,
+      extensionVehicleId: extensionDestination[0] === "vehicle" ? Number(extensionDestination[1]) : null,
     });
   }
   async function remove() {
@@ -315,13 +321,52 @@ export function LiveSchedule() {
     });
     setHolePick(null);
   }
+  function openCreate(kind: "guard" | "post" | "vehicle" | "section") {
+    setCreateKind(kind);
+    setCreateOpen(true);
+  }
+  function startExtension(assignment: Rec, kind: "post" | "vehicle", resource: Rec, shift: string) {
+    setPick({ kind, resource, shift, assignment, extension: true });
+    setContextPick(null);
+  }
   async function move(
     assignment: Rec,
     kind: "post" | "vehicle",
     resource: Rec,
     shift: string,
+    sourceShift?: string,
   ) {
     if (!data) return;
+    const regularEnd = String(assignment.regular_ends_at || "");
+    if (regularEnd && String(assignment.status) === "overtime") {
+      const extensionMove = sourceShift
+        ? operationalShiftWindow(data.date, sourceShift).start >= regularEnd
+        : operationalShiftWindow(data.date, shift).start >= regularEnd;
+      const originalPostId = assignment.post_id || null;
+      const originalVehicleId = assignment.vehicle_id || null;
+      await postAssignment({
+        action: "save_with_extension",
+        id: assignment.id,
+        scheduleId: data.schedule.id,
+        guardId: assignment.guard_id,
+        shift: assignment.shift,
+        role: extensionMove ? assignment.role : kind === "post" ? "guard" : "driver",
+        startsAt: assignment.starts_at,
+        endsAt: regularEnd,
+        postId: extensionMove ? originalPostId : kind === "post" ? resource.id : null,
+        vehicleId: extensionMove ? originalVehicleId : kind === "vehicle" ? resource.id : null,
+        extensionStartsAt: regularEnd,
+        extensionEndsAt: assignment.ends_at,
+        extensionShift: "4",
+        extensionRole: extensionMove ? (kind === "post" ? "guard" : "third") : assignment.role,
+        extensionPostId: extensionMove ? (kind === "post" ? resource.id : null) : originalPostId,
+        extensionVehicleId: extensionMove ? (kind === "vehicle" ? resource.id : null) : originalVehicleId,
+        requestRef: assignment.request_ref || null,
+        isReassigned: 1,
+        reassignmentNote: "Expediente e extensão separados durante o remanejamento",
+      });
+      return;
+    }
     const t = times(data.date, shift),
       sameShift = String(assignment.shift) === shift,
       currentCount = data.assignments.filter(
@@ -517,10 +562,13 @@ export function LiveSchedule() {
           <button type="button" className={view==="night"?"active":""} onClick={()=>jump("night")}>Noturno</button>
           <button type="button" className={view==="holes"||view==="redeploy"?"active":""} onClick={()=>jump("pending")}>Pendências</button>
         </div>
-        <button type="button" className="toolbar-add" onClick={startManualAdd}>
-          + Escalar GM
-        </button>
-        <button type="button" className="toolbar-create" onClick={()=>setCreateOpen(true)}>+ Criar na escala</button>
+        <div className="schedule-action-rail" role="group" aria-label="Ações rápidas na escala">
+          <button type="button" onClick={startManualAdd}><span aria-hidden="true">👤＋</span><b>Escalar GM</b></button>
+          <button type="button" onClick={()=>setMessage("Para mover, arraste o GM até o novo local ou clique no nome e escolha Mover / horário.")}><span aria-hidden="true">↔</span><b>Mover GM</b></button>
+          <button type="button" onClick={()=>openCreate("vehicle")}><span aria-hidden="true">🚓＋</span><b>Nova VTR</b></button>
+          <button type="button" onClick={()=>openCreate("post")}><span aria-hidden="true">📍＋</span><b>Novo posto</b></button>
+          <button type="button" onClick={()=>openCreate("section")}><span aria-hidden="true">▦＋</span><b>Nova seção</b></button>
+        </div>
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -601,6 +649,7 @@ export function LiveSchedule() {
                   onContextPick={setContextPick}
                   onEdit={setPick}
                   onQuickStatus={quickStatus}
+                  onExtend={startExtension}
                   onQuickDelete={(assignment)=>confirm(`Remover ${assignment.guard_name} da escala?`)&&postAssignment({action:"delete",id:assignment.id})}
                   onMove={move}
                   onMoveGroup={moveGroup}
@@ -732,13 +781,13 @@ export function LiveSchedule() {
           onSave={saveRedeployment}
         />
       )}
-      {createOpen&&<QuickCreateDialog data={data} saving={saving} onClose={()=>setCreateOpen(false)} onSave={createCatalogItem}/>}
+      {createOpen&&<QuickCreateDialog key={createKind} initialKind={createKind} data={data} saving={saving} onClose={()=>setCreateOpen(false)} onSave={createCatalogItem}/>}
     </main>
   );
 }
 
-function QuickCreateDialog({data,saving,onClose,onSave}:{data:State;saving:boolean;onClose:()=>void;onSave:(event:FormEvent<HTMLFormElement>,kind:"guard"|"post"|"vehicle"|"section")=>void}){
-  const [kind,setKind]=useState<"guard"|"post"|"vehicle"|"section">("guard");
+function QuickCreateDialog({initialKind,data,saving,onClose,onSave}:{initialKind:"guard"|"post"|"vehicle"|"section";data:State;saving:boolean;onClose:()=>void;onSave:(event:FormEvent<HTMLFormElement>,kind:"guard"|"post"|"vehicle"|"section")=>void}){
+  const [kind,setKind]=useState<"guard"|"post"|"vehicle"|"section">(initialKind);
   const sectionLabels=[...new Set(data.sections.filter(section=>String(section.section_key).startsWith("POST:")).map(section=>String(section.label)))];
   return <div className="quick-create-backdrop"><section className="quick-create-dialog" role="dialog" aria-modal="true" aria-labelledby="quick-create-title"><header><div><small>CRIAR SEM SAIR DA ESCALA</small><h2 id="quick-create-title">Adicionar estrutura ou efetivo</h2><p>O novo item aparece imediatamente na escala aberta.</p></div><button type="button" onClick={onClose} aria-label="Fechar">×</button></header><nav>{([['guard','GM'],['post','Posto'],['vehicle','Viatura'],['section','Seção']] as const).map(option=><button type="button" className={kind===option[0]?"active":""} key={option[0]} onClick={()=>setKind(option[0])}>{option[1]}</button>)}</nav>
     {kind==="guard"&&<form onSubmit={event=>onSave(event,"guard")}><label>Nome operacional<input name="name" required placeholder="Ex.: SILVA"/></label><label>Matrícula<input name="registration" required placeholder="Identificação única"/></label><label>Equipe / padrão<input name="platoon" placeholder="D1, D2, N1, N2…"/></label><label>Escala de trabalho<select name="workRegime" defaultValue="12x36"><option value="12x36">Plantão 12x36</option><option value="weekly">Expediente semanal</option></select></label><input type="hidden" name="baseShift" value={kind==="guard"?"12x36":""}/><footer><button type="button" onClick={onClose}>Cancelar</button><button className="save" disabled={saving}>{saving?"Criando…":"Cadastrar GM"}</button></footer></form>}
@@ -825,6 +874,7 @@ function Row({
   onContextPick,
   onEdit,
   onQuickStatus,
+  onExtend,
   onQuickDelete,
   onMove,
   onMoveGroup,
@@ -846,8 +896,9 @@ function Row({
   onContextPick: (p: Pick) => void;
   onEdit: (p: Pick) => void;
   onQuickStatus: (assignment:Rec,status:string) => void;
+  onExtend: (assignment: Rec, kind: "post" | "vehicle", resource: Rec, shift: string) => void;
   onQuickDelete: (assignment:Rec) => void;
-  onMove: (a: Rec, k: "post" | "vehicle", r: Rec, s: string) => void;
+  onMove: (a: Rec, k: "post" | "vehicle", r: Rec, s: string, sourceShift?: string) => void;
   onMoveGroup: (a: Rec[], k: "post" | "vehicle", r: Rec) => void;
   onHolePick: (
     kind: "post" | "vehicle",
@@ -875,15 +926,16 @@ function Row({
       return;
     }
     const id = Number(e.dataTransfer.getData("text/assignment"));
+    const sourceShift = e.dataTransfer.getData("text/assignment-source-shift") || undefined;
     for (const list of assignmentIndex.values()) {
       const assignment = list.find((a) => Number(a.id) === id);
       if (assignment) {
-        void onMove(assignment, kind, resource, shift);
+        void onMove(assignment, kind, resource, shift, sourceShift);
         return;
       }
     }
     const available = availableForRedeployment.find((a) => Number(a.id) === id);
-    if (available) void onMove(available, kind, resource, shift);
+    if (available) void onMove(available, kind, resource, shift, sourceShift);
   }
   return (
     <Fragment>
@@ -942,6 +994,7 @@ function Row({
                   onDragStart={(e) => {
                     e.dataTransfer.effectAllowed = "move";
                     e.dataTransfer.setData("text/assignment", String(a.id));
+                    e.dataTransfer.setData("text/assignment-source-shift", s.id);
                   }}
                   onClick={() =>
                     onContextPick({ kind, resource, shift: s.id, assignment: a })
@@ -963,7 +1016,7 @@ function Row({
                     {assignmentDisplayInShift(a,date,s.id)}
                   </small>
                 </button>
-                {Number(a.id)===selectedId&&<div className="cell-quick-actions" role="group" aria-label={`Ações rápidas de ${String(a.guard_name)}`}><b>{a.guard_name}</b><button type="button" onClick={()=>onEdit({kind,resource,shift:s.id,assignment:a})}>Trocar / mover / horário</button><button type="button" className={a.status==="overtime"?"active":""} onClick={()=>onQuickStatus(a,a.status==="overtime"?"normal":"overtime")}>HE</button><button type="button" className={a.status==="time_bank"?"active":""} onClick={()=>onQuickStatus(a,a.status==="time_bank"?"normal":"time_bank")}>BH</button><button type="button" className="danger" onClick={()=>onQuickDelete(a)}>Remover</button><button type="button" aria-label="Fechar ações" onClick={()=>onContextPick({kind,resource,shift:s.id})}>×</button></div>}</Fragment>
+                {Number(a.id)===selectedId&&<div className="cell-quick-actions" role="group" aria-label={`Ações rápidas de ${String(a.guard_name)}`}><b>{a.guard_name}</b><button type="button" onClick={()=>onEdit({kind,resource,shift:s.id,assignment:a})}><span aria-hidden="true">✎</span> Editar / mover</button><button type="button" className="extend-action" onClick={()=>onExtend(a,kind,resource,s.id)}><span aria-hidden="true">＋</span> Estender HE</button><button type="button" className={a.status==="time_bank"?"active":""} onClick={()=>onQuickStatus(a,a.status==="time_bank"?"normal":"time_bank")}><span aria-hidden="true">◷</span> BH</button><button type="button" className="danger" onClick={()=>onQuickDelete(a)}><span aria-hidden="true">×</span> Remover</button><button type="button" aria-label="Fechar ações" onClick={()=>onContextPick({kind,resource,shift:s.id})}>×</button></div>}</Fragment>
               )})}
               {missingRoles.length > 0 && (
                 <button
@@ -1003,13 +1056,18 @@ function Editor({
     manualAdd = Boolean(pick.manualAdd),
     fillingHole = !a && !manualAdd,
     t = fillingHole ? fullPeriodWindow(data.date, pick.shift) : times(data.date, pick.shift),
+    initialRegularEnd = String(a?.regular_ends_at || a?.ends_at || `${data.date}T19:00`),
     [guardId, setGuardId] = useState(String(a?.guard_id || "")),
     [guardQuery, setGuardQuery] = useState(""),
     [shiftId, setShiftId] = useState(String(a?.shift || pick.shift)),
     [startsAt, setStartsAt] = useState(String(a?.starts_at || t.start)),
-    [endsAt, setEndsAt] = useState(String(a?.ends_at || t.end)),
+    [endsAt, setEndsAt] = useState(String(pick.extension ? initialRegularEnd : a?.ends_at || t.end)),
     [regularEndsAt, setRegularEndsAt] = useState(String(a?.regular_ends_at || "")),
-    [assignmentStatus, setAssignmentStatus] = useState(String(a?.status || "normal")),
+    [assignmentStatus, setAssignmentStatus] = useState(String(pick.extension && a?.status === "overtime" ? "normal" : a?.status || "normal")),
+    [extensionMode, setExtensionMode] = useState(Boolean(pick.extension)),
+    [extensionStartsAt, setExtensionStartsAt] = useState(String(a?.regular_ends_at || `${data.date}T19:00`)),
+    [extensionEndsAt, setExtensionEndsAt] = useState(String(a?.regular_ends_at ? a?.ends_at : `${data.date}T23:00`)),
+    [extensionDestination, setExtensionDestination] = useState(`${pick.kind}:${pick.resource.id}`),
     guard = data.guards.find((g) => String(g.id) === guardId);
   const tomorrow=new Date(`${data.date}T12:00:00Z`);tomorrow.setUTCDate(tomorrow.getUTCDate()+1);const tomorrowDate=tomorrow.toISOString().slice(0,10);
   const covered=coveredOperationalShifts({shift:shiftId,starts_at:startsAt,ends_at:endsAt},data.date);
@@ -1058,7 +1116,8 @@ function Editor({
           <span>Escolha GM, destino, turno, função e horário.</span>
         </div>
       )}
-      {!fillingHole&&<div className="cross-shift-tools"><div><b>Horário atravessando turnos</b><small>O GM aparecerá automaticamente em todas as colunas cobertas.</small></div><button type="button" onClick={()=>{if(shiftId!=="W")setShiftId("3");setStartsAt(`${data.date}T13:00`);setEndsAt(`${tomorrowDate}T01:00`);setRegularEndsAt("")}}>13h até 01h</button><button type="button" onClick={()=>{setRegularEndsAt(`${data.date}T19:00`);setEndsAt(`${data.date}T23:00`);setAssignmentStatus("overtime")}}>HE após 19h</button><p><span>Aparecerá em:</span> {covered.length?covered.map((shift)=>`${shift}º`).join(" + "):"revise os horários"}</p></div>}
+      {!fillingHole&&<div className="cross-shift-tools"><div><b>Expediente e extensão independentes</b><small>A HE pode ter outro posto ou VTR sem mover o horário normal.</small></div><button type="button" className={extensionMode?"active":""} onClick={()=>{if(shiftId!=="W")setShiftId("3");setStartsAt(`${data.date}T13:00`);setEndsAt(`${data.date}T19:00`);setRegularEndsAt("");setExtensionStartsAt(`${data.date}T19:00`);setExtensionEndsAt(`${tomorrowDate}T01:00`);setAssignmentStatus("normal");setExtensionMode(true)}}>13h–01h em 2 blocos</button><button type="button" className={extensionMode?"active":""} onClick={()=>{const boundary=`${data.date}T19:00`;if(endsAt>boundary)setEndsAt(boundary);setRegularEndsAt("");setExtensionStartsAt(boundary);if(extensionEndsAt<=boundary)setExtensionEndsAt(`${data.date}T23:00`);setAssignmentStatus("normal");setExtensionMode(true)}}>＋ HE depois das 19h</button><p><span>Horário normal:</span> {covered.length?covered.map((shift)=>`${shift}º`).join(" + "):"revise os horários"}</p></div>}
+      <input type="hidden" name="saveMode" value={extensionMode ? "split" : "single"}/>
       <div className="editing-alert">
         <b>Confira antes de salvar:</b>
         <span>{guard?.name || "nenhum GM selecionado"}</span>
@@ -1170,7 +1229,8 @@ function Editor({
             : "Horário fixo do furo noturno: 19:00 às 07:00 (4º + 1º turnos)."}
         </p>
       )}
-      {!fillingHole&&<label>Fim do horário normal <small>Preencha somente quando o trecho seguinte for hora extra.</small><input name="regularEndsAt" type="datetime-local" value={regularEndsAt} onChange={(event)=>setRegularEndsAt(event.target.value)}/></label>}
+      {!fillingHole&&!extensionMode&&<label>Fim do horário normal <small>Compatibilidade com lançamentos antigos; para nova HE use “HE depois das 19h”.</small><input name="regularEndsAt" type="datetime-local" value={regularEndsAt} onChange={(event)=>setRegularEndsAt(event.target.value)}/></label>}
+      {extensionMode&&<fieldset className="extension-editor"><legend><span aria-hidden="true">＋</span> Extensão em hora extra — bloco independente</legend><p>Alterar este destino não movimentará o expediente normal acima.</p><label>Destino da extensão<select name="extensionDestination" value={extensionDestination} onChange={(event)=>setExtensionDestination(event.target.value)}>{data.vehicles.map((v)=><option key={`xv${v.id}`} value={`vehicle:${v.id}`}>{v.prefix} · {v.zone}</option>)}{data.posts.map((p)=><option key={`xp${p.id}`} value={`post:${p.id}`}>{p.group_name} · {p.name}</option>)}</select></label><label>Função na extensão<select name="extensionRole" defaultValue={pick.kind==="vehicle"?"third":"guard"}><option value="guard">GM do posto</option><option value="driver">M — Motorista</option><option value="patrol">P — Patrulheiro</option><option value="third">R — Reforço</option></select></label><div className="two"><label>Início da HE<input name="extensionStartsAt" type="datetime-local" value={extensionStartsAt} onChange={(event)=>setExtensionStartsAt(event.target.value)} required/></label><label>Fim da HE<input name="extensionEndsAt" type="datetime-local" value={extensionEndsAt} onChange={(event)=>setExtensionEndsAt(event.target.value)} required/></label></div><button type="button" className="cancel-extension" onClick={()=>setExtensionMode(false)}>Remover extensão</button></fieldset>}
       <label>
         Situação
         <select name="status" value={assignmentStatus} onChange={(event)=>setAssignmentStatus(event.target.value)}>
@@ -1191,7 +1251,7 @@ function Editor({
         />
       </label>
       <button className="save" disabled={saving}>
-        {saving ? "Salvando…" : fillingHole ? "Escalar turno inteiro" : manualAdd ? "Adicionar à escala" : "Salvar alteração"}
+        {saving ? "Salvando…" : fillingHole ? "Escalar turno inteiro" : extensionMode ? "Salvar expediente + HE independente" : manualAdd ? "Adicionar à escala" : "Salvar alteração"}
       </button>
       {a && (
         <button

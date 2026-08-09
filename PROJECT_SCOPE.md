@@ -5,6 +5,7 @@
 - Escala diária única, com 2º/3º turnos diurnos e 4º/1º turnos noturnos.
 - Postos, viaturas, zonas, guardas, horários individuais e funções de motorista/patrulheiro.
 - Horários contínuos entre turnos: uma designação como `13:00–01:00` aparece no 3º e 4º turnos. Extensões após o expediente mostram somente o trecho de HE na coluna noturna e entram como reforço, sem ocupar as posições obrigatórias da dupla motorista/patrulheiro.
+- Expediente e extensão de HE são blocos independentes: em `13:00–19:00 + HE 19:00–01:00`, cada bloco pode ter destino e função próprios, e mover a extensão não altera o expediente regular.
 - Regras contra dupla escala, indisponibilidade e conflitos de horário.
 - Sinalização de hora extra, banco de horas, troca de serviço e furos.
 - Movimentações: reserva técnica, folga, férias, curso, atestado/licença, banco de horas e troca, com requerimento associado.
@@ -82,6 +83,7 @@
 
 - Primeiro pacote implementado: menu de ações rápidas dentro da célula do GM, marcação direta de HE/BH, remoção contextual, acesso ao editor completo somente quando necessário e desfazer seguro ligado à auditoria.
 - Cadastro contextual implementado na escala: criar GM, posto, viatura e seção sem navegar até Cadastros; o novo registro entra imediatamente nos dados exibidos.
+- Barra contextual com ícones e rótulos na própria escala para escalar/mover GM e criar viatura, posto ou seção.
 - Transição de datas aprimorada: a escala anterior permanece montada, porém bloqueada e claramente identificada enquanto a nova data carrega. Linhas operacionais usam contenção de renderização para reduzir o custo em escalas extensas.
 
 #### Diretriz central de interação

@@ -8,7 +8,7 @@ import {
 import { writeAudit } from "../../../lib/audit";
 import { permitted } from "../../../lib/access";
 import { isScheduleDate, todayScheduleDate } from "../../../lib/schedule-date";
-import { fullPeriodShifts, shiftTimes as periodShiftTimes, isDayShift } from "../../../lib/shift-rules";
+import { fullPeriodShifts, shiftTimes as periodShiftTimes, isDayShift, splitExtensionWindow } from "../../../lib/shift-rules";
 import { rankGuardSuggestions, describeReasons } from "../../../lib/suggest-gm";
 import { syncScheduleOvertime } from "../../../lib/overtime-ledger";
 
@@ -708,6 +708,44 @@ export async function POST(request: Request) {
         ? "Zona da viatura atualizada."
         : `Guarnição transferida para ${target.prefix}.`,
     });
+  }
+  if (b.action === "save_with_extension") {
+    const id = Number(b.id || 0);
+    const scheduleId = Number(b.scheduleId);
+    const guardId = Number(b.guardId);
+    const regularStart = String(b.startsAt || "");
+    const regularEnd = String(b.endsAt || "");
+    const extensionStart = String(b.extensionStartsAt || "");
+    const extensionEnd = String(b.extensionEndsAt || "");
+    if (!splitExtensionWindow(regularStart, regularEnd, extensionStart, extensionEnd))
+      return Response.json({ error: "Revise os horários: a extensão deve começar no fim ou depois do expediente normal." }, { status: 400 });
+    const regularPostId = Number(b.postId || 0) || null;
+    const regularVehicleId = Number(b.vehicleId || 0) || null;
+    const extensionPostId = Number(b.extensionPostId || 0) || null;
+    const extensionVehicleId = Number(b.extensionVehicleId || 0) || null;
+    if ((regularPostId ? 1 : 0) + (regularVehicleId ? 1 : 0) !== 1 || (extensionPostId ? 1 : 0) + (extensionVehicleId ? 1 : 0) !== 1)
+      return Response.json({ error: "Escolha um destino para o expediente e outro para a extensão." }, { status: 400 });
+    const regularConflict = await assertAssignable(scheduleId, guardId, regularStart, regularEnd, id);
+    if (regularConflict) return Response.json({ error: regularConflict.error }, { status: regularConflict.status });
+    const extensionConflict = await assertAssignable(scheduleId, guardId, extensionStart, extensionEnd, id);
+    if (extensionConflict) return Response.json({ error: extensionConflict.error }, { status: extensionConflict.status });
+    const before = id
+      ? await env.DB.prepare("SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id=?").bind(id).first<Record<string, unknown>>()
+      : null;
+    const statements = [];
+    const regularStatus = String(b.status || "normal") === "overtime" ? "normal" : String(b.status || "normal");
+    if (id) {
+      statements.push(env.DB.prepare("UPDATE assignments SET guard_id=?,post_id=?,vehicle_id=?,shift=?,role=?,starts_at=?,ends_at=?,regular_ends_at=NULL,status=?,request_ref=?,is_reassigned=?,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(guardId, regularPostId, regularVehicleId, b.shift, b.role, regularStart, regularEnd, regularStatus, b.requestRef || null, b.isReassigned ? 1 : 0, b.reassignmentNote || null, id));
+    } else {
+      statements.push(env.DB.prepare("INSERT INTO assignments (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,work_kind,status,request_ref,is_reassigned,reassignment_note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(scheduleId, guardId, regularPostId, regularVehicleId, b.shift, b.role, regularStart, regularEnd, b.workKind || "shift", regularStatus, b.requestRef || null, b.isReassigned ? 1 : 0, b.reassignmentNote || null));
+    }
+    statements.push(env.DB.prepare("INSERT INTO assignments (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,work_kind,status,request_ref,is_reassigned,reassignment_note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(scheduleId, guardId, extensionPostId, extensionVehicleId, b.extensionShift || "4", b.extensionRole || (extensionVehicleId ? "third" : "guard"), extensionStart, extensionEnd, "overtime_extension", "overtime", b.requestRef || null, b.isReassigned ? 1 : 0, b.reassignmentNote || "Extensão independente do expediente"));
+    const results = await env.DB.batch(statements);
+    const regularId = id || Number(results[0].meta.last_row_id);
+    const extensionId = Number(results[1].meta.last_row_id);
+    const assignments = (await env.DB.prepare("SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id IN (?,?) ORDER BY a.starts_at").bind(regularId, extensionId).all<Record<string, unknown>>()).results;
+    const auditEventId = await writeAudit(request, { action: id ? "update" : "create", entityType: "assignment_group", entityId: `${regularId},${extensionId}`, summary: `Separou expediente e extensão de ${assignments[0]?.guard_name || "GM"}`, before: before ? { assignments: [before] } : undefined, after: { assignments }, undoable: true });
+    return Response.json({ ok: true, assignments, auditEventId, message: "Expediente e extensão salvos separadamente. Cada bloco agora pode ser movido sozinho." });
   }
   if (b.action === "delete") {
     const before = await env.DB.prepare(

@@ -108,3 +108,18 @@ export function formatHoursDuration(totalHours: number) {
   if (minutes === 60) return `${sign}${hours + 1}h`;
   return `${sign}${hours}h${String(minutes).padStart(2, "0")}`;
 }
+
+export function splitExtensionWindow(
+  regularStart: string,
+  regularEnd: string,
+  extensionStart: string,
+  extensionEnd: string,
+) {
+  const values = [regularStart, regularEnd, extensionStart, extensionEnd].map(Date.parse);
+  if (values.some((value) => !Number.isFinite(value))) return null;
+  if (values[1] <= values[0] || values[3] <= values[2] || values[2] < values[1]) return null;
+  return {
+    regular: { start: regularStart, end: regularEnd },
+    extension: { start: extensionStart, end: extensionEnd },
+  };
+}
