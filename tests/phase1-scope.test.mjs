@@ -315,10 +315,11 @@ test("daily operations have an isolated workflow, crew slots and PDF annex", () 
   const print = readFileSync(resolve("app/print-schedule.tsx"), "utf8");
   assert.match(migration, /CREATE TABLE IF NOT EXISTS `operations`/);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS `operation_slots`/);
-  assert.match(api, /sourceType:"available"\|"extension"\|"overtime"/);
+  assert.match(api, /sourceType:"available"\|"redeployment"\|"extension"\|"overtime"/);
   assert.match(api, /Uma das viaturas ficou indisponível ou já foi reservada/);
   assert.match(dashboard, /CRIAR MINI ESCALA/);
-  assert.match(dashboard, /Primeiro: À disposição\. Depois: extensão e HE/);
+  assert.match(dashboard, /Remanejar da escala/);
+  assert.match(dashboard, /Extensão e hora extra/);
   assert.match(print, /ANEXO · OPERAÇÕES/);
 });
 
@@ -332,4 +333,17 @@ test("monthly leave compilation is reviewed before one bulk confirmation", () =>
   assert.match(dashboard, /Revisar antes de incluir/);
   assert.match(dashboard, /Confirmar importação geral/);
   assert.match(dashboard, /GM não encontrado/);
+});
+
+test("operation redeployment preserves and restores every source assignment", () => {
+  const migration = readFileSync(resolve("drizzle/0013_operation_redeployments.sql"), "utf8");
+  const api = readFileSync(resolve("app/api/operations/route.ts"), "utf8");
+  const dashboard = readFileSync(resolve("app/operations-dashboard.tsx"), "utf8");
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS `operation_slot_origins`/);
+  assert.match(api, /sourceType="redeployment"/);
+  assert.match(api, /AVISAR REMANEJAMENTO/);
+  assert.match(api, /async function restoreSlot/);
+  assert.match(api, /async function restoreOperation/);
+  assert.match(dashboard, /Remanejar da escala/);
+  assert.match(dashboard, /Horários parcialmente sobrepostos não são remanejados automaticamente/);
 });
