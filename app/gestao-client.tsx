@@ -7,9 +7,9 @@ type Item = Record<string, string | number | null>;
 type LeaveOverviewDay = {
   date: string;
   total: number;
-  capacity: number | null;
   day: number;
   night: number;
+  vehicleTotal: number;
   roles: Record<"driver" | "patrol" | "third" | "guard" | "unassigned", number>;
   patterns: string[];
   vehicleRisks: Array<{vehicle:string;members:Array<{name:string;role:string}>}>;
@@ -18,10 +18,11 @@ type LeaveOverviewDay = {
 type LeaveOverview = {
   month: string;
   totalLeaves: number;
+  average: number;
+  criticalThreshold: number;
   criticalDays: number;
   attentionDays: number;
-  vehicleAlertDays: number;
-  busiest: LeaveOverviewDay | null;
+  vehicleLeaves: number;
   days: LeaveOverviewDay[];
 };
 type Data = {
@@ -250,11 +251,11 @@ export function GestaoClient({
     setMessage(r.ok ? `${j.count} GMs importados ou atualizados.` : j.error);
     if (r.ok) await load();
   }
-  async function importLeaves(month:string,rows:Array<{guardId:number;date:string}>) {
+  async function importLeaves(month:string,rows:Array<{guardId?:number;guardName?:string;date:string}>,newGuards:Array<{name:string;registration:string;platoon?:string;baseShift?:string}>) {
     if(saving)return;
     setSaving(true);setMessage("");
     try{
-      const r=await fetch("/api/admin",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"leave_import",month,rows})});
+      const r=await fetch("/api/admin",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"leave_import",month,rows,newGuards})});
       const j=await r.json();setMessage(r.ok?j.message:j.error);
       if(r.ok)await load();
       return r.ok;
@@ -611,18 +612,23 @@ function parseLeaveImport(raw:string,guards:Item[],month:string):ParsedLeave[]{
     return {line,shift,guardId:guard?Number(guard.id):null,guardName:String(guard?.name||prefix||"GM não identificado"),dates,problems};
   });
 }
-function LeaveImport({guards,choices,defaultMonth,saving,onImport}:{guards:Item[];choices:Item[];defaultMonth:string;saving:boolean;onImport:(month:string,rows:Array<{guardId:number;date:string}>)=>Promise<boolean|undefined>}){
-  const [raw,setRaw]=useState(""),[month,setMonth]=useState(defaultMonth),[reviewing,setReviewing]=useState(false);
+function LeaveImport({guards,choices,defaultMonth,saving,onImport}:{guards:Item[];choices:Item[];defaultMonth:string;saving:boolean;onImport:(month:string,rows:Array<{guardId?:number;guardName?:string;date:string}>,newGuards:Array<{name:string;registration:string;platoon?:string;baseShift?:string}>)=>Promise<boolean|undefined>}){
+  const [raw,setRaw]=useState(""),[month,setMonth]=useState(defaultMonth),[reviewing,setReviewing]=useState(false),[newRegistrations,setNewRegistrations]=useState<Record<string,string>>({});
   const parsed=useMemo(()=>parseLeaveImport(raw,guards,month),[raw,guards,month]);
   const existing=new Set(choices.map(choice=>`${Number(choice.guard_id)}:${String(choice.date)}`));
-  const validRows=parsed.flatMap(row=>row.guardId?row.dates.filter(date=>!existing.has(`${row.guardId}:${date}`)).map(date=>({guardId:Number(row.guardId),date})):[]);
-  const problems=parsed.reduce((total,row)=>total+row.problems.length,0),recognized=parsed.reduce((total,row)=>total+row.dates.length,0);
-  async function confirmImport(){if(!validRows.length||problems||saving)return;const ok=await onImport(month,validRows);if(ok){setRaw("");setReviewing(false)}}
+  const unknownNames=[...new Map(parsed.filter(row=>!row.guardId&&row.guardName).map(row=>[normalizeLeaveName(row.guardName),row.guardName])).values()];
+  const newGuards=unknownNames.map(name=>({name,registration:String(newRegistrations[normalizeLeaveName(name)]||"").trim(),baseShift:"12x36 dia"}));
+  const missingRegistrations=newGuards.filter(guard=>!guard.registration).length;
+  const unresolvedProblems=parsed.reduce((total,row)=>total+row.problems.filter(problem=>!problem.startsWith("GM não encontrado")).length,0);
+  const validRows=parsed.flatMap(row=>row.dates.filter(date=>row.guardId? !existing.has(`${row.guardId}:${date}`):Boolean(newRegistrations[normalizeLeaveName(row.guardName)]?.trim())).map(date=>row.guardId?{guardId:Number(row.guardId),date}:{guardName:row.guardName,date}));
+  const problems=unresolvedProblems+missingRegistrations,recognized=parsed.reduce((total,row)=>total+row.dates.length,0);
+  function rowHasProblem(row:ParsedLeave){return row.problems.some(problem=>!problem.startsWith("GM não encontrado"))||(!row.guardId&&!newRegistrations[normalizeLeaveName(row.guardName)]?.trim())}
+  async function confirmImport(){if(!validRows.length||problems||saving)return;const ok=await onImport(month,validRows,newGuards.filter(guard=>guard.registration));if(ok){setRaw("");setReviewing(false);setNewRegistrations({})}}
   return <section className="leave-import">
     <header><div><small>IMPORTAÇÃO DO COMPILADO MENSAL</small><h2>Colar tabela de folgas</h2><p>Cole as colunas DIA/NOITE, GM e todas as datas. Nada é salvo antes da confirmação geral.</p></div><label>Mês<input type="month" value={month} onChange={event=>{setMonth(event.target.value);setReviewing(false)}}/></label></header>
     <textarea value={raw} onChange={event=>{setRaw(event.target.value);setReviewing(false)}} rows={6} placeholder={"DIA\tALENCAR\t22/08 (SÁBADO)\t06/08 (QUINTA-FEIRA)\nNOITE\tALEXANDRE\t12/08\t14/08"}/>
-    <div className="leave-import-actions"><span><b>{parsed.length}</b> GMs · <b>{recognized}</b> folgas reconhecidas{problems?` · ${problems} pendência(s)`:""}</span><button type="button" disabled={!parsed.length} onClick={()=>setReviewing(true)}>Revisar antes de incluir</button></div>
-    {reviewing&&<div className="leave-import-review"><header><div><small>CONFIRMAÇÃO - NENHUM DADO SALVO AINDA</small><h3>Folgas de {month.split("-").reverse().join("/")}</h3></div><strong className={problems?"warning":"ready"}>{problems?"Corrigir pendências":`${validRows.length} novas folgas`}</strong></header><div className="leave-import-list">{parsed.map(row=><article key={`${row.line}-${row.guardName}`} className={row.problems.length?"invalid":""}><span className={`leave-shift ${row.shift.toLowerCase()}`}>{row.shift||"-"}</span><div><b>{row.guardName}</b><small>Linha {row.line}</small></div><div className="leave-date-tags">{row.dates.map(date=><span key={date} className={existing.has(`${row.guardId}:${date}`)?"existing":""}>{formatDate(date)}{existing.has(`${row.guardId}:${date}`)?" · já incluída":""}</span>)}{row.problems.map(problem=><em key={problem}>{problem}</em>)}</div></article>)}</div><footer><button type="button" onClick={()=>setReviewing(false)}>Voltar e corrigir</button><button type="button" className="save" disabled={!validRows.length||Boolean(problems)||saving} onClick={()=>void confirmImport()}>{saving?"Importando…":`Confirmar importação geral (${validRows.length})`}</button></footer></div>}
+    <div className="leave-import-actions"><span><b>{parsed.length}</b> GMs · <b>{recognized}</b> folgas reconhecidas{unknownNames.length?` · ${unknownNames.length} novo(s) aguardando matrícula`:""}{problems?` · ${problems} pendência(s)`:""}</span><button type="button" disabled={!parsed.length} onClick={()=>setReviewing(true)}>Revisar antes de incluir</button></div>
+    {reviewing&&<div className="leave-import-review"><header><div><small>CONFIRMAÇÃO - NENHUM DADO SALVO AINDA</small><h3>Folgas de {month.split("-").reverse().join("/")}</h3><p>{unknownNames.length?`${unknownNames.length} GM(s) não cadastrado(s): informe a matrícula abaixo para criar e importar junto.`:"Todos os nomes foram encontrados no cadastro."}</p></div><strong className={problems?"warning":"ready"}>{problems?"Completar cadastro":`${validRows.length} novas folgas`}</strong></header><div className="leave-import-list">{parsed.map(row=><article key={`${row.line}-${row.guardName}`} className={rowHasProblem(row)?"invalid":""}><span className={`leave-shift ${row.shift.toLowerCase()}`}>{row.shift||"-"}</span><div><b>{row.guardName}</b><small>Linha {row.line}</small>{!row.guardId&&<label className="leave-new-guard"><span>GM novo · matrícula</span><input value={newRegistrations[normalizeLeaveName(row.guardName)]||""} onChange={event=>setNewRegistrations(current=>({...current,[normalizeLeaveName(row.guardName)]:event.target.value}))} placeholder="Informe a matrícula"/></label>}</div><div className="leave-date-tags">{row.dates.map(date=><span key={date} className={row.guardId&&existing.has(`${row.guardId}:${date}`)?"existing":""}>{formatDate(date)}{row.guardId&&existing.has(`${row.guardId}:${date}`)?" · já incluída":""}</span>)}{row.problems.filter(problem=>!problem.startsWith("GM não encontrado")).map(problem=><em key={problem}>{problem}</em>)}{!row.guardId&&<em className="new-guard-note">Será cadastrado após informar a matrícula</em>}</div></article>)}</div><footer><button type="button" onClick={()=>setReviewing(false)}>Voltar e corrigir</button><button type="button" className="save" disabled={!validRows.length||Boolean(problems)||saving} onClick={()=>void confirmImport()}>{saving?"Importando…":`Confirmar importação geral (${validRows.length})`}</button></footer></div>}
   </section>
 }
 function LeaveMonthOverview({overview}:{overview:LeaveOverview|null}) {
@@ -637,21 +643,22 @@ function LeaveMonthOverview({overview}:{overview:LeaveOverview|null}) {
     calendar.push({date,number,day:byDate.get(date)});
   }
   const priorities=[...overview.days].sort((a,b)=>severityWeight(b.severity)-severityWeight(a.severity)||b.total-a.total||a.date.localeCompare(b.date)).slice(0,10);
+  const monthlyAverage=overview.average.toLocaleString("pt-BR",{minimumFractionDigits:1,maximumFractionDigits:1});
   return <section className="leave-overview">
-    <header><div><small>PANORAMA DO MÊS</small><h2>Risco de efetivo nas folgas</h2><p>Os alertas cruzam turno, função no padrão e integrantes da mesma viatura.</p></div><a href={`/?date=${overview.busiest?.date||`${overview.month}-01`}`}>Abrir escala do dia mais carregado</a></header>
+    <header><div><small>PANORAMA DO MÊS</small><h2>Risco de efetivo nas folgas</h2><p>A média empírica é de <b>{monthlyAverage} folgas/dia</b>; dias acima de {overview.criticalThreshold} entram como críticos para conferência. O total considera todo o efetivo em viaturas.</p></div></header>
     <div className="leave-overview-summary">
       <span><b>{overview.totalLeaves}</b><small>folgas confirmadas</small></span>
+      <span className="average"><b>{monthlyAverage}</b><small>média por dia</small></span>
       <span className="critical"><b>{overview.criticalDays}</b><small>dias críticos</small></span>
-      <span className="attention"><b>{overview.attentionDays}</b><small>dias de atenção</small></span>
-      <span className="vehicle"><b>{overview.vehicleAlertDays}</b><small>alertas de guarnição</small></span>
+      <span className="vehicle"><b>{overview.vehicleLeaves}</b><small>folgas em viaturas</small></span>
     </div>
     <div className="leave-overview-grid">
       <div className="leave-calendar-wrap">
         <div className="leave-calendar-weekdays">{["SEG","TER","QUA","QUI","SEX","SÁB","DOM"].map(label=><span key={label}>{label}</span>)}</div>
-        <div className="leave-calendar">{calendar.map((entry,index)=>entry?<a key={entry.date} href={`/?date=${entry.date}`} className={entry.day?.severity||"clear"} title={entry.day?`${entry.day.total} folgas · Dia ${entry.day.day} · Noite ${entry.day.night}`:"Sem folgas confirmadas"}><span>{entry.number}</span>{entry.day?<><b>{entry.day.total} folga{entry.day.total===1?"":"s"}</b><small><i>D {entry.day.day}</i><i>N {entry.day.night}</i></small>{entry.day.vehicleRisks.length>0&&<em>⚠ VTR</em>}</>:<small className="no-leave">—</small>}</a>:<span className="calendar-blank" key={`blank-${index}`}/>)}</div>
+        <div className="leave-calendar">{calendar.map((entry,index)=>entry?<a key={entry.date} href={`/?date=${entry.date}`} className={entry.day?.severity||"clear"} title={entry.day?`${entry.day.total} folgas · Dia ${entry.day.day} · Noite ${entry.day.night}`:"Sem folgas confirmadas"}><span>{entry.number}</span>{entry.day?<><b>{entry.day.total} folga{entry.day.total===1?"":"s"}</b><small><i>D {entry.day.day}</i><i>N {entry.day.night}</i></small>{entry.day.vehicleTotal>0&&<em>VTR {entry.day.vehicleTotal}</em>}</>:<small className="no-leave">—</small>}</a>:<span className="calendar-blank" key={`blank-${index}`}/>)}</div>
         <footer><span><i className="normal"/>Regular</span><span><i className="attention"/>Atenção</span><span><i className="critical"/>Crítico</span><small>Clique em qualquer dia para abrir a escala.</small></footer>
       </div>
-      <div className="leave-priority-days"><header><div><small>MAIOR IMPACTO</small><h3>Dias para conferir</h3></div><span>{priorities.length}</span></header>{priorities.length?priorities.map(day=><a href={`/?date=${day.date}`} className={day.severity} key={day.date}><div className="priority-date"><b>{new Date(`${day.date}T12:00:00`).toLocaleDateString("pt-BR",{day:"2-digit",month:"short"})}</b><small>{day.patterns.join(" + ")}</small></div><div className="priority-detail"><strong>{day.total} folgas <i>Dia {day.day}</i><i>Noite {day.night}</i></strong><div className="leave-role-chips">{roleEntries(day.roles).map(([role,count])=><span key={role}>{roleLabel(role)} {count}</span>)}</div>{day.vehicleRisks.map(risk=><em key={risk.vehicle}>⚠ {risk.vehicle}: {risk.members.map(member=>member.name).join(" + ")}</em>)}</div><span className="open-day">Abrir escala →</span></a>):<p>Nenhuma folga confirmada neste mês.</p>}</div>
+      <div className="leave-priority-days"><header><div><small>MAIOR IMPACTO</small><h3>Dias para conferir</h3></div><span>{priorities.length}</span></header>{priorities.length?priorities.map(day=><a href={`/?date=${day.date}`} className={day.severity} key={day.date}><div className="priority-date"><b>{new Date(`${day.date}T12:00:00`).toLocaleDateString("pt-BR",{day:"2-digit",month:"short"})}</b><small>{day.patterns.join(" + ")}</small></div><div className="priority-detail"><strong>{day.total} folgas <i>Dia {day.day}</i><i>Noite {day.night}</i></strong><div className="leave-role-chips">{roleEntries(day.roles).map(([role,count])=><span key={role}>{roleLabel(role)} {count}</span>)}</div>{day.vehicleTotal>0&&<em className="vehicle-total">VTR afetadas: {day.vehicleTotal}</em>}{day.vehicleRisks.map(risk=><em key={risk.vehicle}>⚠ {risk.vehicle}: {risk.members.map(member=>member.name).join(" + ")}</em>)}</div><span className="open-day">Abrir escala →</span></a>):<p>Nenhuma folga confirmada neste mês.</p>}</div>
     </div>
   </section>;
 }

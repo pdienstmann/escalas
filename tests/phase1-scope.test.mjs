@@ -352,10 +352,24 @@ test("monthly leave panorama highlights shift, roles, vehicle risks and links to
   assert.match(api, /function buildLeaveOverview/);
   assert.match(api, /vehicleRisks/);
   assert.match(api, /pattern_role/);
+  assert.match(api, /criticalThreshold/);
+  assert.match(api, /vehicleTotal/);
   assert.match(dashboard, /Risco de efetivo nas folgas/);
   assert.match(dashboard, /Motoristas/);
   assert.match(dashboard, /Abrir escala/);
   assert.match(dashboard, /\?date=\$\{day\.date\}/);
+  assert.match(dashboard, /média empírica/);
+  assert.doesNotMatch(dashboard, /Abrir escala do dia mais carregado/);
+});
+
+test("monthly leave import can register an unknown GM during the review", () => {
+  const api = readFileSync(resolve("app/api/admin/route.ts"), "utf8");
+  const dashboard = readFileSync(resolve("app/gestao-client.tsx"), "utf8");
+  assert.match(api, /newGuards/);
+  assert.match(api, /normalizeImportName/);
+  assert.match(api, /createdGuards/);
+  assert.match(dashboard, /Informe a matrícula/);
+  assert.match(dashboard, /Será cadastrado após informar a matrícula/);
 });
 
 test("operation redeployment preserves and restores every source assignment", () => {

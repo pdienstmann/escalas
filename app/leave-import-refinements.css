@@ -1,0 +1,8 @@
+.leave-import-review>header p{margin:6px 0 0;color:#80552f;font-size:11px;line-height:1.35}
+.leave-new-guard{display:grid;gap:4px;margin-top:7px;color:#9a3c17;font-size:10px;font-weight:800}
+.leave-new-guard input{width:100%;padding:7px 8px;border:1px solid #d6a27c;border-radius:6px;background:#fffaf5;color:#17334f;font-size:12px}
+.leave-new-guard input:focus{outline:2px solid #f1b879;outline-offset:1px}
+.new-guard-note{display:block!important;background:#fff4e8!important;color:#98511e!important}
+.leave-overview-summary .average b{color:#176b7d}
+.priority-detail .vehicle-total{color:#176b7d}
+@media(max-width:650px){.leave-new-guard input{font-size:16px;min-height:38px}.leave-import-review>header{align-items:flex-start;gap:7px}.leave-import-review>header>strong{white-space:nowrap}}

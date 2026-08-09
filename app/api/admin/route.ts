@@ -4,13 +4,26 @@ import { permitted } from "../../../lib/access";
 import { todayScheduleDate } from "../../../lib/schedule-date";
 
 export const dynamic = "force-dynamic";
-type LeaveImportRow = { guardId: number; date: string };
-type AdminBody = Record<string, string | number> & { rows?: LeaveImportRow[] };
+type LeaveImportRow = { guardId?: number; guardName?: string; date: string };
+type NewLeaveGuard = { name: string; registration: string; platoon?: string; baseShift?: string };
+type AdminBody = Record<string, string | number> & { rows?: LeaveImportRow[]; newGuards?: NewLeaveGuard[] };
+
+const normalizeImportName = (value: string) =>
+  value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Z0-9]+/gi, " ")
+    .trim()
+    .toUpperCase();
+const isValidIsoDate = (value: string) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T12:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+};
 
 function buildLeaveOverview(
   campaign: Record<string, unknown> | null,
   choices: Record<string, unknown>[],
-  limits: Record<string, unknown>[],
   patternSlots: Record<string, unknown>[],
 ) {
   if (!campaign) return null;
@@ -19,11 +32,6 @@ function buildLeaveOverview(
   const slotByGuardAndCode = new Map(
     patternSlots.map((slot) => [`${slot.guard_id}:${slot.pattern_code}`, slot]),
   );
-  const limitsByDate = new Map<string, number>();
-  for (const limit of limits) {
-    const date = String(limit.date);
-    limitsByDate.set(date, (limitsByDate.get(date) || 0) + Number(limit.capacity || 0));
-  }
   const grouped = new Map<string, Record<string, unknown>[]>();
   for (const choice of confirmed) {
     const date = String(choice.date);
@@ -67,37 +75,48 @@ function buildLeaveOverview(
     const vehicleRisks = [...vehicles.entries()]
       .filter(([, members]) => members.length > 1)
       .map(([vehicle, members]) => ({ vehicle, members }));
-    const capacity = limitsByDate.get(date) || null;
     const total = dayChoices.length;
-    const ratio = capacity ? total / capacity : 0;
-    const severity =
-      vehicleRisks.length > 0 || (capacity !== null && total >= capacity) || total >= 5
-        ? "critical"
-        : total >= 3 || ratio >= 0.67
-          ? "attention"
-          : "normal";
     return {
       date,
       total,
-      capacity,
       day: periods.day,
       night: periods.night,
       roles,
       guards,
       patterns: expectedCodes,
       vehicleRisks,
-      severity,
+      vehicleTotal: guards.filter((guard) => guard.vehicle).length,
     };
   });
   days.sort((a, b) => a.date.localeCompare(b.date));
-  const busiest = [...days].sort((a, b) => b.total - a.total || a.date.localeCompare(b.date))[0] || null;
+  const [campaignYear, campaignMonth] = String(campaign.month).split("-").map(Number);
+  const totalDays = campaignYear && campaignMonth ? new Date(campaignYear, campaignMonth, 0).getDate() : days.length;
+  const dailyTotals = Array.from({ length: totalDays }, (_, index) => {
+    const date = `${campaignYear}-${String(campaignMonth).padStart(2, "0")}-${String(index + 1).padStart(2, "0")}`;
+    return grouped.get(date)?.length || 0;
+  });
+  const average = dailyTotals.length ? confirmed.length / dailyTotals.length : 0;
+  const totals = dailyTotals.sort((a, b) => a - b);
+  const upperQuartile = totals.length ? totals[Math.floor((totals.length - 1) * 0.75)] : 0;
+  const maxTotal = totals.at(-1) || 0;
+  const criticalThreshold = Math.max(upperQuartile + 1, Math.ceil(average * 1.25));
+  for (const day of days) {
+    const aboveAverage = day.total > average;
+    day.severity =
+      day.total >= criticalThreshold || (day.total === maxTotal && aboveAverage)
+        ? "critical"
+        : aboveAverage
+          ? "attention"
+          : "normal";
+  }
   return {
     month: String(campaign.month),
     totalLeaves: confirmed.length,
+    average,
+    criticalThreshold,
     criticalDays: days.filter((day) => day.severity === "critical").length,
     attentionDays: days.filter((day) => day.severity === "attention").length,
-    vehicleAlertDays: days.filter((day) => day.vehicleRisks.length > 0).length,
-    busiest,
+    vehicleLeaves: days.reduce((sum, day) => sum + day.vehicleTotal, 0),
     days,
   };
 }
@@ -320,7 +339,6 @@ export async function GET(request: Request) {
     leaveOverview: buildLeaveOverview(
       campaign as Record<string, unknown> | null,
       choices.results,
-      days.results,
       leavePatternSlots.results,
     ),
   });
@@ -641,30 +659,105 @@ export async function POST(request: Request) {
       await writeAudit(request,{action:"delete",entityType:"movement",entityId:body.id,summary:`Removeu ${before.type} de ${before.guard_name}`,before,undoable:true});
       return Response.json({ok:true});
     } else if (body.action === "leave_import") {
-      const month=String(body.month||""),rows=Array.isArray(body.rows)?body.rows:[];
-      if(!/^\d{4}-\d{2}$/.test(month)||!rows.length)
-        return Response.json({error:"Informe o mês e ao menos uma folga válida."},{status:400});
-      const uniqueRows=[...new Map(rows.map(row=>[`${Number(row.guardId)}:${String(row.date)}`,{guardId:Number(row.guardId),date:String(row.date)}])).values()];
-      if(uniqueRows.some(row=>!Number.isInteger(row.guardId)||!/^\d{4}-\d{2}-\d{2}$/.test(row.date)||!row.date.startsWith(`${month}-`)))
-        return Response.json({error:"Há GMs ou datas inválidas na importação."},{status:400});
-      const validGuards=new Set((await env.DB.prepare("SELECT id FROM guards WHERE active=1").all<{id:number}>()).results.map(row=>Number(row.id)));
-      if(uniqueRows.some(row=>!validGuards.has(row.guardId)))
-        return Response.json({error:"A importação contém um GM inexistente ou inativo."},{status:400});
-      const [year,monthNumber]=month.split("-").map(Number);
-      const monthLabel=new Intl.DateTimeFormat("pt-BR",{month:"long",year:"numeric",timeZone:"UTC"}).format(new Date(Date.UTC(year,monthNumber-1,1)));
+      const month = String(body.month || "").trim();
+      const rows = Array.isArray(body.rows) ? body.rows.slice(0, 500) : [];
+      const submittedNewGuards = Array.isArray(body.newGuards) ? body.newGuards.slice(0, 200) : [];
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || !rows.length)
+        return Response.json({ error: "Informe o mês e ao menos uma folga válida." }, { status: 400 });
+
+      const newGuardRequests = new Map<string, NewLeaveGuard>();
+      for (const rawGuard of submittedNewGuards) {
+        const name = String(rawGuard?.name || "").trim();
+        const registration = String(rawGuard?.registration || "").trim();
+        const key = normalizeImportName(name);
+        if (!name || !registration || !key)
+          return Response.json({ error: "Todo GM novo precisa de nome e matrícula antes da importação." }, { status: 400 });
+        const previous = newGuardRequests.get(key);
+        if (previous && previous.registration !== registration)
+          return Response.json({ error: `O GM ${name} recebeu mais de uma matrícula na importação.` }, { status: 409 });
+        newGuardRequests.set(key, {
+          name,
+          registration,
+          platoon: String(rawGuard?.platoon || "").trim() || undefined,
+          baseShift: String(rawGuard?.baseShift || "12x36 dia").trim() || "12x36 dia",
+        });
+      }
+      const registrationOwners = new Map<string, string>();
+      for (const requested of newGuardRequests.values()) {
+        const owner = registrationOwners.get(requested.registration);
+        if (owner && normalizeImportName(owner) !== normalizeImportName(requested.name))
+          return Response.json({ error: `A matrícula ${requested.registration} foi informada para mais de um GM.` }, { status: 409 });
+        registrationOwners.set(requested.registration, requested.name);
+      }
+
+      const activeGuardIds = new Set(
+        (await env.DB.prepare("SELECT id FROM guards WHERE active=1").all<{ id: number }>()).results.map((row) => Number(row.id)),
+      );
+      const normalizedRows = rows.map((row) => {
+        const guardId = Number(row.guardId);
+        const hasGuardId = Number.isInteger(guardId) && guardId > 0;
+        const guardName = String(row.guardName || "").trim();
+        return { guardId: hasGuardId ? guardId : null, guardName, date: String(row.date || "").trim() };
+      });
+      if (normalizedRows.some((row) => !isValidIsoDate(row.date) || !row.date.startsWith(`${month}-`)))
+        return Response.json({ error: "Há datas inválidas ou fora do mês selecionado." }, { status: 400 });
+      if (normalizedRows.some((row) => row.guardId === null && !newGuardRequests.has(normalizeImportName(row.guardName))))
+        return Response.json({ error: "Há GM(s) não cadastrado(s) sem matrícula informada." }, { status: 400 });
+      if (normalizedRows.some((row) => row.guardId !== null && !activeGuardIds.has(row.guardId)))
+        return Response.json({ error: "A importação contém um GM inexistente ou inativo." }, { status: 400 });
+
+      const newGuardIds = new Map<string, number>();
+      let createdGuards = 0;
+      const existingGuardsByRegistration = new Map<string, { id: number; name: string }>();
+      for (const requested of newGuardRequests.values()) {
+        const existing = await env.DB.prepare("SELECT id,name FROM guards WHERE registration=?").bind(requested.registration).first<{ id: number; name: string }>();
+        if (existing) {
+          if (normalizeImportName(String(existing.name)) !== normalizeImportName(requested.name))
+            return Response.json({ error: `A matrícula ${requested.registration} já está vinculada a ${existing.name}. Confira o cadastro antes de importar.` }, { status: 409 });
+          existingGuardsByRegistration.set(requested.registration, existing);
+        }
+      }
+      for (const requested of newGuardRequests.values()) {
+        const existing = existingGuardsByRegistration.get(requested.registration);
+        if (existing) {
+          await env.DB.prepare("UPDATE guards SET active=1,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(existing.id).run();
+          newGuardIds.set(normalizeImportName(requested.name), Number(existing.id));
+        } else {
+          const created = await env.DB.prepare("INSERT INTO guards (registration,name,platoon,base_shift,work_regime) VALUES (?,?,?,?,?)")
+            .bind(requested.registration, requested.name, requested.platoon || null, requested.baseShift || "12x36 dia", "12x36")
+            .run();
+          newGuardIds.set(normalizeImportName(requested.name), Number(created.meta.last_row_id));
+          createdGuards++;
+        }
+      }
+      const resolvedRows = normalizedRows.map((row) => ({
+        guardId: row.guardId ?? newGuardIds.get(normalizeImportName(row.guardName)) ?? 0,
+        date: row.date,
+      }));
+      if (resolvedRows.some((row) => !Number.isInteger(row.guardId) || row.guardId <= 0))
+        return Response.json({ error: "Não foi possível vincular todos os nomes importados a um GM." }, { status: 400 });
+      const validGuards = new Set(
+        (await env.DB.prepare("SELECT id FROM guards WHERE active=1").all<{ id: number }>()).results.map((row) => Number(row.id)),
+      );
+      if (resolvedRows.some((row) => !validGuards.has(row.guardId)))
+        return Response.json({ error: "A importação contém um GM inexistente ou inativo." }, { status: 400 });
+      const uniqueRows = [...new Map(resolvedRows.map((row) => [`${row.guardId}:${row.date}`, row])).values()];
+      const [year, monthNumber] = month.split("-").map(Number);
+      const monthLabel = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(year, monthNumber - 1, 1)));
       await env.DB.prepare("INSERT OR IGNORE INTO leave_campaigns (month,title,status,access_code) VALUES (?,?,?,?)")
-        .bind(month,`Folgas de ${monthLabel}`,"open",`IMPORT-${month}`).run();
-      const campaign=await env.DB.prepare("SELECT id FROM leave_campaigns WHERE month=?").bind(month).first<{id:number}>();
-      if(!campaign)return Response.json({error:"Não foi possível abrir a campanha mensal."},{status:500});
-      const results=await env.DB.batch(uniqueRows.map(row=>{
-        const weekday=new Date(`${row.date}T12:00:00Z`).getUTCDay(),category=weekday===0||weekday===6?"weekend":"weekday";
+        .bind(month, `Folgas de ${monthLabel}`, "open", `IMPORT-${month}`).run();
+      const campaign = await env.DB.prepare("SELECT id FROM leave_campaigns WHERE month=?").bind(month).first<{ id: number }>();
+      if (!campaign) return Response.json({ error: "Não foi possível abrir a campanha mensal." }, { status: 500 });
+      const results = await env.DB.batch(uniqueRows.map((row) => {
+        const weekday = new Date(`${row.date}T12:00:00Z`).getUTCDay();
+        const category = weekday === 0 || weekday === 6 ? "weekend" : "weekday";
         return env.DB.prepare("INSERT OR IGNORE INTO leave_choices (campaign_id,guard_id,date,category,status,position) VALUES (?,?,?,?, 'confirmed',NULL)")
-          .bind(campaign.id,row.guardId,row.date,category);
+          .bind(campaign.id, row.guardId, row.date, category);
       }));
       await syncConfirmedLeaves();
-      const imported=results.reduce((total,result)=>total+Number(result.meta.changes||0),0);
-      await writeAudit(request,{action:"import",entityType:"leave_choice",entityId:campaign.id,summary:`Importou ${imported} folgas do compilado de ${month}`,after:{month,received:uniqueRows.length,imported},undoable:false});
-      return Response.json({ok:true,imported,ignored:uniqueRows.length-imported,message:`${imported} folgas importadas e aplicadas às escalas. ${uniqueRows.length-imported} registros já existentes foram mantidos.`});
+      const imported = results.reduce((total, result) => total + Number(result.meta.changes || 0), 0);
+      await writeAudit(request, { action: "import", entityType: "leave_choice", entityId: campaign.id, summary: `Importou ${imported} folgas do compilado de ${month}`, after: { month, received: uniqueRows.length, imported, createdGuards }, undoable: false });
+      return Response.json({ ok: true, imported, createdGuards, ignored: uniqueRows.length - imported, message: `${imported} folgas importadas e aplicadas as escalas. ${createdGuards ? `${createdGuards} GM(s) cadastrado(s). ` : ""}${uniqueRows.length - imported} registros ja existentes foram mantidos.` });
     } else if (body.action === "leave") {
       const date = String(body.date),
         category = String(body.category),
