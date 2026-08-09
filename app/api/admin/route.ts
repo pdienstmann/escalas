@@ -197,8 +197,10 @@ export async function POST(request: Request) {
       return Response.json({ok:true,entity:after,message:`Seção ${label} criada. Agora adicione postos nela.`});
     } else if (body.action === "vehicle_outage") {
       const vehicleId = Number(body.vehicleId);
-      const startsOn = String(body.startsOn);
+      const startsOn = body.startsOn ? String(body.startsOn) : new Date().toISOString().slice(0,10);
       const endsOn = body.endsOn ? String(body.endsOn) : null;
+      const existingOutage=await env.DB.prepare("SELECT id FROM vehicle_outages WHERE vehicle_id=? AND active=1 AND (ends_on IS NULL OR ends_on>=?) LIMIT 1").bind(vehicleId,startsOn).first();
+      if(existingOutage)return Response.json({error:"Esta viatura já possui um registro de FA ativo."},{status:409});
       const created=await env.DB.prepare("INSERT INTO vehicle_outages (vehicle_id,starts_on,ends_on,reason) VALUES (?,?,?,?)").bind(vehicleId,startsOn,endsOn,body.reason||null).run();
       const after=await env.DB.prepare("SELECT o.*,v.prefix FROM vehicle_outages o JOIN vehicles v ON v.id=o.vehicle_id WHERE o.id=?").bind(created.meta.last_row_id).first();
       // Keep GMs visible: mark affected assignments as awaiting redeployment without deleting them.

@@ -10,6 +10,7 @@
 - Sinalização de hora extra, banco de horas, troca de serviço e furos.
 - Movimentações: reserva técnica, folga, férias, curso, atestado/licença, banco de horas e troca, com requerimento associado.
 - Cadastros editáveis e histórico das alterações.
+- Camada simplificada de operação: menu principal reduzido, uma única ação `Adicionar`, escala ocupando toda a largura quando o editor avançado está fechado, afastamentos compactos e bandeja recolhível de GMs à disposição.
 
 ## Padrões 12x36 — aplicação e primeira edição visual implementadas
 
@@ -43,6 +44,7 @@
 ## Controle de horas extras — reformulação aprovada
 
 - Base do livro manual implementada: previsões separadas, conferência individual, lançamento manual, elegibilidade e avisos por GM.
+- Distribuição em formato de planilha com filtros próprios para D1, D2, N1, N2 e semanal/outros, ordenação por mais/menos horas, HE mais recente, maior intervalo sem HE e nome.
 - Fechamento mensal implementado: exige zero pendências, bloqueia novos lançamentos e edições, permite reabertura somente com justificativa e registra as duas operações na auditoria. Permanecem no roadmap relatórios finais e alertas operacionais avançados.
 - Separar `HE prevista` de `HE confirmada`. Uma designação marcada como HE na escala criará uma previsão, mas não aumentará automaticamente o total oficial do GM.
 - Criar o fechamento/conferência de HE por dia. O responsável verá as previsões do período e marcará cada uma como `Realizada integralmente`, `Realizada parcialmente`, `Não realizada`, `Cancelada` ou `Pendente`.

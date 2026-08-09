@@ -88,6 +88,9 @@ export function LiveSchedule() {
     [createOpen, setCreateOpen] = useState(false),
     [createKind, setCreateKind] = useState<"guard" | "post" | "vehicle" | "section">("guard"),
     [resourceDialog, setResourceDialog] = useState<"post" | "vehicle" | null>(null),
+    [addMenuOpen, setAddMenuOpen] = useState(false),
+    [movementsExpanded, setMovementsExpanded] = useState(false),
+    [redeploymentExpanded, setRedeploymentExpanded] = useState(false),
     [undoEvent, setUndoEvent] = useState<UndoState | null>(null),
     [message, setMessage] = useState(""),
     [query, setQuery] = useState(""),
@@ -667,12 +670,9 @@ export function LiveSchedule() {
           <button type="button" className={view==="night"?"active":""} onClick={()=>jump("night")}>Noturno</button>
           <button type="button" className={view==="holes"||view==="redeploy"?"active":""} onClick={()=>jump("pending")}>Pendências</button>
         </div>
-        <div className="schedule-action-rail" role="group" aria-label="Ações rápidas na escala">
-          <button type="button" onClick={startManualAdd}><span aria-hidden="true">👤＋</span><b>Escalar GM</b></button>
-          <button type="button" onClick={()=>setMessage("Para mover, arraste o GM até o novo local ou clique no nome e escolha Mover / horário.")}><span aria-hidden="true">↔</span><b>Mover GM</b></button>
-          <button type="button" onClick={()=>openCreate("vehicle")}><span aria-hidden="true">🚓＋</span><b>Nova VTR</b></button>
-          <button type="button" onClick={()=>openCreate("post")}><span aria-hidden="true">📍＋</span><b>Novo posto</b></button>
-          <button type="button" onClick={()=>openCreate("section")}><span aria-hidden="true">▦＋</span><b>Nova seção</b></button>
+        <div className="schedule-add-menu">
+          <button type="button" className="schedule-add-trigger" aria-expanded={addMenuOpen} onClick={()=>setAddMenuOpen(value=>!value)}>＋ Adicionar</button>
+          {addMenuOpen&&<div role="menu"><button type="button" onClick={()=>{setAddMenuOpen(false);startManualAdd()}}>👤 Escalar GM</button><button type="button" onClick={()=>{setAddMenuOpen(false);openCreate("vehicle")}}>🚓 Viatura</button><button type="button" onClick={()=>{setAddMenuOpen(false);openCreate("post")}}>📍 Posto</button><button type="button" onClick={()=>{setAddMenuOpen(false);openCreate("section")}}>▦ Seção</button></div>}
         </div>
         <input
           value={query}
@@ -700,7 +700,7 @@ export function LiveSchedule() {
           <button onClick={() => setMessage("")}>×</button>
         </div>
       )}
-      <div className="workspace">
+      <div className={`workspace ${pick?"has-editor":"schedule-only"}`}>
         <section className={`schedule-wrap ${data.date!==date?"is-switching":""}`}>
           {data.date!==date&&<div className="schedule-switching" role="status"><b>Abrindo escala de {formatScheduleDate(date)}</b><span>A escala anterior permanece bloqueada até a nova data terminar de carregar.</span></div>}
           <div className="drag-help">
@@ -773,13 +773,9 @@ export function LiveSchedule() {
             </tbody>
           </table>
           )}
-          <section className="movement-grid compact-movements">
-            <h2>Efetivo retirado automaticamente</h2>
-            <p>
-              Movimentações aprovadas não aparecem nos postos e deixam o furo
-              visível.
-            </p>
-            {movementGroups.length ? (
+          <section className={`movement-grid compact-movements ${movementsExpanded?"expanded":"collapsed"}`}>
+            <button type="button" className="compact-section-toggle" onClick={()=>setMovementsExpanded(value=>!value)}><span><b>Efetivo retirado</b><small>{movementGroups.map(group=>`${group.label} ${group.items.length}`).join(" · ")||"Nenhum afastamento"}</small></span><strong>{data.movements.length}</strong><i>{movementsExpanded?"Recolher":"Ver nomes"}</i></button>
+            {movementsExpanded&&(movementGroups.length ? (
               <div className="movement-groups">
                 {movementGroups.map((group) => (
                   <article key={group.key} className="movement-group">
@@ -803,12 +799,12 @@ export function LiveSchedule() {
               </div>
             ) : (
               <p>Nenhum afastamento nesta data.</p>
-            )}
+            ))}
           </section>
           {showRedeploy && data.availableForRedeployment.length > 0 && (
-            <section className="redeployment-pool">
-              <header><div><span>RECURSO RETIRADO OU INDISPONÍVEL</span><h2>GMs à disposição para remanejamento</h2><p>Cada card reúne os dois horários do mesmo período. Ao mover, ambos seguem juntos.</p></div><b title={`${data.availableForRedeployment.length} horários`}>{redeploymentGroups.length}</b></header>
-              <div>{redeploymentGroups.map((group) => (
+            <section className={`redeployment-pool ${redeploymentExpanded||view==="redeploy"?"expanded":"collapsed"}`}>
+              <header><div><span>À DISPOSIÇÃO</span><h2>{redeploymentGroups.length} GM(s) aguardando destino</h2><p>Arraste o bloco para um posto/VTR ou escolha o destino.</p></div><button type="button" onClick={()=>setRedeploymentExpanded(value=>!value)}>{redeploymentExpanded||view==="redeploy"?"Recolher":"Abrir bandeja"}</button></header>
+              {(redeploymentExpanded||view==="redeploy")&&<div>{redeploymentGroups.map((group) => (
                 <article key={group.key} draggable onDragStart={(event) => {
                   event.dataTransfer.effectAllowed = "move";
                   event.dataTransfer.setData("text/assignment", String(group.assignments[0].id));
@@ -818,12 +814,12 @@ export function LiveSchedule() {
                   <div><b>{group.guardName}</b><small>{redeploymentTimeLabel(group.assignments)} · {group.period === "day" ? "Diurno · 2º + 3º" : "Noturno · 4º + 1º"}</small></div>
                   <button type="button" onClick={() => setRedeployPick({ assignments: group.assignments })}>Escolher destino</button>
                 </article>
-              ))}</div>
+              ))}</div>}
             </section>
           )}
         </section>
-        <aside className={`editor ${pick ? "editor-active" : ""}`}>
-          {pick ? (
+        {pick&&<aside className="editor editor-active">
+          {(
             <Editor
               key={String(
                 pick.assignment?.id ||
@@ -836,16 +832,8 @@ export function LiveSchedule() {
               onSave={save}
               onRemove={remove}
             />
-          ) : (
-            <div className="empty">
-              <h2>Edição rápida</h2>
-              <p>
-                Selecione um GM ou uma vaga. Ao clicar em um furo, aparece a
-                sugestão inteligente de GMs.
-              </p>
-            </div>
           )}
-        </aside>
+        </aside>}
       </div>
       {holePick && (
         <>
