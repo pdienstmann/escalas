@@ -372,7 +372,7 @@ export async function GET(request: Request) {
   const schedule = await env.DB.prepare("SELECT * FROM schedules WHERE date=?")
     .bind(date)
     .first<Record<string, unknown>>();
-  const [guards, posts, vehicles, allVehicles, assignments, movements, notices, outages, sections] =
+  const [guards, posts, vehicles, allVehicles, assignments, movements, notices, outages, sections, operations] =
     await Promise.all([
       env.DB.prepare(
         "SELECT id,name,registration,platoon,base_shift,work_regime,overtime_eligible FROM guards WHERE active=1 ORDER BY name",
@@ -403,7 +403,12 @@ export async function GET(request: Request) {
         .all(),
       env.DB.prepare("SELECT o.*,v.prefix,v.type,v.zone FROM vehicle_outages o JOIN vehicles v ON v.id=o.vehicle_id WHERE o.active=1 AND o.starts_on<=? AND (o.ends_on IS NULL OR o.ends_on>=?)").bind(date,date).all(),
       env.DB.prepare("SELECT section_key,label,sort_order FROM schedule_sections ORDER BY sort_order,label").all(),
+      env.DB.prepare(`SELECT o.id,o.title,o.starts_at,o.ends_at,o.location,o.status,o.requested_guards,
+        COUNT(os.id) total_slots,SUM(CASE WHEN os.guard_id IS NOT NULL THEN 1 ELSE 0 END) filled
+        FROM operations o LEFT JOIN operation_slots os ON os.operation_id=o.id
+        WHERE o.schedule_id=? AND o.status!='cancelled' GROUP BY o.id ORDER BY o.starts_at,o.title`).bind(schedule?.id).all(),
     ]);
+  const operationAssignments=(await env.DB.prepare(`SELECT os.guard_id,o.starts_at,o.ends_at FROM operation_slots os JOIN operations o ON o.id=os.operation_id WHERE o.schedule_id=? AND o.status!='cancelled' AND os.guard_id IS NOT NULL`).bind(schedule?.id).all<{guard_id:number;starts_at:string;ends_at:string}>()).results;
   const blocked = new Set(movements.results.map((m) => Number(m.guard_id))),
     visibleVehicleIds=new Set(vehicles.results.map((v)=>Number(v.id))),
     visiblePostIds=new Set(posts.results.map((p)=>Number(p.id))),
@@ -419,7 +424,9 @@ export async function GET(request: Request) {
     active = assignments.results.filter(
       (a) => !blocked.has(Number(a.guard_id)) && !awaitingRedeploy(a),
     ),
-    availableForRedeployment = assignments.results.filter((a) => awaitingRedeploy(a));
+    availableForRedeployment = assignments.results.filter((a) => awaitingRedeploy(a)&&!operationAssignments.some(operation=>
+      Number(operation.guard_id)===Number(a.guard_id)&&String(a.starts_at)<operation.ends_at&&String(a.ends_at)>operation.starts_at,
+    ));
   const appliedPattern=await env.DB.prepare("SELECT dp.code day_code,np.code night_code FROM schedule_patterns sp JOIN shift_patterns dp ON dp.id=sp.day_pattern_id JOIN shift_patterns np ON np.id=sp.night_pattern_id WHERE sp.schedule_id=?").bind(schedule?.id).first<Record<string,unknown>>();
   const suggested=appliedPattern?null:await resolvePatternCodes(env.DB,date);
   return Response.json({
@@ -436,6 +443,7 @@ export async function GET(request: Request) {
     notices: notices.results,
     outages: outages.results,
     sections: sections.results,
+    operations: operations.results,
     patternLabel: appliedPattern?`${appliedPattern.day_code} + ${appliedPattern.night_code} + SEMANAL`:`${suggested?.dayCode} + ${suggested?.nightCode} + SEMANAL · AJUSTES`,
   });
 }
@@ -454,6 +462,12 @@ async function assertAssignable(
     .first();
   if (conflict)
     return { error: "Conflito: este GM já está escalado nesse horário.", status: 409 as const };
+  const operationConflict = await env.DB.prepare(
+    `SELECT os.id,o.title FROM operation_slots os JOIN operations o ON o.id=os.operation_id
+     WHERE os.guard_id=? AND o.schedule_id=? AND o.status!='cancelled' AND o.starts_at<? AND o.ends_at>? LIMIT 1`,
+  ).bind(guardId,scheduleId,end,start).first<{id:number;title:string}>();
+  if(operationConflict)
+    return { error: `Conflito: este GM já participa da operação ${operationConflict.title}.`, status: 409 as const };
   const movement = await env.DB.prepare(
     "SELECT type FROM movements WHERE guard_id=? AND status='approved' AND starts_at<? AND ends_at>? LIMIT 1",
   )
@@ -1168,6 +1182,9 @@ async function buildSuggestions(request: Request, date: string) {
   for (const assignment of todayAssignments.results) {
     const guardId = Number(assignment.guard_id);
     if (blocked.has(guardId)) continue;
+    // Remanejamento rápido é exclusivo da bandeja "À disposição". Quem ainda
+    // ocupa posto ou VTR não deve aparecer como candidato nesta categoria.
+    if (Number(assignment.awaiting_redeploy) !== 1) continue;
     const atTarget = postId
       ? Number(assignment.post_id) === postId
       : Number(assignment.vehicle_id) === vehicleId;
@@ -1194,11 +1211,10 @@ async function buildSuggestions(request: Request, date: string) {
         startsAt: periodWindow?.start || String(assignments[0].starts_at),
         endsAt: periodWindow?.end || String(assignments[assignments.length - 1].ends_at),
         compatibleRole,
-        availableForRedeployment: assignments.some((item) => Number(item.awaiting_redeploy) === 1),
+        availableForRedeployment: true,
       };
     })
     .sort((a, b) =>
-      Number(b.availableForRedeployment) - Number(a.availableForRedeployment) ||
       Number(b.compatibleRole) - Number(a.compatibleRole) ||
       a.name.localeCompare(b.name, "pt-BR"),
     );

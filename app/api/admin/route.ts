@@ -4,6 +4,8 @@ import { permitted } from "../../../lib/access";
 import { todayScheduleDate } from "../../../lib/schedule-date";
 
 export const dynamic = "force-dynamic";
+type LeaveImportRow = { guardId: number; date: string };
+type AdminBody = Record<string, string | number> & { rows?: LeaveImportRow[] };
 
 
 async function seed() {
@@ -220,7 +222,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   if (!permitted(request))
     return Response.json({ error: "Não autorizado" }, { status: 401 });
-  const body = (await request.json()) as Record<string, string | number>;
+  const body = (await request.json()) as AdminBody;
   await ensureFleetReturnTables();
   try {
     if (body.action === "guard_import") {
@@ -531,6 +533,31 @@ export async function POST(request: Request) {
       await env.DB.prepare("DELETE FROM movements WHERE id=?").bind(body.id).run();
       await writeAudit(request,{action:"delete",entityType:"movement",entityId:body.id,summary:`Removeu ${before.type} de ${before.guard_name}`,before,undoable:true});
       return Response.json({ok:true});
+    } else if (body.action === "leave_import") {
+      const month=String(body.month||""),rows=Array.isArray(body.rows)?body.rows:[];
+      if(!/^\d{4}-\d{2}$/.test(month)||!rows.length)
+        return Response.json({error:"Informe o mês e ao menos uma folga válida."},{status:400});
+      const uniqueRows=[...new Map(rows.map(row=>[`${Number(row.guardId)}:${String(row.date)}`,{guardId:Number(row.guardId),date:String(row.date)}])).values()];
+      if(uniqueRows.some(row=>!Number.isInteger(row.guardId)||!/^\d{4}-\d{2}-\d{2}$/.test(row.date)||!row.date.startsWith(`${month}-`)))
+        return Response.json({error:"Há GMs ou datas inválidas na importação."},{status:400});
+      const validGuards=new Set((await env.DB.prepare("SELECT id FROM guards WHERE active=1").all<{id:number}>()).results.map(row=>Number(row.id)));
+      if(uniqueRows.some(row=>!validGuards.has(row.guardId)))
+        return Response.json({error:"A importação contém um GM inexistente ou inativo."},{status:400});
+      const [year,monthNumber]=month.split("-").map(Number);
+      const monthLabel=new Intl.DateTimeFormat("pt-BR",{month:"long",year:"numeric",timeZone:"UTC"}).format(new Date(Date.UTC(year,monthNumber-1,1)));
+      await env.DB.prepare("INSERT OR IGNORE INTO leave_campaigns (month,title,status,access_code) VALUES (?,?,?,?)")
+        .bind(month,`Folgas de ${monthLabel}`,"open",`IMPORT-${month}`).run();
+      const campaign=await env.DB.prepare("SELECT id FROM leave_campaigns WHERE month=?").bind(month).first<{id:number}>();
+      if(!campaign)return Response.json({error:"Não foi possível abrir a campanha mensal."},{status:500});
+      const results=await env.DB.batch(uniqueRows.map(row=>{
+        const weekday=new Date(`${row.date}T12:00:00Z`).getUTCDay(),category=weekday===0||weekday===6?"weekend":"weekday";
+        return env.DB.prepare("INSERT OR IGNORE INTO leave_choices (campaign_id,guard_id,date,category,status,position) VALUES (?,?,?,?, 'confirmed',NULL)")
+          .bind(campaign.id,row.guardId,row.date,category);
+      }));
+      await syncConfirmedLeaves();
+      const imported=results.reduce((total,result)=>total+Number(result.meta.changes||0),0);
+      await writeAudit(request,{action:"import",entityType:"leave_choice",entityId:campaign.id,summary:`Importou ${imported} folgas do compilado de ${month}`,after:{month,received:uniqueRows.length,imported},undoable:false});
+      return Response.json({ok:true,imported,ignored:uniqueRows.length-imported,message:`${imported} folgas importadas e aplicadas às escalas. ${uniqueRows.length-imported} registros já existentes foram mantidos.`});
     } else if (body.action === "leave") {
       const date = String(body.date),
         category = String(body.category),
@@ -552,6 +579,10 @@ export async function POST(request: Request) {
           { error: "Data indisponível nesta campanha." },
           { status: 400 },
         );
+      const existingCategory=await env.DB.prepare("SELECT id FROM leave_choices WHERE campaign_id=? AND guard_id=? AND category=? AND status!='cancelled' LIMIT 1")
+        .bind(campaignId,guardId,category).first();
+      if(existingCategory)
+        return Response.json({error:"Este GM já possui uma escolha nesta categoria."},{status:409});
       const status = limit.used < limit.capacity ? "confirmed" : "waitlist";
       const created = await env.DB.prepare(
         "INSERT INTO leave_choices (campaign_id,guard_id,date,category,status,position) VALUES (?,?,?,?,?,?)",

@@ -50,6 +50,7 @@ type State = {
   notices: Rec[];
   sections: Rec[];
   availableForRedeployment: Rec[];
+  operations?: Rec[];
   patternLabel?: string;
 };
 type Pick = {
@@ -811,6 +812,9 @@ export function LiveSchedule() {
         <Link className="toolbar-link" href={hrefFor("/impressao")}>
           Gerar PDF
         </Link>
+        <Link className="toolbar-operation-link" href={hrefFor("/operacoes")}>
+          ＋ Operação
+        </Link>
         <div className="schedule-scroll-controls" role="group" aria-label="Mover visualização dos turnos">
           <button type="button" title="Turnos anteriores" onClick={()=>scheduleWrapRef.current?.scrollBy({left:-420,behavior:"smooth"})}>←</button>
           <button type="button" title="Próximos turnos" onClick={()=>scheduleWrapRef.current?.scrollBy({left:420,behavior:"smooth"})}>→</button>
@@ -826,6 +830,7 @@ export function LiveSchedule() {
           <Link href={hrefFor("/alteracoes")}>Conferir</Link>
         </section>
       )}
+      {Boolean(data.operations?.length) && <section className="daily-operations-summary"><div><span>OPERAÇÕES DO DIA</span><b>{data.operations?.length} mini escala(s) vinculada(s)</b></div><div>{data.operations?.slice(0,3).map(operation=><span key={String(operation.id)}><b>{operation.title}</b><small>{String(operation.starts_at).slice(11,16)}–{String(operation.ends_at).slice(11,16)} · {operation.filled}/{operation.total_slots} GMs</small></span>)}</div><Link href={hrefFor("/operacoes")}>Abrir operações</Link></section>}
 
       {message && (
         <div className="schedule-toast" role="status">

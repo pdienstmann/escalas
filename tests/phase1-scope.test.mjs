@@ -299,3 +299,37 @@ test("schedule editor distinguishes day and night without changing the PDF", () 
   assert.match(styles, /td\.period-day:not\(\.furo\)/);
   assert.match(styles, /td\.period-night:not\(\.furo\)/);
 });
+
+test("same-day hole suggestions only expose guards already awaiting redeployment", () => {
+  const api = readFileSync(resolve("app/api/schedule/route.ts"), "utf8");
+  const dialog = readFileSync(resolve("app/hole-suggest-box.tsx"), "utf8");
+  assert.match(api, /Number\(assignment\.awaiting_redeploy\) !== 1\) continue/);
+  assert.doesNotMatch(dialog, /assignedCandidates/);
+  assert.doesNotMatch(dialog, /Move o período do GM de outro posto/);
+});
+
+test("daily operations have an isolated workflow, crew slots and PDF annex", () => {
+  const migration = readFileSync(resolve("drizzle/0011_daily_operations.sql"), "utf8");
+  const api = readFileSync(resolve("app/api/operations/route.ts"), "utf8");
+  const dashboard = readFileSync(resolve("app/operations-dashboard.tsx"), "utf8");
+  const print = readFileSync(resolve("app/print-schedule.tsx"), "utf8");
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS `operations`/);
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS `operation_slots`/);
+  assert.match(api, /sourceType:"available"\|"extension"\|"overtime"/);
+  assert.match(api, /Uma das viaturas ficou indisponível ou já foi reservada/);
+  assert.match(dashboard, /CRIAR MINI ESCALA/);
+  assert.match(dashboard, /Primeiro: À disposição\. Depois: extensão e HE/);
+  assert.match(print, /ANEXO · OPERAÇÕES/);
+});
+
+test("monthly leave compilation is reviewed before one bulk confirmation", () => {
+  const migration = readFileSync(resolve("drizzle/0012_leave_import.sql"), "utf8");
+  const api = readFileSync(resolve("app/api/admin/route.ts"), "utf8");
+  const dashboard = readFileSync(resolve("app/gestao-client.tsx"), "utf8");
+  assert.match(migration, /idx_leave_choices_campaign_guard_date/);
+  assert.match(api, /body\.action === "leave_import"/);
+  assert.match(api, /await syncConfirmedLeaves\(\)/);
+  assert.match(dashboard, /Revisar antes de incluir/);
+  assert.match(dashboard, /Confirmar importação geral/);
+  assert.match(dashboard, /GM não encontrado/);
+});

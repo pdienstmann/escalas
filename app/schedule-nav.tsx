@@ -5,6 +5,7 @@ import { withScheduleDate } from "../lib/schedule-date";
 
 const primaryItems = [
   { href: "/", label: "Escala", exact: true },
+  { href: "/operacoes", label: "Operações" },
   { href: "/movimentacoes", label: "Pendências" },
   { href: "/horas-extras", label: "Horas extras" },
 ] as const;

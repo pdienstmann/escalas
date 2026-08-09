@@ -132,7 +132,6 @@ export function HoleSuggestBox({
     );
   }, [data, query]);
   const availableCandidates = filteredSameDay.filter((candidate) => candidate.availableForRedeployment);
-  const assignedCandidates = filteredSameDay.filter((candidate) => !candidate.availableForRedeployment);
 
   function confirmSuggestion(guard: Suggested) {
     return async () => {
@@ -217,22 +216,6 @@ export function HoleSuggestBox({
                 <b>À disposição para escala</b>
                 <p>Estes GMs já estão aguardando destino e podem ser colocados diretamente neste local.</p>
                 {availableCandidates.map((candidate) => (
-                  <SameDayRow
-                    key={candidate.guardId}
-                    candidate={candidate}
-                    selected={selectedRedeployId === candidate.guardId}
-                    busy={busy}
-                    onSelect={() => setSelectedRedeployId(candidate.guardId)}
-                    onConfirm={() => onRedeploy(candidate)}
-                  />
-                ))}
-              </section>
-            )}
-            {assignedCandidates.length > 0 && (
-              <section className="hole-suggest-group redeploy-suggestions">
-                <b>Remanejar nesta escala</b>
-                <p>Move o período do GM de outro posto e marca automaticamente “Avisar remanejamento”.</p>
-                {assignedCandidates.map((candidate) => (
                   <SameDayRow
                     key={candidate.guardId}
                     candidate={candidate}

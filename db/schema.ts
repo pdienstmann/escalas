@@ -87,7 +87,7 @@ export const leaveDayLimits = sqliteTable("leave_day_limits", {
 },t=>[uniqueIndex("idx_leave_limits_campaign_date_platoon").on(t.campaignId,t.date,t.platoon)]);
 export const leaveChoices = sqliteTable("leave_choices", {
  id:integer("id").primaryKey({autoIncrement:true}), campaignId:integer("campaign_id").notNull().references(()=>leaveCampaigns.id), guardId:integer("guard_id").notNull().references(()=>guards.id), date:text("date").notNull(), category:text("category",{enum:["weekday","weekend"]}).notNull(), status:text("status",{enum:["confirmed","waitlist","cancelled"]}).notNull(), position:integer("position"), ...audit,
-},t=>[uniqueIndex("idx_leave_choices_campaign_guard_category").on(t.campaignId,t.guardId,t.category)]);
+},t=>[uniqueIndex("idx_leave_choices_campaign_guard_date").on(t.campaignId,t.guardId,t.date)]);
 export const shiftPatterns = sqliteTable("shift_patterns", {
  id:integer("id").primaryKey({autoIncrement:true}), code:text("code").notNull().unique(), name:text("name").notNull(), period:text("period",{enum:["day","night"]}).notNull(), parity:integer("parity").notNull(), anchorDate:text("anchor_date").notNull(), active:integer("active",{mode:"boolean"}).notNull().default(true), ...audit,
 });
@@ -101,6 +101,15 @@ export const operationalNotices = sqliteTable("operational_notices", {
  id:integer("id").primaryKey({autoIncrement:true}), effectiveDate:text("effective_date").notNull(), title:text("title").notNull(), details:text("details"),
  status:text("status",{enum:["pending","acknowledged"]}).notNull().default("pending"), acknowledgedAt:text("acknowledged_at"), ...audit,
 });
+export const operations = sqliteTable("operations", {
+ id:integer("id").primaryKey({autoIncrement:true}),scheduleId:integer("schedule_id").notNull().references(()=>schedules.id),title:text("title").notNull(),startsAt:text("starts_at").notNull(),endsAt:text("ends_at").notNull(),location:text("location"),commander:text("commander"),reference:text("reference"),notes:text("notes"),requestedGuards:integer("requested_guards").notNull().default(0),status:text("status",{enum:["draft","confirmed","cancelled"]}).notNull().default("draft"),...audit,
+},t=>[index("idx_operations_schedule_time").on(t.scheduleId,t.startsAt,t.endsAt)]);
+export const operationVehicles = sqliteTable("operation_vehicles", {
+ id:integer("id").primaryKey({autoIncrement:true}),operationId:integer("operation_id").notNull().references(()=>operations.id,{onDelete:"cascade"}),vehicleId:integer("vehicle_id").notNull().references(()=>vehicles.id),sortOrder:integer("sort_order").notNull().default(0),...audit,
+},t=>[uniqueIndex("idx_operation_vehicle_unique").on(t.operationId,t.vehicleId),index("idx_operation_vehicles_vehicle").on(t.vehicleId,t.operationId)]);
+export const operationSlots = sqliteTable("operation_slots", {
+ id:integer("id").primaryKey({autoIncrement:true}),operationId:integer("operation_id").notNull().references(()=>operations.id,{onDelete:"cascade"}),operationVehicleId:integer("operation_vehicle_id").references(()=>operationVehicles.id,{onDelete:"cascade"}),role:text("role",{enum:["driver","patrol","third","guard"]}).notNull().default("guard"),position:integer("position").notNull().default(0),guardId:integer("guard_id").references(()=>guards.id),sourceType:text("source_type",{enum:["pending","available","overtime","extension","redeployment"]}).notNull().default("pending"),originAssignmentId:integer("origin_assignment_id").references(()=>assignments.id),...audit,
+},t=>[index("idx_operation_slots_operation").on(t.operationId,t.operationVehicleId,t.position),index("idx_operation_slots_guard").on(t.guardId,t.operationId)]);
 export const auditEvents = sqliteTable("audit_events", {
  id:integer("id").primaryKey({autoIncrement:true}), action:text("action").notNull(), entityType:text("entity_type").notNull(), entityId:text("entity_id"), summary:text("summary").notNull(),
  beforeJson:text("before_json"), afterJson:text("after_json"), actorId:text("actor_id").notNull(), actorEmail:text("actor_email").notNull(), actorName:text("actor_name").notNull(),

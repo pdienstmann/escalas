@@ -6,6 +6,9 @@ import { formatScheduleDate, withScheduleDate } from "../lib/schedule-date";
 import { orderScheduleResources } from "../lib/schedule-sections";
 import { assignmentOverlapsShift, operationalShiftWindow } from "../lib/shift-rules";
 type Rec = Record<string, string | number | null>;
+type OperationSlot = Rec & { id:number; role:string; guard_name?:string|null; source_type?:string|null };
+type OperationVehicle = Rec & { id:number; prefix:string; type:string; zone?:string|null; slots:OperationSlot[] };
+type PrintOperation = Rec & { id:number; title:string; starts_at:string; ends_at:string; vehicles:OperationVehicle[]; generalSlots:OperationSlot[] };
 type State = {
   date: string;
   posts: Rec[];
@@ -14,6 +17,7 @@ type State = {
   movements: Rec[];
   sections?: Rec[];
   patternLabel?: string;
+  operations?: PrintOperation[];
 };
 const shifts = {
   day: [
@@ -33,10 +37,14 @@ export function PrintSchedule() {
     const volumeTest = new URLSearchParams(location.search).get("teste") === "200";
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setData(null);
-    fetch(`/api/schedule?date=${date}&_=${Date.now()}`, { cache: "no-store" })
-      .then((r) => {
-        if (!r.ok) throw new Error();
-        return r.json();
+    Promise.all([
+      fetch(`/api/schedule?date=${date}&_=${Date.now()}`, { cache: "no-store" }),
+      fetch(`/api/operations?date=${date}&_=${Date.now()}`, { cache: "no-store" }),
+    ])
+      .then(async ([scheduleResponse,operationsResponse]) => {
+        if (!scheduleResponse.ok || !operationsResponse.ok) throw new Error();
+        const [scheduleData,operationsData]=await Promise.all([scheduleResponse.json(),operationsResponse.json()]);
+        return {...scheduleData,operations:operationsData.operations||[]};
       })
       .then((value) => setData(volumeTest ? makeVolumeData(value) : value))
       .catch(() => setError("Não foi possível preparar a impressão."));
@@ -52,9 +60,16 @@ export function PrintSchedule() {
       </div>
       <PrintPage data={data} period="day" title="ESCALA DIURNA" />
       <PrintPage data={data} period="night" title="ESCALA NOTURNA" />
+      {Boolean(data.operations?.length)&&<PrintOperationsPage data={data}/>}
     </main>
   );
 }
+function PrintOperationsPage({data}:{data:State}){
+  return <section className="print-page print-operations-page"><header><div className="print-mark">GMNH</div><div><b>PREFEITURA MUNICIPAL DE NOVO HAMBURGO</b><span>SECRETARIA DE SEGURANÇA · DIRETORIA DA GUARDA MUNICIPAL</span><strong>OPERAÇÕES DO DIA</strong></div><aside><b>{formatScheduleDate(data.date)}</b><span>{data.operations?.length} operação(ões)</span></aside></header><div className="print-operation-list">{data.operations?.map(operation=><article key={operation.id}><header><div><h2>{operation.title}</h2><p>{String(operation.starts_at).slice(11,16)}–{String(operation.ends_at).slice(11,16)} · {String(operation.location||"Local não informado")}</p></div><aside><b>{String(operation.commander||"Responsável a definir")}</b><small>{String(operation.reference||"")}</small></aside></header><table><thead><tr><th>VTR / EQUIPE</th><th>MOTORISTA</th><th>PATRULHEIRO</th><th>REFORÇOS</th></tr></thead><tbody>{operation.vehicles.map(vehicle=>{const driver=vehicle.slots.find(slot=>slot.role==="driver"),patrol=vehicle.slots.find(slot=>slot.role==="patrol"),extras=vehicle.slots.filter(slot=>!["driver","patrol"].includes(slot.role));return <tr key={vehicle.id}><td><b><span className="print-vehicle-icon">{vehicleIcon(String(vehicle.type))}</span>{vehicle.prefix}</b><small>{String(vehicle.zone||"Sem área")}</small></td><OperationSlotCell slot={driver}/><OperationSlotCell slot={patrol}/><td>{extras.length?extras.map(slot=><PrintOperationGuard key={slot.id} slot={slot}/>):"—"}</td></tr>})}{operation.generalSlots.length>0&&<tr><td><b>EFETIVO ADICIONAL</b><small>Sem VTR vinculada</small></td><td colSpan={3}>{operation.generalSlots.map(slot=><PrintOperationGuard key={slot.id} slot={slot}/>)}</td></tr>}</tbody></table>{operation.notes&&<p className="print-operation-notes"><b>Observações:</b> {String(operation.notes)}</p>}</article>)}</div><div className="print-page-number">ANEXO · OPERAÇÕES</div></section>
+}
+function OperationSlotCell({slot}:{slot?:OperationSlot}){return <td>{slot?<PrintOperationGuard slot={slot}/>:<strong className="print-hole">VAGA</strong>}</td>}
+function PrintOperationGuard({slot}:{slot:OperationSlot}){return <span className="print-operation-guard"><b>{slot.guard_name||"VAGA"}</b>{slot.guard_name&&<em>{operationSource(String(slot.source_type||"pending"))}</em>}</span>}
+const operationSource=(source:string)=>source==="available"?"DISP.":source==="extension"?"EXT. HE":source==="overtime"?"HE":source==="redeployment"?"REM.":"—";
 function PrintPage({
   data,
   period,

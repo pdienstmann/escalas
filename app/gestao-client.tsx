@@ -228,6 +228,16 @@ export function GestaoClient({
     setMessage(r.ok ? `${j.count} GMs importados ou atualizados.` : j.error);
     if (r.ok) await load();
   }
+  async function importLeaves(month:string,rows:Array<{guardId:number;date:string}>) {
+    if(saving)return;
+    setSaving(true);setMessage("");
+    try{
+      const r=await fetch("/api/admin",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"leave_import",month,rows})});
+      const j=await r.json();setMessage(r.ok?j.message:j.error);
+      if(r.ok)await load();
+      return r.ok;
+    }finally{setSaving(false)}
+  }
   async function choiceAction(
     action: "leave_approve" | "leave_cancel",
     id: Item["id"],
@@ -474,6 +484,13 @@ export function GestaoClient({
       busy={saving}
       busyArea={modeLabel[mode]}
     >
+      <LeaveImport
+        guards={data.guards}
+        choices={data.choices}
+        defaultMonth={String(campaign?.month||date.slice(0,7))}
+        saving={saving}
+        onImport={importLeaves}
+      />
       <div className="leave-layout">
         <Form title="Registrar escolha" onSubmit={(e) => submit(e, "leave")}>
           <input
@@ -547,6 +564,42 @@ function GuardImport({onImport}:{onImport:(rows:Array<{registration:string;name:
     <textarea value={raw} onChange={event=>setRaw(event.target.value)} rows={6} placeholder={"Matrícula\tNome de escala\tEquipe\t12x36 dia\n12345\tSILVA\tD1\t12x36 dia"}/>
     {rows.length>0&&<div className="import-preview"><b>Pré-visualização</b>{rows.slice(0,3).map(row=><span key={`${row.registration}-${row.index}`}><strong>{row.registration}</strong>{row.name}<small>{row.platoon||"Sem equipe"} · {row.baseShift}</small></span>)}{rows.length>3&&<em>+ {rows.length-3} linhas</em>}</div>}
     <button className="save" disabled={!rows.length||sending} onClick={()=>void send()}>{sending?"Importando…":`Confirmar importação${rows.length?` (${rows.length})`:""}`}</button>
+  </section>
+}
+type ParsedLeave={line:number;shift:string;guardId:number|null;guardName:string;dates:string[];problems:string[]};
+const normalizeLeaveName=(value:string)=>value.normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^A-Z0-9]+/gi," ").trim().toUpperCase();
+function parseLeaveImport(raw:string,guards:Item[],month:string):ParsedLeave[]{
+  const [year,monthNumber]=month.split("-").map(Number),byName=new Map(guards.map(guard=>[normalizeLeaveName(String(guard.name)),guard]));
+  return raw.split(/\r?\n/).map((source,index)=>({source:source.trim(),line:index+1})).filter(item=>item.source&&!/^\[\d+\]|^GM\b|^DIA\s+GM\b/i.test(item.source)).map(({source,line})=>{
+    const shift=/^NOITE\b/i.test(source)?"NOITE":/^DIA\b/i.test(source)?"DIA":"";
+    const matches=[...source.matchAll(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/g)];
+    const prefix=(matches.length?source.slice(0,matches[0].index):source).replace(/^\s*(DIA|NOITE)\s+/i,"").replace(/\t/g," ").trim();
+    const guard=byName.get(normalizeLeaveName(prefix));
+    const problems:string[]=[];
+    if(!guard)problems.push(`GM não encontrado: ${prefix||"linha sem nome"}`);
+    if(!matches.length)problems.push("Nenhuma data reconhecida");
+    const dates=[...new Set(matches.flatMap(match=>{
+      const day=Number(match[1]),candidateMonth=Number(match[2]),candidateYear=match[3]?Number(match[3].length===2?`20${match[3]}`:match[3]):year;
+      const candidate=new Date(Date.UTC(candidateYear,candidateMonth-1,day));
+      if(candidate.getUTCFullYear()!==candidateYear||candidate.getUTCMonth()!==candidateMonth-1||candidate.getUTCDate()!==day){problems.push(`Data inválida: ${match[0]}`);return []}
+      if(candidateYear!==year||candidateMonth!==monthNumber){problems.push(`Data fora de ${month}: ${match[0]}`);return []}
+      return [`${candidateYear}-${String(candidateMonth).padStart(2,"0")}-${String(day).padStart(2,"0")}`];
+    }))];
+    return {line,shift,guardId:guard?Number(guard.id):null,guardName:String(guard?.name||prefix||"GM não identificado"),dates,problems};
+  });
+}
+function LeaveImport({guards,choices,defaultMonth,saving,onImport}:{guards:Item[];choices:Item[];defaultMonth:string;saving:boolean;onImport:(month:string,rows:Array<{guardId:number;date:string}>)=>Promise<boolean|undefined>}){
+  const [raw,setRaw]=useState(""),[month,setMonth]=useState(defaultMonth),[reviewing,setReviewing]=useState(false);
+  const parsed=useMemo(()=>parseLeaveImport(raw,guards,month),[raw,guards,month]);
+  const existing=new Set(choices.map(choice=>`${Number(choice.guard_id)}:${String(choice.date)}`));
+  const validRows=parsed.flatMap(row=>row.guardId?row.dates.filter(date=>!existing.has(`${row.guardId}:${date}`)).map(date=>({guardId:Number(row.guardId),date})):[]);
+  const problems=parsed.reduce((total,row)=>total+row.problems.length,0),recognized=parsed.reduce((total,row)=>total+row.dates.length,0);
+  async function confirmImport(){if(!validRows.length||problems||saving)return;const ok=await onImport(month,validRows);if(ok){setRaw("");setReviewing(false)}}
+  return <section className="leave-import">
+    <header><div><small>IMPORTAÇÃO DO COMPILADO MENSAL</small><h2>Colar tabela de folgas</h2><p>Cole as colunas DIA/NOITE, GM e todas as datas. Nada é salvo antes da confirmação geral.</p></div><label>Mês<input type="month" value={month} onChange={event=>{setMonth(event.target.value);setReviewing(false)}}/></label></header>
+    <textarea value={raw} onChange={event=>{setRaw(event.target.value);setReviewing(false)}} rows={6} placeholder={"DIA\tALENCAR\t22/08 (SÁBADO)\t06/08 (QUINTA-FEIRA)\nNOITE\tALEXANDRE\t12/08\t14/08"}/>
+    <div className="leave-import-actions"><span><b>{parsed.length}</b> GMs · <b>{recognized}</b> folgas reconhecidas{problems?` · ${problems} pendência(s)`:""}</span><button type="button" disabled={!parsed.length} onClick={()=>setReviewing(true)}>Revisar antes de incluir</button></div>
+    {reviewing&&<div className="leave-import-review"><header><div><small>CONFIRMAÇÃO - NENHUM DADO SALVO AINDA</small><h3>Folgas de {month.split("-").reverse().join("/")}</h3></div><strong className={problems?"warning":"ready"}>{problems?"Corrigir pendências":`${validRows.length} novas folgas`}</strong></header><div className="leave-import-list">{parsed.map(row=><article key={`${row.line}-${row.guardName}`} className={row.problems.length?"invalid":""}><span className={`leave-shift ${row.shift.toLowerCase()}`}>{row.shift||"-"}</span><div><b>{row.guardName}</b><small>Linha {row.line}</small></div><div className="leave-date-tags">{row.dates.map(date=><span key={date} className={existing.has(`${row.guardId}:${date}`)?"existing":""}>{formatDate(date)}{existing.has(`${row.guardId}:${date}`)?" · já incluída":""}</span>)}{row.problems.map(problem=><em key={problem}>{problem}</em>)}</div></article>)}</div><footer><button type="button" onClick={()=>setReviewing(false)}>Voltar e corrigir</button><button type="button" className="save" disabled={!validRows.length||Boolean(problems)||saving} onClick={()=>void confirmImport()}>{saving?"Importando…":`Confirmar importação geral (${validRows.length})`}</button></footer></div>}
   </section>
 }
 const formatDate = (value: string | number | null) =>
