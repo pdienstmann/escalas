@@ -348,7 +348,7 @@ export async function GET(request: Request) {
   const [guards, posts, vehicles, allVehicles, assignments, movements, notices, outages, sections] =
     await Promise.all([
       env.DB.prepare(
-        "SELECT id,name,registration,platoon,base_shift,work_regime FROM guards WHERE active=1 ORDER BY name",
+        "SELECT id,name,registration,platoon,base_shift,work_regime,overtime_eligible FROM guards WHERE active=1 ORDER BY name",
       ).all(),
       env.DB.prepare(
         "SELECT id,name,group_name FROM posts WHERE active=1 ORDER BY sort_order,name",
@@ -730,6 +730,7 @@ async function buildSuggestions(request: Request, date: string) {
         platoon: string | null;
         base_shift: string | null;
         work_regime: string | null;
+        overtime_eligible: number;
       }>(),
     env.DB
       .prepare(
@@ -812,7 +813,7 @@ async function buildSuggestions(request: Request, date: string) {
   const nightCodes = new Set<string>(appliedPattern?.night_code ? [appliedPattern.night_code] : []);
 
   const ranked = rankGuardSuggestions(
-    guards.results.map((g) => ({
+    guards.results.filter((g) => Number(g.overtime_eligible) !== 0).map((g) => ({
       id: Number(g.id),
       name: String(g.name),
       registration: String(g.registration),
@@ -847,6 +848,7 @@ async function buildSuggestions(request: Request, date: string) {
       blocked: blocked.size,
       scheduledToday: scheduledToday.size,
       totalGuards: guards.results.length,
+      excludedNoHe: guards.results.filter((g) => Number(g.overtime_eligible) === 0).length,
     },
   });
 }

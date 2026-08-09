@@ -2,6 +2,7 @@
 
 import { CSSProperties, useEffect, useMemo, useState } from "react";
 import { formatHoursDuration, fullPeriodLabel } from "../lib/shift-rules";
+import type { SuggestionPosition } from "../lib/suggestion-position";
 
 type Suggested = {
   id: number;
@@ -23,7 +24,12 @@ type State = {
   vehicleId: number | null;
   role: string | null;
   suggestions: Suggested[];
-  summary?: { blocked: number; scheduledToday: number; totalGuards: number };
+  summary?: {
+    blocked: number;
+    scheduledToday: number;
+    totalGuards: number;
+    excludedNoHe?: number;
+  };
 };
 
 export function HoleSuggestBox({
@@ -49,7 +55,7 @@ export function HoleSuggestBox({
   onManual: () => void;
   onClose: () => void;
   busy: boolean;
-  position?: { top: number; left: number } | null;
+  position?: SuggestionPosition | null;
 }) {
   const [data, setData] = useState<State | null>(null);
   const [error, setError] = useState("");
@@ -117,12 +123,17 @@ export function HoleSuggestBox({
   const { primary, others } = separateByPriority(shown);
 
   const style = position
-    ? { top: `${position.top}px`, left: `${position.left}px` }
+    ? {
+        top: `${position.top}px`,
+        left: `${position.left}px`,
+        maxHeight: `${position.maxHeight}px`,
+      }
     : undefined;
 
   return (
     <div
       className="hole-suggest-card"
+      data-placement={position?.placement || "bottom-sheet"}
       style={style as CSSProperties}
       role="dialog"
       aria-label="Sugestões de GM para o furo"
@@ -136,12 +147,13 @@ export function HoleSuggestBox({
         </div>
         <button type="button" onClick={onClose} aria-label="Fechar">×</button>
       </header>
-      {error && <p className="hole-suggest-error">{error}</p>}
-      {!data && !error && (
-        <div className="hole-suggest-loading">Carregando sugestões…</div>
-      )}
-      {data && (
-        <>
+      <div className="hole-suggest-body">
+        {error && <p className="hole-suggest-error">{error}</p>}
+        {!data && !error && (
+          <div className="hole-suggest-loading">Carregando sugestões…</div>
+        )}
+        {data && (
+          <>
           <input
             className="hole-suggest-search"
             value={query}
@@ -151,16 +163,20 @@ export function HoleSuggestBox({
           {data.summary && (
             <p className="hole-suggest-summary">
               {filtered.length} elegíveis · {data.summary.scheduledToday} já escalados hoje ·{" "}
-              {data.summary.blocked} indisponíveis por afastamento.
+              {data.summary.blocked} indisponíveis por afastamento
+              {data.summary.excludedNoHe
+                ? ` · ${data.summary.excludedNoHe} não realizam HE`
+                : ""}.
             </p>
           )}
-          {!filtered.length && (
-            <p className="hole-suggest-empty">
-              Nenhum GM elegível para este furo com os filtros atuais. Use seleção manual.
-            </p>
-          )}
-          {primary.length > 0 && (
-            <section className="hole-suggest-group primary">
+          <div className="hole-suggest-results">
+            {!filtered.length && (
+              <p className="hole-suggest-empty">
+                Nenhum GM elegível para este furo com os filtros atuais. Use seleção manual.
+              </p>
+            )}
+            {primary.length > 0 && (
+              <section className="hole-suggest-group primary">
               <b>Equipe do dia oposto</b>
               {primary.map((guard) => (
                 <SuggestionRow
@@ -173,10 +189,10 @@ export function HoleSuggestBox({
                   highlight
                 />
               ))}
-            </section>
-          )}
-          {others.length > 0 && (
-            <section className="hole-suggest-group">
+              </section>
+            )}
+            {others.length > 0 && (
+              <section className="hole-suggest-group">
               <b>{primary.length > 0 ? "Outras sugestões" : "Sugestões ordenadas por HE"}</b>
               {others.map((guard) => (
                 <SuggestionRow
@@ -188,16 +204,18 @@ export function HoleSuggestBox({
                   busy={busy}
                 />
               ))}
-            </section>
-          )}
-          <footer>
-            <button type="button" className="hole-suggest-manual" onClick={onManual}>
-              Ver todos os GMs (manual)
-            </button>
-            <small>A sugestão nunca é aplicada sem confirmação.</small>
-          </footer>
-        </>
-      )}
+              </section>
+            )}
+          </div>
+          </>
+        )}
+      </div>
+      {data && <footer>
+        <button type="button" className="hole-suggest-manual" onClick={onManual}>
+          Ver todos os GMs (manual)
+        </button>
+        <small>A sugestão nunca é aplicada sem confirmação.</small>
+      </footer>}
     </div>
   );
 }

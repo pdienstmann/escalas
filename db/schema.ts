@@ -13,6 +13,8 @@ export const guards = sqliteTable("guards", {
   id: integer("id").primaryKey({autoIncrement:true}), registration: text("registration").notNull().unique(), name:text("name").notNull(),
   platoon:text("platoon"), baseShift:text("base_shift"), active:integer("active",{mode:"boolean"}).notNull().default(true), ...audit,
   workRegime:text("work_regime",{enum:["12x36","weekly"]}).notNull().default("12x36"),
+  overtimeEligible:integer("overtime_eligible",{mode:"boolean"}).notNull().default(true),
+  overtimeNote:text("overtime_note"),
 });
 export const posts = sqliteTable("posts", {
   id:integer("id").primaryKey({autoIncrement:true}), name:text("name").notNull(), groupName:text("group_name").notNull(), sortOrder:integer("sort_order").notNull().default(0), active:integer("active",{mode:"boolean"}).notNull().default(true), ...audit,

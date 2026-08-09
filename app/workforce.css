@@ -17,12 +17,14 @@
 .section-toggle{background:none;border:0;color:#fff;font-weight:700;font-size:13px;cursor:pointer;padding:0;text-align:left}
 .toolbar-seg button{min-width:auto;padding:6px 12px}
 .hole-suggest-backdrop{position:fixed;inset:0;z-index:96;background:transparent;border:0;padding:0}
-.hole-suggest-card{position:fixed;z-index:97;width:min(340px,calc(100vw - 16px));max-height:calc(100vh - 16px);overflow:auto;display:grid;gap:10px;padding:14px;border-radius:10px;background:#fff;border:1px solid #c9d4df;box-shadow:0 18px 50px #082d5544}
+.hole-suggest-card{position:fixed;z-index:97;width:min(380px,calc(100vw - 16px));max-height:calc(100dvh - 16px);overflow:hidden;display:grid;grid-template-rows:auto minmax(0,1fr) auto;gap:10px;padding:14px;border-radius:10px;background:#fff;border:1px solid #c9d4df;box-shadow:0 18px 50px #082d5544}
 .hole-suggest-card header{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
 .hole-suggest-card header small{display:block;color:#54708b;font-size:10px;font-weight:800;letter-spacing:.06em}
 .hole-suggest-card header strong{display:block;font-size:13px}
 .hole-suggest-card header button{border:0;background:none;color:#54708b}
 .hole-suggest-loading,.hole-suggest-error,.hole-suggest-empty{padding:8px;border:0;background:none;color:#54708b;font-size:12px}
+.hole-suggest-body{min-height:0;display:grid;grid-template-rows:auto auto minmax(0,1fr);gap:8px;overflow:hidden}
+.hole-suggest-results{min-height:0;overflow-y:auto;overscroll-behavior:contain;padding-right:3px;scrollbar-gutter:stable}
 .hole-suggest-search{padding:8px;border:1px solid #b9c8d7;border-radius:6px;background:#fff}
 .hole-suggest-summary{margin:0;color:#798ca2;font-size:11px}
 .hole-suggest-group{display:grid;gap:5px;border-top:1px solid #e3eaf2;padding-top:8px;margin-top:4px}
@@ -45,6 +47,7 @@
 .hole-suggest-card footer{display:grid;gap:6px;border-top:1px solid #e3eaf2;padding-top:8px;margin-top:4px}
 .hole-suggest-card footer small{color:#798ca2;font-size:11px}
 .hole-suggest-manual{border:1px solid #b9c8d7;border-radius:6px;background:#fff;color:#0b579b;font-weight:700;padding:8px}
+@media(max-width:700px){.hole-suggest-backdrop{background:#082d5538}.hole-suggest-card{top:auto!important;left:0!important;right:0;bottom:0;width:100%;max-height:92dvh!important;border-radius:14px 14px 0 0;padding:16px}.hole-suggest-card header button{font-size:22px;padding:5px 9px}.hole-suggest-row-main{grid-template-columns:minmax(0,1fr) auto}.hole-suggest-results{padding-bottom:4px}}
 .full-period-alert{background:#fff7df;border-color:#e4c45a;color:#7a4f00}
 .full-period-note{margin:-4px 0 6px;padding:8px;background:#f6fafe;border:1px solid #c6d8ec;border-radius:6px;color:#27557e;font-size:11px}
 .compact-movements{margin-top:14px}

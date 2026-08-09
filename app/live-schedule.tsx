@@ -6,6 +6,7 @@ import { useScheduleDate } from "./use-schedule-date";
 import { formatScheduleDate } from "../lib/schedule-date";
 import { orderScheduleResources } from "../lib/schedule-sections";
 import { mergeScheduleAssignments } from "../lib/schedule-state";
+import { suggestionPosition, type SuggestionPosition } from "../lib/suggestion-position";
 import {
   formatHoursDuration,
   fullPeriodLabel,
@@ -55,7 +56,7 @@ type HolePick = {
   resource: Rec;
   shift: string;
   role: string | null;
-  position: { top: number; left: number } | null;
+  position: SuggestionPosition | null;
 };
 type RedeployPick = { assignment: Rec };
 type ViewFilter = "all" | "day" | "night" | "holes" | "redeploy";
@@ -255,10 +256,10 @@ export function LiveSchedule() {
       resource,
       shift,
       role: missingRole,
-      position: {
-        top: Math.max(8, Math.min(window.innerHeight - 420, rect.bottom + 6)),
-        left: Math.max(8, Math.min(window.innerWidth - 356, rect.left)),
-      },
+      position: suggestionPosition(rect, {
+        width: window.innerWidth,
+        height: window.innerHeight,
+      }),
     });
     setPick(null);
   }

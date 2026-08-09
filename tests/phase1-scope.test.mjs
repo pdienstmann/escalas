@@ -11,6 +11,7 @@ import { orderScheduleResources } from "../lib/schedule-sections.ts";
 import { formatHoursDuration, fullPeriodWindow, fullPeriodShifts } from "../lib/shift-rules.ts";
 import { rankGuardSuggestions, describeReasons } from "../lib/suggest-gm.ts";
 import { mergeScheduleAssignments } from "../lib/schedule-state.ts";
+import { suggestionPosition } from "../lib/suggestion-position.ts";
 
 test("resolveScheduleDate prefers URL date over storage and today", () => {
   assert.equal(isScheduleDate("2026-08-12"), true);
@@ -194,4 +195,28 @@ test("mergeScheduleAssignments removes and preserves redeployment records locall
     2,
   );
   assert.deepEqual(removed.availableForRedeployment.map((item) => item.id), [1]);
+});
+
+test("suggestionPosition keeps the suggestion panel inside the available viewport", () => {
+  const below = suggestionPosition(
+    { top: 100, bottom: 130, left: 900, right: 980 },
+    { width: 1100, height: 800 },
+  );
+  assert.equal(below?.placement, "below");
+  assert.ok((below?.left || 0) <= 712);
+  assert.ok((below?.top || 0) + (below?.maxHeight || 0) <= 792);
+
+  const above = suggestionPosition(
+    { top: 650, bottom: 680, left: 40, right: 120 },
+    { width: 1100, height: 720 },
+  );
+  assert.equal(above?.placement, "above");
+  assert.ok((above?.top || 0) >= 8);
+  assert.equal(
+    suggestionPosition(
+      { top: 10, bottom: 40, left: 5, right: 80 },
+      { width: 600, height: 700 },
+    ),
+    null,
+  );
 });
