@@ -1,0 +1,2 @@
+.operation-card>footer>small{margin-right:auto;color:#64798d}.operation-card>footer .operation-reopen{border-color:#6f91af;background:#edf5fc;color:#174f7e;font-weight:900}.operation-card>footer .operation-reopen:hover,.operation-card>footer .operation-reopen:focus-visible{background:#dcecf9;outline:2px solid #8eb8dc}
+@media(max-width:600px){.operation-card>footer>small{width:100%;margin-bottom:4px}.operation-card>footer .operation-reopen{width:100%}}

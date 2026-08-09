@@ -187,8 +187,8 @@ export async function POST(request:Request){
   }
   if(body.action==="clear_slot"){
     const slotId=Number(body.slotId),operationId=Number(body.operationId);
-    const slot=await env.DB.prepare("SELECT id FROM operation_slots WHERE id=? AND operation_id=?").bind(slotId,operationId).first();
-    if(!slot)return Response.json({error:"Vaga não encontrada."},{status:404});
+    const slot=await env.DB.prepare("SELECT os.id FROM operation_slots os JOIN operations o ON o.id=os.operation_id WHERE os.id=? AND os.operation_id=? AND o.status='draft'").bind(slotId,operationId).first();
+    if(!slot)return Response.json({error:"Reabra a operação antes de alterar suas vagas."},{status:409});
     await restoreSlot(slotId);
     const operation=await env.DB.prepare("SELECT s.date FROM operations o JOIN schedules s ON s.id=o.schedule_id WHERE o.id=?").bind(operationId).first<{date:string}>();
     return Response.json({ok:true,message:"Vaga liberada.",operations:await loadOperations(String(operation?.date))});
@@ -201,6 +201,15 @@ export async function POST(request:Request){
     const operation=await env.DB.prepare("SELECT o.*,s.date FROM operations o JOIN schedules s ON s.id=o.schedule_id WHERE o.id=?").bind(operationId).first<Row>();
     await writeAudit(request,{action:"confirm",entityType:"operation",entityId:operationId,summary:`Confirmou a operação ${operation?.title}`,after:operation,undoable:false});
     return Response.json({ok:true,message:"Operação confirmada.",operations:await loadOperations(String(operation?.date))});
+  }
+  if(body.action==="reopen"){
+    const operationId=Number(body.operationId);
+    const before=await env.DB.prepare("SELECT o.*,s.date FROM operations o JOIN schedules s ON s.id=o.schedule_id WHERE o.id=? AND o.status='confirmed'").bind(operationId).first<Row>();
+    if(!before)return Response.json({error:"A operação não está confirmada ou já foi reaberta."},{status:409});
+    await env.DB.prepare("UPDATE operations SET status='draft',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='confirmed'").bind(operationId).run();
+    const after=await env.DB.prepare("SELECT * FROM operations WHERE id=?").bind(operationId).first<Row>();
+    await writeAudit(request,{action:"reopen",entityType:"operation",entityId:operationId,summary:`Reabriu a operação ${before.title} para edição`,before,after,undoable:false});
+    return Response.json({ok:true,message:"Operação reaberta. Ajuste as vagas e confirme novamente.",operations:await loadOperations(String(before.date))});
   }
   if(body.action==="cancel"){
     const operationId=Number(body.operationId);

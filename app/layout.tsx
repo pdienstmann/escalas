@@ -18,6 +18,8 @@ import "./workforce.css";
 import "./simple-ux.css";
 import "./operations.css";
 import "./leave-overview.css";
+import "./schedule-density.css";
+import "./operations-refinements.css";
 
 export const metadata: Metadata = { title:"Escala GMNH", description:"Gestão integrada de escalas da Guarda Municipal", icons:{icon:"/favicon.svg"}, openGraph:{title:"Escala GMNH",description:"Gestão integrada de efetivo",images:["/og.png"]} };
 export default function RootLayout({children}:{children:React.ReactNode}){return <html lang="pt-BR"><body>{children}</body></html>}

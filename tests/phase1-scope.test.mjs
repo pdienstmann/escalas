@@ -122,6 +122,17 @@ test("weekly overtime extension is also visible in the night period", () => {
   assert.deepEqual(coveredOperationalShifts(assignment, "2026-08-12"), ["2", "3", "4"]);
 });
 
+test("overtime shortcut lives inside the GM card and stays distinct from add actions", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const density = readFileSync(resolve("app/schedule-density.css"), "utf8");
+  assert.match(schedule, /className={`live-person-card/);
+  assert.match(schedule, /<span aria-hidden="true">◷<\/span>\+HE/);
+  assert.doesNotMatch(schedule, />＋ HE depois<\/button>/);
+  assert.match(density, /\.live-person-card \.inline-he-extension/);
+  assert.match(density, /border-top:2px solid/);
+  assert.match(density, /border-bottom:4px solid/);
+});
+
 test("formatHoursDuration renders 2h and 2h30 without decimals", () => {
   assert.equal(formatHoursDuration(2), "2h");
   assert.equal(formatHoursDuration(2.5), "2h30");
@@ -360,4 +371,14 @@ test("operation redeployment preserves and restores every source assignment", ()
   assert.match(dashboard, /Horários parcialmente sobrepostos não são remanejados automaticamente/);
   assert.match(dashboard, /useScheduleDate\(initialDate\)/);
   assert.match(dashboard, /detail="Preparando a escala operacional…"/);
+});
+
+test("confirmed operations must be explicitly reopened before editing slots", () => {
+  const api = readFileSync(resolve("app/api/operations/route.ts"), "utf8");
+  const dashboard = readFileSync(resolve("app/operations-dashboard.tsx"), "utf8");
+  assert.match(api, /body\.action==="reopen"/);
+  assert.match(api, /o\.status='draft'/);
+  assert.match(api, /Reabra a operação antes de alterar suas vagas/);
+  assert.match(dashboard, /Reabrir edição/);
+  assert.match(dashboard, /bloqueada para evitar alterações acidentais/);
 });
