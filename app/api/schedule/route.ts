@@ -632,6 +632,26 @@ export async function POST(request: Request) {
     const schedule = await env.DB.prepare("SELECT date FROM schedules WHERE id=?").bind(scheduleId).first<{ date: string }>();
     if (!schedule)
       return Response.json({ error: "Escala não encontrada." }, { status: 404 });
+    if (vehicleId) {
+      const vehicle = await env.DB.prepare("SELECT id FROM vehicles WHERE id=? AND active=1").bind(vehicleId).first();
+      if (!vehicle)
+        return Response.json({ error: "Viatura não encontrada ou desativada." }, { status: 404 });
+      const outage = await env.DB.prepare(
+        "SELECT id FROM vehicle_outages WHERE vehicle_id=? AND active=1 AND starts_on<=? AND (ends_on IS NULL OR ends_on>=?) LIMIT 1",
+      ).bind(vehicleId, schedule.date, schedule.date).first();
+      if (outage)
+        return Response.json({ error: "Esta viatura está em FA na data da escala e não pode receber uma guarnição." }, { status: 409 });
+    }
+    if (postId) {
+      const post = await env.DB.prepare("SELECT id FROM posts WHERE id=? AND active=1").bind(postId).first();
+      if (!post)
+        return Response.json({ error: "Posto não encontrado ou desativado." }, { status: 404 });
+    }
+    const excluded = await env.DB.prepare(
+      "SELECT id FROM schedule_resource_exclusions WHERE schedule_id=? AND resource_kind=? AND resource_id=? LIMIT 1",
+    ).bind(scheduleId, vehicleId ? "vehicle" : "post", vehicleId || postId).first();
+    if (excluded)
+      return Response.json({ error: "Este recurso foi retirado desta escala. Recoloque-o antes de adicionar uma equipe." }, { status: 409 });
     const periodShifts = fullPeriodShifts(requestedShift);
     for (const member of members) {
       for (const shift of periodShifts) {

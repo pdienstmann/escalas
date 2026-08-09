@@ -19,6 +19,7 @@ test("resolveScheduleDate prefers URL date over storage and today", () => {
   assert.equal(resolveScheduleDate("2026-08-20"), "2026-08-20");
   assert.equal(resolveScheduleDate("invalid", "2026-08-08"), "2026-08-08");
   assert.match(todayScheduleDate(new Date("2026-08-08T15:00:00")), /^\d{4}-\d{2}-\d{2}$/);
+  assert.equal(todayScheduleDate(new Date("2026-08-09T02:36:57Z")), "2026-08-08");
   assert.equal(formatScheduleDate("2026-08-12"), "12/08/2026");
 });
 

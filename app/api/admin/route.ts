@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { writeAudit } from "../../../lib/audit";
 import { permitted } from "../../../lib/access";
+import { todayScheduleDate } from "../../../lib/schedule-date";
 
 export const dynamic = "force-dynamic";
 
@@ -96,7 +97,7 @@ export async function GET(request: Request) {
   await seed();
   await syncConfirmedLeaves();
   await ensureSections();
-  const requestedDate = new URL(request.url).searchParams.get("date") || new Date().toISOString().slice(0, 10);
+  const requestedDate = new URL(request.url).searchParams.get("date") || todayScheduleDate();
   const [guards, posts, vehicles, movements, campaign, days, choices, vehicleOutages, sections, vehicleCrews] =
     await Promise.all([
       env.DB.prepare(
@@ -177,14 +178,18 @@ export async function POST(request: Request) {
       await writeAudit(request,{action:"create",entityType:"post",entityId:Number(created.meta.last_row_id),summary:`Cadastrou o posto ${body.name}`,after:after as Record<string,unknown>});
       return Response.json({ok:true,entity:after,message:`Posto ${body.name} adicionado à escala.`});
     } else if (body.action === "vehicle") {
+      const prefix=String(body.prefix||"").trim().toUpperCase();
+      if(!prefix)return Response.json({error:"Informe o prefixo da viatura."},{status:400});
+      const duplicate=await env.DB.prepare("SELECT id FROM vehicles WHERE UPPER(TRIM(prefix))=? LIMIT 1").bind(prefix).first();
+      if(duplicate)return Response.json({error:`A viatura ${prefix} já está cadastrada. Selecione a existente na escala.`},{status:409});
       const created = await env.DB.prepare(
         "INSERT INTO vehicles (prefix,type,zone) VALUES (?,?,?)",
       )
-        .bind(body.prefix, body.type, body.zone)
+        .bind(prefix, body.type, body.zone)
         .run();
       const after = await env.DB.prepare("SELECT * FROM vehicles WHERE id=?").bind(created.meta.last_row_id).first();
-      await writeAudit(request,{action:"create",entityType:"vehicle",entityId:Number(created.meta.last_row_id),summary:`Cadastrou a viatura ${body.prefix}`,after:after as Record<string,unknown>});
-      return Response.json({ok:true,entity:after,message:`Viatura ${body.prefix} adicionada à escala.`});
+      await writeAudit(request,{action:"create",entityType:"vehicle",entityId:Number(created.meta.last_row_id),summary:`Cadastrou a viatura ${prefix}`,after:after as Record<string,unknown>});
+      return Response.json({ok:true,entity:after,message:`Viatura ${prefix} adicionada à escala.`});
     } else if (body.action === "section_create") {
       const label=String(body.label||"").trim();
       if(!label)return Response.json({error:"Informe o nome da seção."},{status:400});
@@ -197,8 +202,9 @@ export async function POST(request: Request) {
       return Response.json({ok:true,entity:after,message:`Seção ${label} criada. Agora adicione postos nela.`});
     } else if (body.action === "vehicle_outage") {
       const vehicleId = Number(body.vehicleId);
-      const startsOn = body.startsOn ? String(body.startsOn) : new Date().toISOString().slice(0,10);
+      const startsOn = body.startsOn ? String(body.startsOn) : todayScheduleDate();
       const endsOn = body.endsOn ? String(body.endsOn) : null;
+      if(endsOn&&endsOn<startsOn)return Response.json({error:"O retorno previsto não pode ser anterior ao início do FA."},{status:400});
       const existingOutage=await env.DB.prepare("SELECT id FROM vehicle_outages WHERE vehicle_id=? AND active=1 AND (ends_on IS NULL OR ends_on>=?) LIMIT 1").bind(vehicleId,startsOn).first();
       if(existingOutage)return Response.json({error:"Esta viatura já possui um registro de FA ativo."},{status:409});
       const created=await env.DB.prepare("INSERT INTO vehicle_outages (vehicle_id,starts_on,ends_on,reason) VALUES (?,?,?,?)").bind(vehicleId,startsOn,endsOn,body.reason||null).run();
