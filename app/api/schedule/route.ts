@@ -614,6 +614,29 @@ export async function POST(request: Request) {
       message:`${resource.label} retirado desta escala. ${guardCount} GM(s) estão à disposição para remanejamento.`,
     });
   }
+  if (b.action === "replace_guard_group") {
+    const assignmentIds=[...new Set((((b as unknown as {assignmentIds?:unknown[]}).assignmentIds)||[]).map(Number).filter(id=>Number.isInteger(id)&&id>0))].slice(0,4);
+    const guardId=Number(b.guardId);
+    if(!assignmentIds.length||!guardId)return Response.json({error:"Selecione o GM e o período que será substituído."},{status:400});
+    const placeholders=assignmentIds.map(()=>"?").join(",");
+    const before=(await env.DB.prepare(`SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id IN (${placeholders}) ORDER BY a.starts_at`).bind(...assignmentIds).all<Record<string,unknown>>()).results;
+    if(before.length!==assignmentIds.length)return Response.json({error:"Um dos horários selecionados não foi encontrado."},{status:404});
+    const scheduleIds=new Set(before.map(item=>Number(item.schedule_id))),oldGuardIds=new Set(before.map(item=>Number(item.guard_id)));
+    if(scheduleIds.size!==1||oldGuardIds.size!==1)return Response.json({error:"A troca deve envolver somente um GM e uma escala."},{status:409});
+    if(oldGuardIds.has(guardId))return Response.json({error:"Selecione um GM diferente do atual."},{status:400});
+    const guard=await env.DB.prepare("SELECT id,name FROM guards WHERE id=? AND active=1").bind(guardId).first<Record<string,unknown>>();
+    if(!guard)return Response.json({error:"GM não encontrado ou desativado."},{status:404});
+    for(const item of before){
+      const blocked=await assertAssignable(Number(item.schedule_id),guardId,String(item.starts_at),String(item.ends_at));
+      if(blocked)return Response.json({error:blocked.error},{status:blocked.status});
+      const movement=await env.DB.prepare("SELECT id FROM movements WHERE guard_id=? AND status='approved' AND starts_at<? AND ends_at>? LIMIT 1").bind(guardId,item.ends_at,item.starts_at).first();
+      if(movement)return Response.json({error:`${guard.name} possui afastamento ou movimentação neste horário.`},{status:409});
+    }
+    await env.DB.batch(before.map(item=>env.DB.prepare("UPDATE assignments SET guard_id=?,is_reassigned=1,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(guardId,`Troca rápida: ${item.guard_name} → ${guard.name}`,item.id)));
+    const assignments=(await env.DB.prepare(`SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id IN (${placeholders}) ORDER BY a.starts_at`).bind(...assignmentIds).all<Record<string,unknown>>()).results;
+    const auditEventId=await writeAudit(request,{action:"replace",entityType:"assignment_group",entityId:assignmentIds.join(","),summary:`Trocou ${before[0].guard_name} por ${guard.name} em ${assignmentIds.length} horário(s)`,before:{assignments:before},after:{assignments},undoable:true});
+    return Response.json({ok:true,assignments,auditEventId,message:`${before[0].guard_name} → ${guard.name}. Troca aplicada e sinalizada para aviso.`});
+  }
   if (b.action === "assign_resource_group") {
     const scheduleId = Number(b.scheduleId);
     const postId = Number(b.postId || 0) || null;

@@ -71,7 +71,13 @@ type UndoState = { id: number; label: string };
 type ViewFilter = "all" | "day" | "night" | "holes" | "redeploy";
 type ScheduleDensity = "summary" | "detailed";
 type MovementEdit = { type: string; movement?: Rec };
+type SwapPick = { pick: Pick; assignments: Rec[] };
 const shifts = SHIFT_DEFS;
+const scheduleCacheKey=(date:string)=>`gmnh:schedule:${date}`;
+function readScheduleCache(date:string):State|null{if(typeof window==="undefined")return null;try{const raw=sessionStorage.getItem(scheduleCacheKey(date));if(!raw)return null;const parsed=JSON.parse(raw) as {savedAt:number;data:State};return Date.now()-parsed.savedAt<5*60_000?parsed.data:null}catch{return null}}
+function writeScheduleCache(data:State){if(typeof window==="undefined")return;try{sessionStorage.setItem(scheduleCacheKey(data.date),JSON.stringify({savedAt:Date.now(),data}))}catch{/* cache opcional */}}
+function readUiSetting(key:string){if(typeof window==="undefined")return null;try{return sessionStorage.getItem(`gmnh:ui:${key}`)}catch{return null}}
+function writeUiSetting(key:string,value:string){if(typeof window==="undefined")return;try{sessionStorage.setItem(`gmnh:ui:${key}`,value)}catch{/* preferência opcional */}}
 function times(date: string, shift: string) {
   return shiftTimes(date, shift);
 }
@@ -80,7 +86,7 @@ function assignmentKey(kind: "post" | "vehicle", resourceId: string | number, sh
 }
 export function LiveSchedule() {
   const { date, setDate, hrefFor } = useScheduleDate();
-  const [data, setData] = useState<State | null>(null),
+  const [data, setData] = useState<State | null>(()=>readScheduleCache(date)),
     [pick, setPick] = useState<Pick | null>(null),
     [holePick, setHolePick] = useState<HolePick | null>(null),
     [redeployPick, setRedeployPick] = useState<RedeployPick | null>(null),
@@ -95,10 +101,12 @@ export function LiveSchedule() {
     [redeploymentExpanded, setRedeploymentExpanded] = useState(false),
     [undoEvent, setUndoEvent] = useState<UndoState | null>(null),
     [message, setMessage] = useState(""),
-    [query, setQuery] = useState(""),
-    [view, setView] = useState<ViewFilter>("all"),
-    [density, setDensity] = useState<ScheduleDensity>("summary"),
+    [query, setQuery] = useState(()=>readUiSetting("query")||""),
+    [view, setView] = useState<ViewFilter>(()=>{const value=readUiSetting("view");return value&&["all","day","night","holes","redeploy"].includes(value)?value as ViewFilter:"all"}),
+    [density, setDensity] = useState<ScheduleDensity>(()=>readUiSetting("density")==="detailed"?"detailed":"summary"),
     [movementEdit, setMovementEdit] = useState<MovementEdit | null>(null),
+    [swapPick,setSwapPick]=useState<SwapPick|null>(null),
+    [recentAssignmentIds,setRecentAssignmentIds]=useState<number[]>([]),
     [collapsed, setCollapsed] = useState<Record<string, boolean>>({}),
     [saving, setSaving] = useState(false),
     [loadError, setLoadError] = useState("");
@@ -107,6 +115,7 @@ export function LiveSchedule() {
   const load = useCallback(async () => {
     const sequence=++loadSequence.current;
     try {
+      const cached=readScheduleCache(date);if(cached)setData(cached);
       setPick(null);
       setContextPick(null);
       setLoadError("");
@@ -115,7 +124,7 @@ export function LiveSchedule() {
       });
       if (!r.ok) throw new Error();
       const value=await r.json();
-      if(sequence===loadSequence.current)setData(value);
+      if(sequence===loadSequence.current){setData(value);writeScheduleCache(value)}
     } catch {
       if(sequence===loadSequence.current){
         setLoadError("Não foi possível consultar a escala. Recarregue a página para tentar novamente.");
@@ -127,6 +136,16 @@ export function LiveSchedule() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
+  useEffect(()=>{if(data)writeScheduleCache(data)},[data]);
+  useEffect(()=>{writeUiSetting("query",query);writeUiSetting("view",view);writeUiSetting("density",density)},[density,query,view]);
+  useEffect(()=>{
+    if(typeof window==="undefined"||data?.date!==date)return;
+    const key=`gmnh:scroll:${date}`,saved=Number(readUiSetting(key)||0);
+    const restore=window.requestAnimationFrame(()=>window.scrollTo({top:saved,behavior:"instant"}));
+    const remember=()=>writeUiSetting(key,String(window.scrollY));
+    window.addEventListener("scroll",remember,{passive:true});
+    return()=>{window.cancelAnimationFrame(restore);remember();window.removeEventListener("scroll",remember)};
+  },[data?.date,date]);
   const assignmentIndex = useMemo(() => {
     const map = new Map<string, Rec[]>();
     if (!data) return map;
@@ -194,6 +213,7 @@ export function LiveSchedule() {
           : j.assignment
             ? [j.assignment]
             : [];
+        if(changedAssignments.length){const ids=changedAssignments.map(item=>Number(item.id));setRecentAssignmentIds(ids);window.setTimeout(()=>setRecentAssignmentIds(current=>current.filter(id=>!ids.includes(id))),1800)}
         if (j.reload && changedAssignments.length === 0 && !j.deletedId) {
           await load();
         } else {
@@ -215,6 +235,7 @@ export function LiveSchedule() {
         setContextPick(null);
         setHolePick(null);
         setRedeployPick(null);
+        setSwapPick(null);
       }
       return r.ok;
     } finally {
@@ -407,6 +428,17 @@ export function LiveSchedule() {
   function startExtension(assignment: Rec, kind: "post" | "vehicle", resource: Rec, shift: string) {
     setPick({ kind, resource, shift, assignment, extension: true });
     setContextPick(null);
+  }
+  function openQuickSwap(assignment:Rec,kind:"post"|"vehicle",resource:Rec,shift:string){
+    if(!data)return;
+    const period=isDayShift(shift)?"day":"night",extension=String(assignment.work_kind)==="overtime_extension";
+    const linked=data.assignments.filter(item=>Number(item.guard_id)===Number(assignment.guard_id)&&(kind==="post"?Number(item.post_id)===Number(resource.id):Number(item.vehicle_id)===Number(resource.id))&&(String(item.work_kind)==="overtime_extension")===extension&&coveredOperationalShifts(item,data.date).some(id=>(isDayShift(id)?"day":"night")===period));
+    const unique=[...new Map(linked.map(item=>[Number(item.id),item])).values()];
+    setSwapPick({pick:{kind,resource,shift,assignment},assignments:unique.length?unique:[assignment]});setContextPick(null);setPick(null);
+  }
+  async function replaceGuard(guardId:number){
+    if(!swapPick)return;
+    await postAssignment({action:"replace_guard_group",guardId,assignmentIds:swapPick.assignments.map(item=>Number(item.id))});
   }
   async function move(
     assignment: Rec,
@@ -765,8 +797,10 @@ export function LiveSchedule() {
                   availableForRedeployment={data.availableForRedeployment}
                   redeploymentGroups={redeploymentGroups}
                   selectedId={Number(contextPick?.assignment?.id || pick?.assignment?.id || 0)}
+                  recentAssignmentIds={recentAssignmentIds}
                   onContextPick={setContextPick}
                   onEdit={setPick}
+                  onSwap={openQuickSwap}
                   onQuickStatus={quickStatus}
                   onExtend={startExtension}
                   onQuickDelete={(assignment)=>confirm(`Remover ${assignment.guard_name} da escala?`)&&postAssignment({action:"delete",id:assignment.id})}
@@ -900,6 +934,7 @@ export function LiveSchedule() {
       {resourceDialog&&<ResourceCrewDialog key={resourceDialog} kind={resourceDialog} data={data} saving={saving} onClose={()=>setResourceDialog(null)} onSave={saveResourceCrew}/>}
       {resourceRemoval&&<ResourceRemovalDialog pick={resourceRemoval} saving={saving} onClose={()=>setResourceRemoval(null)} onConfirm={removeResourceFromDay}/>} 
       {movementEdit&&<MovementDialog data={data} edit={movementEdit} saving={saving} onClose={()=>setMovementEdit(null)} onSave={saveMovement}/>} 
+      {swapPick&&<GuardSwapDialog data={data} swap={swapPick} saving={saving} onClose={()=>setSwapPick(null)} onSelect={replaceGuard}/>}
     </main>
   );
 }
@@ -945,6 +980,23 @@ function MovementDialog({data,edit,saving,onClose,onSave}:{data:State;edit:Movem
   const end=String(movement?.ends_at||`${data.date}T23:59`).slice(0,16);
   const labels:Record<string,string>={technical_reserve:"Reserva técnica",day_off:"Folga",vacation:"Férias",course:"Curso",medical_leave:"Licença / atestado",time_bank:"Banco de horas",swap:"Troca de serviço"};
   return <div className="movement-dialog-backdrop"><form className="movement-dialog" role="dialog" aria-modal="true" aria-labelledby="movement-dialog-title" onSubmit={onSave}><header><div><small>{movement?"EDITAR REGISTRO":"INCLUIR NO EFETIVO RETIRADO"}</small><h2 id="movement-dialog-title">{labels[edit.type]||"Movimentação"}</h2><p>O período será aplicado automaticamente às escalas correspondentes.</p></div><button type="button" onClick={onClose} aria-label="Fechar">×</button></header><label>GM<select name="guardId" required defaultValue={String(movement?.guard_id||"")}><option value="">Selecione o GM</option>{data.guards.map(guard=><option key={String(guard.id)} value={String(guard.id)}>{guard.name} · {guard.registration}</option>)}</select></label><div className="two"><label>Início<input name="startsAt" type="datetime-local" required defaultValue={start}/></label><label>Fim / retorno<input name="endsAt" type="datetime-local" required defaultValue={end}/></label></div><label>Requerimento<input name="requestRef" defaultValue={String(movement?.request_ref||"")} placeholder="Número ou referência"/></label><label>Observação<textarea name="notes" rows={3} defaultValue={String(movement?.notes||"")}/></label><footer><button type="button" onClick={onClose}>Cancelar</button><button className="save" disabled={saving}>{saving?"Salvando…":movement?"Salvar alteração":"Incluir e aplicar"}</button></footer></form></div>
+}
+
+function GuardSwapDialog({data,swap,saving,onClose,onSelect}:{data:State;swap:SwapPick;saving:boolean;onClose:()=>void;onSelect:(guardId:number)=>void}){
+  const[query,setQuery]=useState("");
+  const current=swap.assignments[0],ids=useMemo(()=>new Set(swap.assignments.map(item=>Number(item.id))),[swap.assignments]);
+  const candidates=useMemo(()=>{
+    const value=query.toLowerCase().trim();
+    return data.guards.filter(guard=>{
+      if(Number(guard.id)===Number(current.guard_id))return false;
+      if(value&&!`${guard.name} ${guard.registration} ${guard.platoon||""}`.toLowerCase().includes(value))return false;
+      const conflict=data.assignments.some(item=>!ids.has(Number(item.id))&&Number(item.guard_id)===Number(guard.id)&&swap.assignments.some(target=>String(item.starts_at)<String(target.ends_at)&&String(item.ends_at)>String(target.starts_at)));
+      const movement=data.movements.some(item=>Number(item.guard_id)===Number(guard.id)&&swap.assignments.some(target=>String(item.starts_at)<String(target.ends_at)&&String(item.ends_at)>String(target.starts_at)));
+      return !conflict&&!movement;
+    }).slice(0,30);
+  },[current.guard_id,data.assignments,data.guards,data.movements,ids,query,swap.assignments]);
+  const destination=swap.pick.kind==="vehicle"?String(swap.pick.resource.prefix):String(swap.pick.resource.name);
+  return <div className="guard-swap-backdrop"><section className="guard-swap-dialog" role="dialog" aria-modal="true" aria-labelledby="guard-swap-title"><header><div><small>TROCA RÁPIDA NA ESCALA</small><h2 id="guard-swap-title">Trocar {String(current.guard_name)}</h2><p>{destination} · {redeploymentTimeLabel(swap.assignments)}</p></div><button type="button" onClick={onClose} aria-label="Fechar">×</button></header><div className="guard-swap-summary"><span>Será substituído</span><b>{swap.assignments.length>1?"Todo o período exibido":"Somente este horário"}</b><small>Local, função, horário e marcações serão preservados. A troca ficará destacada para aviso.</small></div><label>Buscar GM disponível<input value={query} onChange={event=>setQuery(event.target.value)} placeholder="Nome ou matrícula…"/></label><div className="guard-swap-list">{candidates.map(guard=><button type="button" key={String(guard.id)} disabled={saving} onClick={()=>onSelect(Number(guard.id))}><span><b>{guard.name}</b><small>{guard.registration} · {guard.platoon||"Sem equipe"}</small></span><strong>Selecionar</strong></button>)}{!candidates.length&&<p>Nenhum GM disponível corresponde à busca.</p>}</div><footer><span>{candidates.length} opção(ões) sem conflito neste horário</span><button type="button" onClick={onClose}>Cancelar</button></footer></section></div>
 }
 
 function vehicleHasPair(data:State,vehicleId:number,shift:string){const period=isDayShift(shift)?"day":"night";const crew=data.assignments.filter(assignment=>Number(assignment.vehicle_id)===vehicleId&&(isDayShift(String(assignment.shift))?"day":"night")===period);return crew.some(assignment=>assignment.role==="driver")&&crew.some(assignment=>assignment.role==="patrol")}
@@ -1037,8 +1089,10 @@ function Row({
   availableForRedeployment,
   redeploymentGroups,
   selectedId,
+  recentAssignmentIds,
   onContextPick,
   onEdit,
+  onSwap,
   onQuickStatus,
   onExtend,
   onQuickDelete,
@@ -1061,8 +1115,10 @@ function Row({
   availableForRedeployment: Rec[];
   redeploymentGroups: RedeploymentGroup[];
   selectedId: number;
+  recentAssignmentIds: number[];
   onContextPick: (p: Pick) => void;
   onEdit: (p: Pick) => void;
+  onSwap: (assignment:Rec,kind:"post"|"vehicle",resource:Rec,shift:string) => void;
   onQuickStatus: (assignment:Rec,status:string) => void;
   onExtend: (assignment: Rec, kind: "post" | "vehicle", resource: Rec, shift: string) => void;
   onQuickDelete: (assignment:Rec) => void;
@@ -1156,7 +1212,7 @@ function Row({
         {density==="summary"?[...new Set(visibleShifts.map(shift=>shift.period))].map(period=><td key={period} className="period-summary-cell"><div className="period-lanes">{visibleShifts.filter(shift=>shift.period===period).map(s=>{
           const list=assignmentIndex.get(assignmentKey(kind,Number(resource.id),s.id))||[];
           const missingRoles=kind==="vehicle"?["driver","patrol"].filter(role=>!list.some(assignment=>String(assignment.role)===role&&!isOvertimeExtensionCell(assignment,date,s.id))):list.length?[]:["guard"];
-          return <section key={s.id} className={`period-lane ${missingRoles.length?"furo":""}`} onDragOver={event=>event.preventDefault()} onDrop={event=>drop(event,s.id)}><header><b>{s.label}</b><span>{s.time}</span></header><div>{list.map(a=>{const visualStatus=statusInShift(a,date,s.id);return <button key={String(a.id)} draggable className={`live-person ${visualStatus} ${Number(a.is_reassigned)?"reassigned":""} ${Number(a.id)===selectedId?"is-selected":""}`} onDragStart={event=>{event.dataTransfer.effectAllowed="move";event.dataTransfer.setData("text/assignment",String(a.id));event.dataTransfer.setData("text/assignment-source-shift",s.id)}} onClick={()=>onEdit({kind,resource,shift:s.id,assignment:a})}>{kind==="vehicle"&&<span className="role">{isOvertimeExtensionCell(a,date,s.id)?"R":a.role==="driver"?"M":a.role==="patrol"?"P":"R"}</span>}<b>{a.guard_name}</b>{visualStatus!=="normal"&&<span className={`badge ${statusClass(visualStatus)}`}>{visualStatus==="overtime"&&a.regular_ends_at?`HE · após ${String(a.regular_ends_at).slice(11,16)}`:statusShort(visualStatus)}</span>}{Number(a.is_reassigned)===1&&<span className="badge remanejamento">AVISAR REM</span>}<small>{assignmentDisplayInShift(a,date,s.id)}</small></button>})}{missingRoles.length>0&&<button className="live-hole" onClick={event=>onHolePick(kind,resource,s.id,event)}><span>FURO</span>＋ Selecionar {kind==="vehicle"?(missingRoles[0]==="driver"?"motorista":"patrulheiro"):"GM"}</button>}</div></section>})}</div></td>):visibleShifts.map((s) => {
+          return <section key={s.id} className={`period-lane ${missingRoles.length?"furo":""}`} onDragOver={event=>event.preventDefault()} onDrop={event=>drop(event,s.id)}><header><b>{s.label}</b><span>{s.time}</span></header><div>{list.map(a=>{const visualStatus=statusInShift(a,date,s.id);return <button key={String(a.id)} draggable className={`live-person ${visualStatus} ${Number(a.is_reassigned)?"reassigned":""} ${Number(a.id)===selectedId?"is-selected":""} ${recentAssignmentIds.includes(Number(a.id))?"recent-update":""}`} onDragStart={event=>{event.dataTransfer.effectAllowed="move";event.dataTransfer.setData("text/assignment",String(a.id));event.dataTransfer.setData("text/assignment-source-shift",s.id)}} onClick={()=>onSwap(a,kind,resource,s.id)} title="Clique para trocar o GM; arraste para mover">{kind==="vehicle"&&<span className="role">{isOvertimeExtensionCell(a,date,s.id)?"R":a.role==="driver"?"M":a.role==="patrol"?"P":"R"}</span>}<b>{a.guard_name}</b>{visualStatus!=="normal"&&<span className={`badge ${statusClass(visualStatus)}`}>{visualStatus==="overtime"&&a.regular_ends_at?`HE · após ${String(a.regular_ends_at).slice(11,16)}`:statusShort(visualStatus)}</span>}{Number(a.is_reassigned)===1&&<span className="badge remanejamento">AVISAR REM</span>}<small>{assignmentDisplayInShift(a,date,s.id)}</small></button>})}{missingRoles.length>0&&<button className="live-hole" onClick={event=>onHolePick(kind,resource,s.id,event)}><span>FURO</span>＋ Selecionar {kind==="vehicle"?(missingRoles[0]==="driver"?"motorista":"patrulheiro"):"GM"}</button>}</div></section>})}</div></td>):visibleShifts.map((s) => {
           const list = assignmentIndex.get(assignmentKey(kind, Number(resource.id), s.id)) || [];
           const missingRoles = kind === "vehicle"
             ? ["driver", "patrol"].filter((role) => !list.some((assignment) => String(assignment.role) === role && !isOvertimeExtensionCell(assignment,date,s.id)))
@@ -1171,7 +1227,7 @@ function Row({
               {list.map((a) => {const visualStatus=statusInShift(a,date,s.id);return (<Fragment key={String(a.id)}>
                 <button
                   draggable
-                  className={`live-person ${visualStatus} ${Number(a.is_reassigned)?"reassigned":""} ${Number(a.id) === selectedId ? "is-selected" : ""}`}
+                  className={`live-person ${visualStatus} ${Number(a.is_reassigned)?"reassigned":""} ${Number(a.id) === selectedId ? "is-selected" : ""} ${recentAssignmentIds.includes(Number(a.id))?"recent-update":""}`}
                   onDragStart={(e) => {
                     e.dataTransfer.effectAllowed = "move";
                     e.dataTransfer.setData("text/assignment", String(a.id));
@@ -1197,7 +1253,7 @@ function Row({
                     {assignmentDisplayInShift(a,date,s.id)}
                   </small>
                 </button>
-                {Number(a.id)===selectedId&&<div className="cell-quick-actions" role="group" aria-label={`Ações rápidas de ${String(a.guard_name)}`}><b>{a.guard_name}</b><button type="button" onClick={()=>onEdit({kind,resource,shift:s.id,assignment:a})}><span aria-hidden="true">✎</span> Editar / mover</button><button type="button" className="extend-action" onClick={()=>onExtend(a,kind,resource,s.id)}><span aria-hidden="true">＋</span> Estender HE</button><button type="button" className={a.status==="time_bank"?"active":""} onClick={()=>onQuickStatus(a,a.status==="time_bank"?"normal":"time_bank")}><span aria-hidden="true">◷</span> BH</button><button type="button" className="danger" onClick={()=>onQuickDelete(a)}><span aria-hidden="true">×</span> Remover</button><button type="button" aria-label="Fechar ações" onClick={()=>onContextPick({kind,resource,shift:s.id})}>×</button></div>}</Fragment>
+                {Number(a.id)===selectedId&&<div className="cell-quick-actions" role="group" aria-label={`Ações rápidas de ${String(a.guard_name)}`}><b>{a.guard_name}</b><button type="button" className="swap-action" onClick={()=>onSwap(a,kind,resource,s.id)}><span aria-hidden="true">⇄</span> Trocar GM</button><button type="button" onClick={()=>onEdit({kind,resource,shift:s.id,assignment:a})}><span aria-hidden="true">✎</span> Alterar / mover</button><button type="button" className="extend-action" onClick={()=>onExtend(a,kind,resource,s.id)}><span aria-hidden="true">＋</span> Estender HE</button><button type="button" className={a.status==="time_bank"?"active":""} onClick={()=>onQuickStatus(a,a.status==="time_bank"?"normal":"time_bank")}><span aria-hidden="true">◷</span> BH</button><button type="button" className="danger" onClick={()=>onQuickDelete(a)}><span aria-hidden="true">×</span> Remover</button><button type="button" aria-label="Fechar ações" onClick={()=>onContextPick({kind,resource,shift:s.id})}>×</button></div>}</Fragment>
               )})}
               {missingRoles.length > 0 && (
                 <button
