@@ -388,6 +388,19 @@ test("pattern editor can create contextual posts and vehicles without duplicate 
   assert.match(styles, /@media\(max-width:700px\)/);
 });
 
+test("schedule edits reject stale versions and refresh the visible scale", () => {
+  const api = readFileSync(resolve("app/api/schedule/route.ts"), "utf8");
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  assert.match(api, /function isStaleVersion/);
+  assert.match(api, /expectedUpdatedAt/);
+  assert.match(api, /expectedUpdatedAts/);
+  assert.match(api, /alterada por outra pessoa/);
+  assert.match(schedule, /expectedUpdatedAt: pick\.assignment\?\.updated_at/);
+  assert.match(schedule, /expectedUpdatedAts/);
+  assert.match(schedule, /r\.status === 409 && j\.conflict/);
+  assert.match(schedule, /await load\(\)/);
+});
+
 test("operation redeployment preserves and restores every source assignment", () => {
   const migration = readFileSync(resolve("drizzle/0013_operation_redeployments.sql"), "utf8");
   const api = readFileSync(resolve("app/api/operations/route.ts"), "utf8");

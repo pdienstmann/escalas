@@ -478,6 +478,63 @@ async function assertAssignable(
   return null;
 }
 
+/**
+ * The schedule is edited by more than one escalante.  Every assignment and
+ * catalog resource carries an updated_at value, so callers can tell us which
+ * version they actually opened.  Keeping this check optional preserves
+ * compatibility with older clients while preventing a stale editor from
+ * silently overwriting a newer change.
+ */
+function normalizeVersion(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .replace("T", " ")
+    .replace("Z", "")
+    .slice(0, 19);
+}
+
+function isStaleVersion(expected: unknown, actual: unknown) {
+  const expectedVersion = normalizeVersion(expected);
+  return Boolean(expectedVersion) && expectedVersion !== normalizeVersion(actual);
+}
+
+function staleVersionResult(current?: Record<string, unknown>) {
+  return {
+    error: "Esta posição foi alterada por outra pessoa. A escala será recarregada; confira antes de salvar novamente.",
+    status: 409 as const,
+    conflict: true as const,
+    current,
+  };
+}
+
+function staleVersionResponse(current?: Record<string, unknown>) {
+  const result = staleVersionResult(current);
+  return Response.json(
+    { error: result.error, conflict: true, current: result.current },
+    { status: result.status },
+  );
+}
+
+function staleAssignmentGroup(
+  body: Record<string, unknown>,
+  before: Record<string, unknown>[],
+) {
+  const raw = body.expectedUpdatedAts;
+  if (!Array.isArray(raw)) return null;
+  const versions = new Map<number, unknown>();
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const value = item as { id?: unknown; updatedAt?: unknown; updated_at?: unknown };
+    const id = Number(value.id || 0);
+    if (id) versions.set(id, value.updatedAt ?? value.updated_at);
+  }
+  const stale = before.find((item) => {
+    const expected = versions.get(Number(item.id));
+    return expected !== undefined && isStaleVersion(expected, item.updated_at);
+  });
+  return stale ? staleVersionResult(stale) : null;
+}
+
 async function upsertAssignment(
   request: Request,
   b: Record<string, string | number | boolean | null>,
@@ -491,6 +548,15 @@ async function upsertAssignment(
   },
 ) {
   const id = Number(opts.id || 0);
+  const before = id
+    ? await env.DB.prepare(
+        "SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id=? AND a.schedule_id=?",
+      ).bind(id, opts.scheduleId).first<Record<string, unknown>>()
+    : null;
+  if (id && !before)
+    return { error: "Designação não encontrada nesta escala.", status: 404 as const };
+  if (before && isStaleVersion((b as Record<string, unknown>).expectedUpdatedAt, before.updated_at))
+    return staleVersionResult(before);
   const startMs = Date.parse(opts.start), endMs = Date.parse(opts.end);
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs)
     return { error: "Informe um intervalo válido; a saída deve ocorrer depois da entrada.", status: 400 as const };
@@ -502,11 +568,6 @@ async function upsertAssignment(
   }
   const blocked = await assertAssignable(opts.scheduleId, opts.guardId, opts.start, opts.end, id);
   if (blocked) return blocked;
-  const before = id
-    ? await env.DB.prepare(
-        "SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id=?",
-      ).bind(id).first<Record<string, unknown>>()
-    : null;
   let assignmentId = id;
   if (id)
     await env.DB.prepare(
@@ -633,9 +694,11 @@ export async function POST(request: Request) {
     const schedule = await env.DB.prepare("SELECT date FROM schedules WHERE id=?").bind(scheduleId).first<{date:string}>();
     if (!schedule) return Response.json({ error: "Escala não encontrada." }, { status: 404 });
     const resource = resourceKind === "post"
-      ? await env.DB.prepare("SELECT id,name label FROM posts WHERE id=? AND active=1").bind(resourceId).first<Record<string,unknown>>()
-      : await env.DB.prepare("SELECT id,prefix label FROM vehicles WHERE id=? AND active=1").bind(resourceId).first<Record<string,unknown>>();
+      ? await env.DB.prepare("SELECT id,name label,updated_at FROM posts WHERE id=? AND active=1").bind(resourceId).first<Record<string,unknown>>()
+      : await env.DB.prepare("SELECT id,prefix label,updated_at FROM vehicles WHERE id=? AND active=1").bind(resourceId).first<Record<string,unknown>>();
     if (!resource) return Response.json({ error: "Local não encontrado ou já desativado." }, { status: 404 });
+    if (isStaleVersion((b as Record<string, unknown>).expectedResourceUpdatedAt, resource.updated_at))
+      return staleVersionResponse(resource);
     const column = resourceKind === "post" ? "post_id" : "vehicle_id";
     const beforeAssignments = (await env.DB.prepare(
       `SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.schedule_id=? AND a.${column}=?`,
@@ -675,6 +738,8 @@ export async function POST(request: Request) {
     const placeholders=assignmentIds.map(()=>"?").join(",");
     const before=(await env.DB.prepare(`SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id IN (${placeholders}) ORDER BY a.starts_at`).bind(...assignmentIds).all<Record<string,unknown>>()).results;
     if(before.length!==assignmentIds.length)return Response.json({error:"Um dos horários selecionados não foi encontrado."},{status:404});
+    const stale = staleAssignmentGroup(b as Record<string, unknown>, before);
+    if (stale) return Response.json({ error: stale.error, conflict: true, current: stale.current }, { status: stale.status });
     const scheduleIds=new Set(before.map(item=>Number(item.schedule_id))),oldGuardIds=new Set(before.map(item=>Number(item.guard_id)));
     if(scheduleIds.size!==1||oldGuardIds.size!==1)return Response.json({error:"A troca deve envolver somente um GM e uma escala."},{status:409});
     if(oldGuardIds.has(guardId))return Response.json({error:"Selecione um GM diferente do atual."},{status:400});
@@ -777,6 +842,8 @@ export async function POST(request: Request) {
     ).results;
     if (before.length !== assignmentIds.length)
       return Response.json({ error: "Uma das designações não foi encontrada." }, { status: 404 });
+    const stale = staleAssignmentGroup(b as Record<string, unknown>, before);
+    if (stale) return Response.json({ error: stale.error, conflict: true, current: stale.current }, { status: stale.status });
     const scheduleIds = new Set(before.map((item) => Number(item.schedule_id)));
     const guardIds = new Set(before.map((item) => Number(item.guard_id)));
     if (scheduleIds.size !== 1 || guardIds.size !== 1)
@@ -861,6 +928,8 @@ export async function POST(request: Request) {
     ]);
     if (!source || !target)
       return Response.json({ error: "Viatura não encontrada ou desativada." }, { status: 404 });
+    if (isStaleVersion((b as Record<string, unknown>).expectedVehicleUpdatedAt, source.updated_at))
+      return staleVersionResponse(source);
     if (toVehicleId !== fromVehicleId) {
       const outage = await env.DB.prepare(
         "SELECT id FROM vehicle_outages WHERE vehicle_id=? AND active=1 AND starts_on<=? AND (ends_on IS NULL OR ends_on>=?) LIMIT 1",
@@ -930,6 +999,13 @@ export async function POST(request: Request) {
     const regularEnd = String(b.endsAt || "");
     const extensionStart = String(b.extensionStartsAt || "");
     const extensionEnd = String(b.extensionEndsAt || "");
+    const before = id
+      ? await env.DB.prepare("SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id=? AND a.schedule_id=?").bind(id, scheduleId).first<Record<string, unknown>>()
+      : null;
+    if (id && !before)
+      return Response.json({ error: "Designação não encontrada nesta escala." }, { status: 404 });
+    if (before && isStaleVersion((b as Record<string, unknown>).expectedUpdatedAt, before.updated_at))
+      return staleVersionResponse(before);
     if (!splitExtensionWindow(regularStart, regularEnd, extensionStart, extensionEnd))
       return Response.json({ error: "Revise os horários: a extensão deve começar no fim ou depois do expediente normal." }, { status: 400 });
     const regularPostId = Number(b.postId || 0) || null;
@@ -942,9 +1018,6 @@ export async function POST(request: Request) {
     if (regularConflict) return Response.json({ error: regularConflict.error }, { status: regularConflict.status });
     const extensionConflict = await assertAssignable(scheduleId, guardId, extensionStart, extensionEnd, id);
     if (extensionConflict) return Response.json({ error: extensionConflict.error }, { status: extensionConflict.status });
-    const before = id
-      ? await env.DB.prepare("SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id=?").bind(id).first<Record<string, unknown>>()
-      : null;
     const statements = [];
     const regularStatus = String(b.status || "normal") === "overtime" ? "normal" : String(b.status || "normal");
     if (id) {
@@ -964,6 +1037,8 @@ export async function POST(request: Request) {
     const baseId=Number(b.baseAssignmentId||0),scheduleId=Number(b.scheduleId||0);
     const base=await env.DB.prepare("SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id=? AND a.schedule_id=?").bind(baseId,scheduleId).first<Record<string,unknown>>();
     if(!base)return Response.json({error:"Expediente de origem não encontrado."},{status:404});
+    if (isStaleVersion((b as Record<string, unknown>).expectedUpdatedAt, base.updated_at))
+      return staleVersionResponse(base);
     const startsAt=String(b.startsAt||""),endsAt=String(b.endsAt||"");
     const startMs=Date.parse(startsAt),endMs=Date.parse(endsAt);
     if(!Number.isFinite(startMs)||!Number.isFinite(endMs)||endMs<=startMs)
@@ -993,6 +1068,8 @@ export async function POST(request: Request) {
     ).bind(b.id).first<Record<string,unknown>>();
     if (!before)
       return Response.json({ error: "Designação não encontrada." }, { status: 404 });
+    if (isStaleVersion((b as Record<string, unknown>).expectedUpdatedAt, before.updated_at))
+      return staleVersionResponse(before);
     await env.DB.prepare("DELETE FROM assignments WHERE id=?").bind(b.id).run();
     const auditEventId = await writeAudit(request, {
       action: "delete",
@@ -1039,7 +1116,7 @@ export async function POST(request: Request) {
         end: t.end,
       });
       if ("error" in result)
-        return Response.json({ error: result.error }, { status: result.status });
+        return Response.json({ error: result.error, conflict: "conflict" in result ? result.conflict : false }, { status: result.status });
       if (result.assignment) created.push(result.assignment);
     }
     const label =
@@ -1065,7 +1142,7 @@ export async function POST(request: Request) {
     end,
   });
   if ("error" in result)
-    return Response.json({ error: result.error }, { status: result.status });
+    return Response.json({ error: result.error, conflict: "conflict" in result ? result.conflict : false }, { status: result.status });
   return Response.json({ ok: true, assignment: result.assignment, auditEventId: result.auditEventId });
 }
 

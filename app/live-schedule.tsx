@@ -229,6 +229,13 @@ export function LiveSchedule() {
       });
       const j = await r.json();
       setMessage(r.ok ? (j.message || "Alteração salva e já exibida na escala.") : j.error);
+      if (!r.ok) {
+        if (r.status === 409 && j.conflict) {
+          await load();
+          setMessage(`${j.error || "A escala foi alterada por outra pessoa."} A versão atual já foi carregada.`);
+        }
+        return false;
+      }
       if (r.ok) {
         if (j.auditEventId) setUndoEvent({id:Number(j.auditEventId),label:String(j.message||"Desfazer a última alteração")});
         const changedAssignments: Rec[] = Array.isArray(j.assignments)
@@ -287,6 +294,7 @@ export function LiveSchedule() {
       endsAt: fillingHole ? t.end : body.endsAt,
       fillFullPeriod: fillingHole,
       id: pick.assignment?.id || null,
+      expectedUpdatedAt: pick.assignment?.updated_at || null,
       scheduleId: data.schedule.id,
       postId: destination === "post" ? Number(id) : null,
       vehicleId: destination === "vehicle" ? Number(id) : null,
@@ -299,6 +307,7 @@ export function LiveSchedule() {
     await postAssignment({
       action: "delete",
       id: Number(pick.assignment.id),
+      expectedUpdatedAt: pick.assignment.updated_at || null,
     });
   }
   async function saveQuickExtension(event:FormEvent<HTMLFormElement>){
@@ -309,6 +318,7 @@ export function LiveSchedule() {
     const saved=await postAssignment({
       action:"create_overtime_extension",
       baseAssignmentId:extensionPick.assignment.id,
+      expectedUpdatedAt: extensionPick.assignment.updated_at || null,
       scheduleId:data.schedule.id,
       startsAt:values.startsAt,
       endsAt:values.endsAt,
@@ -323,7 +333,7 @@ export function LiveSchedule() {
   }
   async function quickStatus(assignment:Rec,status:string){
     if(!data)return;
-    await postAssignment({id:assignment.id,scheduleId:data.schedule.id,guardId:assignment.guard_id,postId:assignment.post_id||null,vehicleId:assignment.vehicle_id||null,shift:assignment.shift,role:assignment.role,startsAt:assignment.starts_at,endsAt:assignment.ends_at,regularEndsAt:assignment.regular_ends_at||null,workKind:assignment.work_kind||"shift",status,requestRef:assignment.request_ref||null,isReassigned:Number(assignment.is_reassigned)===1,reassignmentNote:assignment.reassignment_note||null});
+    await postAssignment({id:assignment.id,expectedUpdatedAt:assignment.updated_at||null,scheduleId:data.schedule.id,guardId:assignment.guard_id,postId:assignment.post_id||null,vehicleId:assignment.vehicle_id||null,shift:assignment.shift,role:assignment.role,startsAt:assignment.starts_at,endsAt:assignment.ends_at,regularEndsAt:assignment.regular_ends_at||null,workKind:assignment.work_kind||"shift",status,requestRef:assignment.request_ref||null,isReassigned:Number(assignment.is_reassigned)===1,reassignmentNote:assignment.reassignment_note||null});
   }
   async function undoLast(){
     if(!undoEvent||savingRef.current)return;
@@ -432,6 +442,10 @@ export function LiveSchedule() {
     await postAssignment({
       action: "redeploy_group",
       assignmentIds: candidate.assignmentIds,
+      expectedUpdatedAts: candidate.assignmentIds.map((id) => {
+        const assignment = [...data.assignments, ...data.availableForRedeployment].find((item) => Number(item.id) === Number(id));
+        return { id, updatedAt: assignment?.updated_at };
+      }),
       scheduleId: data.schedule.id,
       postId: holePick.kind === "post" ? Number(holePick.resource.id) : null,
       vehicleId: holePick.kind === "vehicle" ? Number(holePick.resource.id) : null,
@@ -521,7 +535,7 @@ export function LiveSchedule() {
   }
   async function replaceGuard(guardId:number){
     if(!swapPick)return;
-    await postAssignment({action:"replace_guard_group",guardId,assignmentIds:swapPick.assignments.map(item=>Number(item.id))});
+    await postAssignment({action:"replace_guard_group",guardId,assignmentIds:swapPick.assignments.map(item=>Number(item.id)),expectedUpdatedAts:swapPick.assignments.map(item=>({id:item.id,updatedAt:item.updated_at}))});
   }
   async function move(
     assignment: Rec,
@@ -541,6 +555,7 @@ export function LiveSchedule() {
       await postAssignment({
         action: "save_with_extension",
         id: assignment.id,
+        expectedUpdatedAt: assignment.updated_at || null,
         scheduleId: data.schedule.id,
         guardId: assignment.guard_id,
         shift: assignment.shift,
@@ -570,6 +585,7 @@ export function LiveSchedule() {
       targetRole=kind==="post"?"guard":!targetRoles.has("driver")?"driver":!targetRoles.has("patrol")?"patrol":"third";
     await postAssignment({
       id: assignment.id,
+      expectedUpdatedAt: assignment.updated_at || null,
       scheduleId: data.schedule.id,
       guardId: assignment.guard_id,
       postId: kind === "post" ? resource.id : null,
@@ -608,6 +624,7 @@ export function LiveSchedule() {
     await postAssignment({
       action: "redeploy_group",
       assignmentIds: assignments.map((assignment) => Number(assignment.id)),
+      expectedUpdatedAts: assignments.map((assignment) => ({ id: assignment.id, updatedAt: assignment.updated_at })),
       scheduleId: data.schedule.id,
       postId: kind === "post" ? Number(resource.id) : null,
       vehicleId: kind === "vehicle" ? Number(resource.id) : null,
@@ -626,13 +643,20 @@ export function LiveSchedule() {
           action: "vehicle_quick_update",
           scheduleId: data.schedule.id,
           fromVehicleId: vehicleEdit.id,
+          expectedVehicleUpdatedAt: vehicleEdit.updated_at || null,
           toVehicleId: Number(body.toVehicleId),
           zone: String(body.zone || ""),
         }),
       });
       const result = await response.json();
       setMessage(response.ok ? result.message : result.error);
-      if (!response.ok) return;
+      if (!response.ok) {
+        if (response.status === 409 && result.conflict) {
+          await load();
+          setMessage(`${result.error || "A viatura foi alterada por outra pessoa."} A versão atual já foi carregada.`);
+        }
+        return;
+      }
       const changedAssignments: Rec[] = result.assignments || [];
       setData((current) => {
         if (!current) return current;
@@ -672,11 +696,18 @@ export function LiveSchedule() {
           scheduleId: data.schedule.id,
           resourceKind: resourceRemoval.kind,
           resourceId: resourceRemoval.resource.id,
+          expectedResourceUpdatedAt: resourceRemoval.resource.updated_at || null,
         }),
       });
       const result = await response.json();
       setMessage(response.ok ? result.message : result.error);
-      if (!response.ok) return;
+      if (!response.ok) {
+        if (response.status === 409 && result.conflict) {
+          await load();
+          setMessage(`${result.error || "Este local foi alterado por outra pessoa."} A versão atual já foi carregada.`);
+        }
+        return;
+      }
       if (result.auditEventId) setUndoEvent({ id: Number(result.auditEventId), label: "Desfazer retirada do local" });
       setData((current) => {
         if (!current) return current;
@@ -899,7 +930,7 @@ export function LiveSchedule() {
                   copiedAssignment={copiedAssignment}
                   onCopy={copyAssignment}
                   onPaste={pasteAssignment}
-                  onQuickDelete={(assignment)=>confirm(`Remover ${assignment.guard_name} da escala?`)&&postAssignment({action:"delete",id:assignment.id})}
+                  onQuickDelete={(assignment)=>confirm(`Remover ${assignment.guard_name} da escala?`)&&postAssignment({action:"delete",id:assignment.id,expectedUpdatedAt:assignment.updated_at||null})}
                   onMove={move}
                   onMoveGroup={moveGroup}
                   onHolePick={openHoleSuggest}
