@@ -1207,6 +1207,7 @@ function Row({
 }) {
   const knownAssignments=[...new Map([...assignmentIndex.values()].flat().map(item=>[Number(item.id),item])).values()];
   function showExtensionShortcut(assignment:Rec,shift:string){
+    if(!isDayShift(shift))return false;
     if(String(assignment.work_kind)==="overtime_extension")return false;
     if(String(assignment.status)==="overtime"&&assignment.regular_ends_at&&String(assignment.ends_at)>String(assignment.regular_ends_at))return false;
     const period=isDayShift(shift)?"day":"night";
