@@ -729,3 +729,15 @@ test("daily scale exposes contextual section editing", () => {
   assert.match(schedule, /className="section-inline-edit"/);
   assert.match(styles, /\.section-inline-edit/);
 });
+
+test("selected GM cards expose a quick adjustment dialog before the advanced editor", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/simple-ux.css"), "utf8");
+  assert.match(schedule, /\[quickEdit, setQuickEdit\] = useState/);
+  assert.match(schedule, /async function saveQuickAssignment/);
+  assert.match(schedule, /function QuickAssignmentEditor/);
+  assert.match(schedule, /className="quick-inline-edit"/);
+  assert.match(schedule, /onQuickEdit=\{setQuickEdit\}/);
+  assert.match(schedule, /expectedUpdatedAt: assignment\.updated_at/);
+  assert.match(styles, /\.quick-inline-edit/);
+});

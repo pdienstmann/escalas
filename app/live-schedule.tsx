@@ -116,6 +116,7 @@ export function LiveSchedule() {
     [vehicleEdit, setVehicleEdit] = useState<Rec | null>(null),
     [postEdit, setPostEdit] = useState<Rec | null>(null),
     [sectionEdit, setSectionEdit] = useState<{ sectionKey: string; label: string } | null>(null),
+    [quickEdit, setQuickEdit] = useState<Pick | null>(null),
     [resourceRemoval, setResourceRemoval] = useState<ResourceRemovalPick | null>(null),
     [createOpen, setCreateOpen] = useState(false),
     [createKind, setCreateKind] = useState<"guard" | "post" | "vehicle" | "section">("guard"),
@@ -947,6 +948,31 @@ export function LiveSchedule() {
       setSaving(false);
     }
   }
+  async function saveQuickAssignment(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!data || !quickEdit?.assignment) return;
+    const body = Object.fromEntries(new FormData(e.currentTarget));
+    const assignment = quickEdit.assignment;
+    const saved = await postAssignment({
+      id: assignment.id,
+      expectedUpdatedAt: assignment.updated_at || null,
+      scheduleId: data.schedule.id,
+      guardId: assignment.guard_id,
+      postId: quickEdit.kind === "post" ? Number(quickEdit.resource.id) : null,
+      vehicleId: quickEdit.kind === "vehicle" ? Number(quickEdit.resource.id) : null,
+      shift: body.shift || assignment.shift,
+      role: body.role || assignment.role,
+      startsAt: body.startsAt || assignment.starts_at,
+      endsAt: body.endsAt || assignment.ends_at,
+      regularEndsAt: assignment.regular_ends_at || null,
+      workKind: assignment.work_kind || "shift",
+      status: body.status || assignment.status || "normal",
+      requestRef: body.requestRef || assignment.request_ref || null,
+      isReassigned: body.isReassigned ? 1 : 0,
+      reassignmentNote: body.reassignmentNote || null,
+    });
+    if (saved) setQuickEdit(null);
+  }
   async function removeResourceFromDay() {
     if (!data || !resourceRemoval || savingRef.current) return;
     savingRef.current=true;setSaving(true);
@@ -1259,6 +1285,7 @@ export function LiveSchedule() {
                   onEditVehicle={setVehicleEdit}
                   onEditPost={setPostEdit}
                   onEditSection={(sectionKey, label) => setSectionEdit({ sectionKey, label })}
+                  onQuickEdit={setQuickEdit}
                   onAddToResource={(kind,resource,shift)=>setResourceDialog({
                     kind,
                     initialResourceId:Number(resource.id),
@@ -1441,6 +1468,14 @@ export function LiveSchedule() {
           saving={saving}
           onClose={() => setSectionEdit(null)}
           onSave={saveSectionQuick}
+        />
+      )}
+      {quickEdit?.assignment && (
+        <QuickAssignmentEditor
+          pick={quickEdit}
+          saving={saving}
+          onClose={() => setQuickEdit(null)}
+          onSave={saveQuickAssignment}
         />
       )}
       {redeployPick && (
@@ -1692,6 +1727,24 @@ function SectionQuickEditor({section,saving,onClose,onSave}:{section:{sectionKey
     <footer><button type="button" onClick={onClose}>Cancelar</button><button className="save" disabled={saving}>{saving ? "Salvando…" : "Salvar seção"}</button></footer>
   </form></div>
 }
+function QuickAssignmentEditor({pick,saving,onClose,onSave}:{pick:Pick;saving:boolean;onClose:()=>void;onSave:(e:FormEvent<HTMLFormElement>)=>void}) {
+  const assignment=pick.assignment;
+  if (!assignment) return null;
+  const isVehicle=pick.kind === "vehicle";
+  const destination=isVehicle ? String(pick.resource.prefix) : String(pick.resource.name);
+  return <div className="vehicle-quick-backdrop"><form className="vehicle-quick-editor" role="dialog" aria-modal="true" aria-labelledby="quick-assignment-title" onSubmit={onSave}>
+    <header><div><small>AJUSTE RÁPIDO NA ESCALA</small><h2 id="quick-assignment-title">{String(assignment.guard_name)}</h2><p>{destination} · {String(assignment.shift)}º turno</p></div><button type="button" onClick={onClose} aria-label="Fechar ajuste rápido">×</button></header>
+    <div className="vehicle-status-legend"><span className="busy">Edite somente este quadrante</span><span className="available">Use “Trocar GM” para substituir a pessoa</span></div>
+    <input type="hidden" name="shift" value={String(assignment.shift || pick.shift)} />
+    <label>Função<select name="role" defaultValue={String(assignment.role || (isVehicle ? "third" : "guard"))}>{isVehicle ? <><option value="driver">M — Motorista</option><option value="patrol">P — Patrulheiro</option><option value="third">R — Reforço</option></> : <option value="guard">GM do posto</option>}</select></label>
+    <div className="two"><label>Entrada<input name="startsAt" type="datetime-local" defaultValue={String(assignment.starts_at || "")} required /></label><label>Saída<input name="endsAt" type="datetime-local" defaultValue={String(assignment.ends_at || "")} required /></label></div>
+    <label>Situação<select name="status" defaultValue={String(assignment.status || "normal")}><option value="normal">Normal</option><option value="overtime">Hora extra</option><option value="time_bank">Banco de horas</option><option value="swap">Troca de serviço</option></select></label>
+    <label className="reassignment-check"><span><input type="checkbox" name="isReassigned" defaultChecked={Number(assignment.is_reassigned) === 1} /> Avisar remanejamento</span></label>
+    <label>Observação / requerimento<input name="requestRef" defaultValue={String(assignment.request_ref || "")} placeholder="Opcional" /></label>
+    <label>Nota do remanejamento<input name="reassignmentNote" defaultValue={String(assignment.reassignment_note || "")} placeholder="Opcional" /></label>
+    <footer><button type="button" onClick={onClose}>Cancelar</button><button className="save" disabled={saving}>{saving ? "Salvando…" : "Salvar ajuste"}</button></footer>
+  </form></div>
+}
 function ResourceRemovalDialog({pick,saving,onClose,onConfirm}:{pick:ResourceRemovalPick;saving:boolean;onClose:()=>void;onConfirm:()=>void}){
   const label=String(pick.kind==="vehicle"?pick.resource.prefix:pick.resource.name);
   const guards=[...new Map(pick.assignments.map((assignment)=>[Number(assignment.guard_id),String(assignment.guard_name)])).values()];
@@ -1753,6 +1806,7 @@ type RowProps = {
   onEditVehicle: (vehicle: Rec) => void;
   onEditPost: (post: Rec) => void;
   onEditSection: (sectionKey: string, label: string) => void;
+  onQuickEdit: (pick: Pick) => void;
   onAddToResource: (kind: "post" | "vehicle", resource: Rec, shift: string) => void;
   onAddInSection: (kind: "post" | "vehicle", section: string) => void;
   onRemoveResource: (kind: "post" | "vehicle", resource: Rec) => void;
@@ -1802,6 +1856,7 @@ function Row({
   onEditVehicle,
   onEditPost,
   onEditSection,
+  onQuickEdit,
   onAddToResource,
   onAddInSection,
   onRemoveResource,
@@ -2081,6 +2136,9 @@ function Row({
                 </div>
                 {Number(a.id)===selectedId&&<div className="cell-quick-actions" role="group" aria-label={`Ações rápidas de ${String(a.guard_name)}`}><b>{a.guard_name}</b><button type="button" className="swap-action" onClick={()=>onSwap(a,kind,resource,s.id)}><span aria-hidden="true">⇄</span> Trocar GM</button><button type="button" onClick={()=>onEdit({kind,resource,shift:s.id,assignment:a})}><span aria-hidden="true">✎</span> Alterar / mover</button><button type="button" className={a.status==="time_bank"?"active":""} onClick={()=>onQuickStatus(a,a.status==="time_bank"?"normal":"time_bank")}><span aria-hidden="true">◷</span> BH</button><button type="button" className="copy-action" onClick={()=>onCopy(a)}><span aria-hidden="true">▣</span> Copiar</button><button type="button" className="danger" onClick={()=>onQuickDelete(a)}><span aria-hidden="true">×</span> Remover</button><button type="button" aria-label="Fechar ações" onClick={()=>onContextPick({kind,resource,shift:s.id})}>×</button></div>}</Fragment>
                 {Number(a.id)===selectedId&&<div className="inline-move-tools">
+                  <button type="button" className="quick-inline-edit" onClick={()=>onQuickEdit({kind,resource,shift:s.id,assignment:a})}>
+                    ✎ Ajuste rápido
+                  </button>
                   <button type="button" className="quick-move-trigger" onClick={()=>setMoveAssignmentId(current=>current===Number(a.id)?null:Number(a.id))}>
                     ↗ Mover local
                   </button>
