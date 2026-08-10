@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { writeAudit } from "../../../lib/audit";
 import { permitted } from "../../../lib/access";
 import { todayScheduleDate } from "../../../lib/schedule-date";
+import { ensureOperationalGroups } from "../../../lib/operational-groups-db";
 
 export const dynamic = "force-dynamic";
 type LeaveImportRow = { guardId?: number; guardName?: string; date: string };
@@ -317,12 +318,13 @@ export async function GET(request: Request) {
   await ensureSections();
   await ensureFleetReturnTables();
   await ensureServiceAdjustmentsTable();
+  await ensureOperationalGroups(env.DB);
   const requestedDate = new URL(request.url).searchParams.get("date") || todayScheduleDate();
   const monthStart = `${String(requestedDate).slice(0,7)}-01`;
   const nextMonth = new Date(`${monthStart}T12:00:00Z`);
   nextMonth.setUTCMonth(nextMonth.getUTCMonth()+1);
   const monthEnd = nextMonth.toISOString().slice(0,10);
-  const [guards, posts, vehicles, movements, campaign, days, choices, vehicleOutages, sections, vehicleCrews, vehicleReturnImpacts, leavePatternSlots, serviceAdjustments] =
+  const [guards, posts, vehicles, movements, campaign, days, choices, vehicleOutages, sections, vehicleCrews, vehicleReturnImpacts, leavePatternSlots, serviceAdjustments, operationalGroups, operationalGroupMembers] =
     await Promise.all([
       env.DB.prepare(
         "SELECT * FROM guards WHERE active = 1 ORDER BY name",
@@ -369,6 +371,10 @@ export async function GET(request: Request) {
         LEFT JOIN guards c ON c.id=sa.counterpart_guard_id
         WHERE sa.status='active' AND ((sa.service_date>=? AND sa.service_date<?) OR (sa.counterpart_service_date>=? AND sa.counterpart_service_date<?) OR (sa.settlement_date>=? AND sa.settlement_date<?))
         ORDER BY sa.service_date,sa.starts_at,sa.id`).bind(monthStart,monthEnd,monthStart,monthEnd,monthStart,monthEnd).all(),
+      env.DB.prepare("SELECT id,name,short_name,color,sort_order,active FROM operational_groups WHERE active=1 ORDER BY sort_order,name").all(),
+      env.DB.prepare(`SELECT m.id,m.group_id,m.resource_kind,m.resource_id,m.team_label,g.name group_name,g.short_name group_short_name,g.color group_color,g.sort_order group_sort_order
+        FROM operational_group_members m JOIN operational_groups g ON g.id=m.group_id
+        WHERE g.active=1 ORDER BY g.sort_order,g.name,m.resource_kind,m.resource_id`).all(),
     ]);
   return Response.json({
     guards: guards.results,
@@ -383,6 +389,8 @@ export async function GET(request: Request) {
     sections: sections.results,
     vehicleReturnImpacts: vehicleReturnImpacts.results,
     serviceAdjustments: serviceAdjustments.results,
+    operationalGroups: operationalGroups.results,
+    operationalGroupMembers: operationalGroupMembers.results,
     leaveOverview: buildLeaveOverview(
       campaign as Record<string, unknown> | null,
       choices.results,
@@ -397,6 +405,7 @@ export async function POST(request: Request) {
   const body = (await request.json()) as AdminBody;
   await ensureFleetReturnTables();
   await ensureServiceAdjustmentsTable();
+  await ensureOperationalGroups(env.DB);
   try {
     if (body.action === "guard_import") {
       const rows = ((body as unknown as {rows?:Array<{registration?:string;name?:string;platoon?:string;baseShift?:string}>}).rows || []).slice(0,500).filter(row=>row.registration?.trim()&&row.name?.trim());
@@ -437,6 +446,60 @@ export async function POST(request: Request) {
       const after = await env.DB.prepare("SELECT * FROM vehicles WHERE id=?").bind(created.meta.last_row_id).first();
       await writeAudit(request,{action:"create",entityType:"vehicle",entityId:Number(created.meta.last_row_id),summary:`Cadastrou a viatura ${prefix}`,after:after as Record<string,unknown>});
       return Response.json({ok:true,entity:after,message:`Viatura ${prefix} adicionada à escala.`});
+    } else if (body.action === "operational_group_create") {
+      const name=String(body.name||"").trim().replace(/\s+/g," ");
+      if(!name)return Response.json({error:"Informe o nome do grupamento."},{status:400});
+      const duplicate=await env.DB.prepare("SELECT id FROM operational_groups WHERE UPPER(name)=UPPER(?) LIMIT 1").bind(name).first();
+      if(duplicate)return Response.json({error:"Já existe um grupamento com este nome."},{status:409});
+      const created=await env.DB.prepare("INSERT INTO operational_groups (name,short_name,color,sort_order) VALUES (?,?,?,?)").bind(name,String(body.shortName||name).trim()||name,String(body.color||"#1769aa"),Number(body.sortOrder||99)).run();
+      const after=await env.DB.prepare("SELECT id,name,short_name,color,sort_order,active FROM operational_groups WHERE id=?").bind(created.meta.last_row_id).first();
+      await writeAudit(request,{action:"create",entityType:"operational_group",entityId:Number(created.meta.last_row_id),summary:`Criou o grupamento ${name}`,after:after as Record<string,unknown>});
+      return Response.json({ok:true,entity:after,message:`Grupamento ${name} criado.`});
+    } else if (body.action === "operational_group_update") {
+      const id=Number(body.id),name=String(body.name||"").trim().replace(/\s+/g," ");
+      if(!id||!name)return Response.json({error:"Informe o grupamento e o nome exibido."},{status:400});
+      const before=await env.DB.prepare("SELECT * FROM operational_groups WHERE id=?").bind(id).first<Record<string,unknown>>();
+      if(!before)return Response.json({error:"Grupamento não encontrado."},{status:404});
+      const duplicate=await env.DB.prepare("SELECT id FROM operational_groups WHERE UPPER(name)=UPPER(?) AND id<>? LIMIT 1").bind(name,id).first();
+      if(duplicate)return Response.json({error:"Já existe outro grupamento com este nome."},{status:409});
+      await env.DB.prepare("UPDATE operational_groups SET name=?,short_name=?,color=?,sort_order=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(name,String(body.shortName||name).trim()||name,String(body.color||"#1769aa"),Number(body.sortOrder||99),id).run();
+      const after=await env.DB.prepare("SELECT id,name,short_name,color,sort_order,active FROM operational_groups WHERE id=?").bind(id).first();
+      await writeAudit(request,{action:"update",entityType:"operational_group",entityId:id,summary:`Editou o grupamento ${name}`,before,after:after as Record<string,unknown>});
+      return Response.json({ok:true,entity:after,message:`Grupamento ${name} atualizado.`});
+    } else if (body.action === "operational_group_delete") {
+      const id=Number(body.id);
+      const before=await env.DB.prepare("SELECT * FROM operational_groups WHERE id=?").bind(id).first<Record<string,unknown>>();
+      if(!before)return Response.json({error:"Grupamento não encontrado."},{status:404});
+      await env.DB.batch([
+        env.DB.prepare("DELETE FROM operational_group_members WHERE group_id=?").bind(id),
+        env.DB.prepare("DELETE FROM operational_groups WHERE id=?").bind(id),
+      ]);
+      await writeAudit(request,{action:"delete",entityType:"operational_group",entityId:id,summary:`Removeu o grupamento ${before.name}`,before,undoable:true});
+      return Response.json({ok:true,message:`Grupamento ${before.name} removido. Os cadastros continuam disponíveis.`});
+    } else if (body.action === "operational_group_member_set") {
+      const groupId=Number(body.groupId),resourceId=Number(body.resourceId),resourceKind=String(body.resourceKind||"");
+      if(!groupId||!resourceId||!["guard","post","vehicle"].includes(resourceKind))return Response.json({error:"Selecione grupamento e recurso válidos."},{status:400});
+      const group=await env.DB.prepare("SELECT id,name FROM operational_groups WHERE id=? AND active=1").bind(groupId).first<{id:number;name:string}>();
+      if(!group)return Response.json({error:"Grupamento não encontrado ou inativo."},{status:404});
+      const table=resourceKind==="guard"?"guards":resourceKind==="post"?"posts":"vehicles";
+      const resource=await env.DB.prepare(`SELECT id FROM ${table} WHERE id=? AND active=1`).bind(resourceId).first<{id:number}>();
+      if(!resource)return Response.json({error:"Recurso não encontrado ou inativo."},{status:404});
+      const teamLabel=String(body.teamLabel||"").trim()||null;
+      await env.DB.batch([
+        env.DB.prepare("DELETE FROM operational_group_members WHERE resource_kind=? AND resource_id=?").bind(resourceKind,resourceId),
+        env.DB.prepare("INSERT INTO operational_group_members (group_id,resource_kind,resource_id,team_label) VALUES (?,?,?,?)").bind(groupId,resourceKind,resourceId,teamLabel),
+      ]);
+      const member=await env.DB.prepare(`SELECT m.id,m.group_id,m.resource_kind,m.resource_id,m.team_label,g.name group_name,g.short_name group_short_name,g.color group_color,g.sort_order group_sort_order
+        FROM operational_group_members m JOIN operational_groups g ON g.id=m.group_id WHERE m.group_id=? AND m.resource_kind=? AND m.resource_id=?`).bind(groupId,resourceKind,resourceId).first();
+      await writeAudit(request,{action:"update",entityType:"operational_group_member",entityId:Number(member?.id||0),summary:`Vinculou ${resourceKind} ${resourceId} ao grupamento ${group.name}`,after:member as Record<string,unknown>});
+      return Response.json({ok:true,member,message:`Recurso vinculado a ${group.name}.`});
+    } else if (body.action === "operational_group_member_remove") {
+      const resourceKind=String(body.resourceKind||""),resourceId=Number(body.resourceId);
+      if(!resourceId||!["guard","post","vehicle"].includes(resourceKind))return Response.json({error:"Recurso inválido."},{status:400});
+      const before=await env.DB.prepare("SELECT * FROM operational_group_members WHERE resource_kind=? AND resource_id=?").bind(resourceKind,resourceId).first<Record<string,unknown>>();
+      await env.DB.prepare("DELETE FROM operational_group_members WHERE resource_kind=? AND resource_id=?").bind(resourceKind,resourceId).run();
+      if(before)await writeAudit(request,{action:"delete",entityType:"operational_group_member",entityId:Number(before.id),summary:`Desvinculou ${resourceKind} ${resourceId} do grupamento`,before,undoable:true});
+      return Response.json({ok:true,message:"Recurso retirado do grupamento. A identificação automática continua disponível."});
     } else if (body.action === "section_create") {
       const label=String(body.label||"").trim();
       if(!label)return Response.json({error:"Informe o nome da seção."},{status:400});

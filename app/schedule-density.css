@@ -31,5 +31,6 @@
 .resource-unit-tags em{display:inline-block;padding:1px 4px;border-radius:7px;font-size:8px;font-style:normal;font-weight:900;line-height:1.1;white-space:nowrap}
 .resource-group-chip{background:#e5f1fa;color:#145b88}
 .resource-team-chip{background:#f0eafa;color:#5b3f90}
+.person-operational-chip{display:inline-block;margin-left:4px;padding:1px 4px;border-radius:6px;background:#eef5d8;color:#50721b;font-size:8px;font-weight:900;vertical-align:middle;white-space:nowrap}
 @media(max-width:700px){.app.compact .schedule{min-width:900px}.app.compact .schedule th:first-child{width:190px}.operational-group-heading td{padding:4px 7px!important}.operational-group-heading small{display:none}}
 @media print{.operational-group-heading td{height:auto!important;padding:2px 4px!important;border-top:1px solid #9eaeba!important}.operational-group-heading td:before{width:3px;height:10px;margin-right:4px}.resource-unit-tags{gap:2px}.resource-unit-tags em{padding:0 3px;font-size:6px}}

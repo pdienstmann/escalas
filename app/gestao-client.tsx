@@ -39,6 +39,8 @@ type Data = {
   vehicleReturnImpacts: Item[];
   serviceAdjustments: Item[];
   leaveOverview: LeaveOverview | null;
+  operationalGroups: Item[];
+  operationalGroupMembers: Item[];
 };
 const empty: Data = {
   guards: [],
@@ -54,6 +56,8 @@ const empty: Data = {
   vehicleReturnImpacts: [],
   serviceAdjustments: [],
   leaveOverview: null,
+  operationalGroups: [],
+  operationalGroupMembers: [],
 };
 
 const adminCachePrefix = "escala-admin-cache:";
@@ -231,6 +235,26 @@ export function GestaoClient({
       }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Não foi possível atualizar o cadastro.");
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function operationalGroupAction(body: Record<string, string | number | null>) {
+    if (saving) return false;
+    setSaving(true); setMessage("");
+    try {
+      const response = await fetch("/api/admin", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const result = await response.json() as { message?: string; error?: string };
+      setMessage(response.ok ? String(result.message || "Grupamento atualizado.") : String(result.error || "Não foi possível atualizar o grupamento."));
+      if (response.ok) await load();
+      return response.ok;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Não foi possível atualizar o grupamento.");
+      return false;
     } finally {
       setSaving(false);
     }
@@ -447,6 +471,15 @@ export function GestaoClient({
             <input name="sortOrder" type="number" placeholder="Ordem" />
           </Form>
         </div>
+        <OperationalGroupsPanel
+          groups={data.operationalGroups}
+          members={data.operationalGroupMembers}
+          guards={data.guards}
+          posts={data.posts}
+          vehicles={data.vehicles}
+          saving={saving}
+          onAction={operationalGroupAction}
+        />
         <div className="catalog-tools">
           <SectionOrder sections={data.sections} onReorder={(key, direction) => void reorderSection(key, direction)} onRename={setSectionEditor} />
           <GuardImport onImport={(rows) => void importGuards(rows)} />
@@ -747,6 +780,80 @@ export function GestaoClient({
       />
     </Module>
   );
+}
+
+function OperationalGroupsPanel({
+  groups,
+  members,
+  guards,
+  posts,
+  vehicles,
+  saving,
+  onAction,
+}: {
+  groups: Item[];
+  members: Item[];
+  guards: Item[];
+  posts: Item[];
+  vehicles: Item[];
+  saving: boolean;
+  onAction: (body: Record<string, string | number | null>) => Promise<boolean>;
+}) {
+  const [resourceKind, setResourceKind] = useState<"guard" | "post" | "vehicle">("guard");
+  const [resourceId, setResourceId] = useState("");
+  const [groupId, setGroupId] = useState("");
+  const resourceOptions = resourceKind === "guard"
+    ? guards.map((item) => ({ id: item.id, label: `${item.name}${item.registration ? ` · ${item.registration}` : ""}` }))
+    : resourceKind === "post"
+      ? posts.map((item) => ({ id: item.id, label: `${item.name} · ${item.group_name || "Posto"}` }))
+      : vehicles.map((item) => ({ id: item.id, label: `${item.prefix} · ${item.zone || "Zona não definida"}` }));
+  const resourceLabel = (member: Item) => {
+    const source = member.resource_kind === "guard" ? guards : member.resource_kind === "post" ? posts : vehicles;
+    const item = source.find((candidate) => Number(candidate.id) === Number(member.resource_id));
+    return item ? String(item.name || item.prefix) : `Recurso ${member.resource_id}`;
+  };
+  const submit = async (event: FormEvent<HTMLFormElement>, action: string, extra: Record<string, string | number | null> = {}) => {
+    event.preventDefault();
+    const values = Object.fromEntries(new FormData(event.currentTarget)) as Record<string, string | number | null>;
+    await onAction({ ...values, ...extra, action });
+  };
+  return <section className="operational-groups-panel">
+    <header>
+      <div><small>ORGANIZAÇÃO DO EFETIVO</small><h2>Grupamentos e equipes</h2><p>Cadastre ou edite GESCOM, CANIL, ROMU, Ambiental, Patrulha Rural e outros. Um vínculo pode ter uma equipe Alfa, Bravo, Charlie ou outra identificação.</p></div>
+      <span>{groups.length} grupamentos</span>
+    </header>
+    <div className="operational-groups-layout">
+      <form className="operational-group-create" onSubmit={(event) => void submit(event, "operational_group_create")}>
+        <h3>Novo grupamento</h3>
+        <label>Nome exibido<input name="name" placeholder="Ex.: ROMU" required /></label>
+        <label>Sigla curta<input name="shortName" placeholder="Ex.: ROMU" /></label>
+        <div className="two"><label>Cor<input name="color" type="color" defaultValue="#1769aa" /></label><label>Ordem<input name="sortOrder" type="number" defaultValue="99" min="0" /></label></div>
+        <button className="save" disabled={saving}>＋ Criar grupamento</button>
+      </form>
+      <form className="operational-group-link" onSubmit={(event) => void submit(event, "operational_group_member_set")}>
+        <h3>Vincular recurso</h3>
+        <p>Escolha um cadastro já existente. Ao trocar de grupamento, o vínculo anterior é substituído.</p>
+        <label>Tipo<select value={resourceKind} onChange={(event) => { setResourceKind(event.target.value as typeof resourceKind); setResourceId(""); }}><option value="guard">GM</option><option value="post">Posto</option><option value="vehicle">Viatura</option></select></label>
+        <label>Recurso<select name="resourceId" value={resourceId} onChange={(event) => setResourceId(event.target.value)} required><option value="">Selecione</option>{resourceOptions.map((option) => <option key={String(option.id)} value={String(option.id)}>{option.label}</option>)}</select></label>
+        <label>Grupamento<select name="groupId" value={groupId} onChange={(event) => setGroupId(event.target.value)} required><option value="">Selecione</option>{groups.map((group) => <option key={String(group.id)} value={String(group.id)}>{group.name}</option>)}</select></label>
+        <label>Equipe interna (opcional)<input name="teamLabel" list="operational-team-options" placeholder="Alfa, Bravo, Charlie…" /><datalist id="operational-team-options"><option value="ALFA"/><option value="BRAVO"/><option value="CHARLIE"/><option value="DELTA"/><option value="ECHO"/><option value="FOXTROT"/></datalist></label>
+        <input type="hidden" name="resourceKind" value={resourceKind} />
+        <button className="save" disabled={saving || !resourceId || !groupId}>Vincular ao grupamento</button>
+      </form>
+    </div>
+    <div className="operational-group-list">
+      {groups.map((group) => {
+        const groupMembers = members.filter((member) => Number(member.group_id) === Number(group.id));
+        return <article key={String(group.id)} className="operational-group-card" style={{ borderTopColor: String(group.color || "#1769aa") }}>
+          <form onSubmit={(event) => void submit(event, "operational_group_update", { id: group.id })}>
+            <div className="operational-group-card-head"><span className="operational-group-swatch" style={{ background: String(group.color || "#1769aa") }} /><input name="name" defaultValue={String(group.name || "")} aria-label="Nome do grupamento" required /><span className="operational-group-count">{groupMembers.length} vínculos</span></div>
+            <div className="operational-group-edit-fields"><input name="shortName" defaultValue={String(group.short_name || "")} aria-label="Sigla curta" placeholder="Sigla curta" /><input name="color" type="color" defaultValue={String(group.color || "#1769aa")} aria-label="Cor" /><input name="sortOrder" type="number" defaultValue={String(group.sort_order || 99)} aria-label="Ordem" min="0" /><button disabled={saving}>Salvar</button><button type="button" className="danger-link" disabled={saving} onClick={() => { if (confirm(`Remover o grupamento ${String(group.name)}? Os cadastros não serão apagados.`)) void onAction({ action: "operational_group_delete", id: group.id }); }}>Remover</button></div>
+          </form>
+          {groupMembers.length ? <div className="operational-group-members">{groupMembers.map((member) => <span key={String(member.id)}><b>{resourceLabel(member)}</b><small>{member.resource_kind === "guard" ? "GM" : member.resource_kind === "post" ? "Posto" : "VTR"}{member.team_label ? ` · Equipe ${member.team_label}` : ""}</small><button type="button" aria-label={`Remover ${resourceLabel(member)} do grupamento`} disabled={saving} onClick={() => void onAction({ action: "operational_group_member_remove", resourceKind: String(member.resource_kind), resourceId: Number(member.resource_id) })}>×</button></span>)}</div> : <p className="operational-group-empty">Nenhum GM, posto ou viatura vinculado ainda.</p>}
+        </article>;
+      })}
+    </div>
+  </section>;
 }
 
 function SectionOrder({sections,onReorder,onRename}:{sections:Item[];onReorder:(key:string,direction:"up"|"down")=>void;onRename:(section:Item)=>void}) {

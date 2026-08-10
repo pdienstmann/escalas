@@ -90,6 +90,17 @@ test("operational groups stay compact and recognizable in the schedule", () => {
   assert.match(density, /\.operational-group-heading/);
 });
 
+test("operational groups are editable and can classify existing resources", () => {
+  const admin = readFileSync(resolve("app/api/admin/route.ts"), "utf8");
+  const catalog = readFileSync(resolve("app/gestao-client.tsx"), "utf8");
+  assert.match(admin, /operational_group_create/);
+  assert.match(admin, /operational_group_update/);
+  assert.match(admin, /operational_group_member_set/);
+  assert.match(admin, /DELETE FROM operational_group_members/);
+  assert.match(catalog, /Grupamentos e equipes/);
+  assert.match(catalog, /Vincular recurso/);
+});
+
 test("redeployment visibility rule keeps crew when vehicle leaves active set", () => {
   const blocked = new Set([99]);
   const visibleVehicleIds = new Set([1]);

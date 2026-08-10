@@ -56,6 +56,8 @@ type State = {
   availableForRedeployment: Rec[];
   operations?: Rec[];
   patternLabel?: string;
+  operationalGroups?: Rec[];
+  operationalGroupMembers?: Rec[];
 };
 type Pick = {
   kind: "post" | "vehicle";
@@ -184,6 +186,25 @@ export function LiveSchedule() {
   const scheduleVehicles = data?.vehicles;
   const schedulePosts = data?.posts;
   const scheduleSections = data?.sections;
+  const operationalGroupMembers = data?.operationalGroupMembers;
+  const operationalGroupByResource = useMemo(() => {
+    const map = new Map<string, Rec>();
+    for (const member of operationalGroupMembers || []) map.set(`${member.resource_kind}:${member.resource_id}`, member);
+    return map;
+  }, [operationalGroupMembers]);
+  const operationalGroupByGuard = useMemo(() => {
+    const map = new Map<number, Rec>();
+    for (const member of operationalGroupMembers || []) if (String(member.resource_kind) === "guard") map.set(Number(member.resource_id), member);
+    return map;
+  }, [operationalGroupMembers]);
+  const resourceOperationalMeta = useCallback((kind: "post" | "vehicle", resource: Rec) => {
+    const member = operationalGroupByResource.get(`${kind}:${resource.id}`);
+    return {
+      group: member ? String(member.group_name || "") || operationalGroupLabel(resource) : operationalGroupLabel(resource),
+      team: member ? String(member.team_label || "") || operationalTeamLabel(resource) : operationalTeamLabel(resource),
+      color: member ? String(member.group_color || "") || null : null,
+    };
+  }, [operationalGroupByResource]);
   const assignmentIndex = useMemo(() => {
     const map = new Map<string, Rec[]>();
     if (!scheduleAssignments || !scheduleDate) return map;
@@ -244,7 +265,8 @@ export function LiveSchedule() {
     if (!data) return [];
     const q = deferredQuery.toLowerCase().trim();
     const filtered = orderScheduleResources(data.vehicles, data.posts, data.sections).filter((x) => {
-      const text = `${x.r.name || ""} ${x.r.prefix || ""} ${x.r.zone || ""} ${x.r.group_name || ""} ${x.section}`
+      const meta = resourceOperationalMeta(x.kind, x.r);
+      const text = `${x.r.name || ""} ${x.r.prefix || ""} ${x.r.zone || ""} ${x.r.group_name || ""} ${x.section} ${meta.group || ""} ${meta.team || ""}`
         .toLowerCase();
       if (q && !text.includes(q)) {
         const hasGuard = shifts.some((s) =>
@@ -265,11 +287,11 @@ export function LiveSchedule() {
     return filtered.sort((left, right) =>
       left.order - right.order ||
       left.section.localeCompare(right.section, "pt-BR") ||
-      operationalGroupOrder(left.r) - operationalGroupOrder(right.r) ||
-      operationalTeamOrder(left.r) - operationalTeamOrder(right.r) ||
+      operationalGroupOrder({ ...left.r, group_name: resourceOperationalMeta(left.kind, left.r).group }) - operationalGroupOrder({ ...right.r, group_name: resourceOperationalMeta(right.kind, right.r).group }) ||
+      operationalTeamOrder({ ...left.r, name: resourceOperationalMeta(left.kind, left.r).team }) - operationalTeamOrder({ ...right.r, name: resourceOperationalMeta(right.kind, right.r).team }) ||
       String(left.r.prefix || left.r.name || "").localeCompare(String(right.r.prefix || right.r.name || ""), "pt-BR"),
     );
-  }, [assignmentIndex, data, deferredQuery, view]);
+  }, [assignmentIndex, data, deferredQuery, resourceOperationalMeta, view]);
   const sectionOptions = useMemo(
     () => [...new Set(resources.map((item) => item.section))],
     [resources],
@@ -1074,12 +1096,16 @@ export function LiveSchedule() {
               {resources.map(({ kind, r, section }, index) => {
                 const first = index === 0 || resources[index - 1].section !== section;
                 const last = index === resources.length - 1 || resources[index + 1].section !== section;
-                const operationalGroup = operationalGroupLabel(r);
-                const operationalTeam = operationalTeamLabel(r);
+                const operationalMeta = resourceOperationalMeta(kind, r);
+                const operationalGroup = operationalMeta.group;
+                const operationalTeam = operationalMeta.team;
+                const operationalGroupColor = operationalMeta.color;
                 const previousResource = resources[index - 1]?.r;
+                const previousKind = resources[index - 1]?.kind;
+                const previousOperationalGroup = previousResource ? resourceOperationalMeta(previousKind || kind, previousResource).group : null;
                 const groupFirst = Boolean(operationalGroup && (
                   first ||
-                  operationalGroupLabel(previousResource || {}) !== operationalGroup
+                  previousOperationalGroup !== operationalGroup
                 ));
                 const isCollapsed = Boolean(collapsed[section]);
                 if (isCollapsed && !first) return null;
@@ -1094,6 +1120,7 @@ export function LiveSchedule() {
                    groupFirst={groupFirst}
                    operationalGroup={operationalGroup}
                    operationalTeam={operationalTeam}
+                   operationalGroupColor={operationalGroupColor}
                    collapsed={isCollapsed}
                   onToggleSection={() =>
                     setCollapsed((current) => ({
@@ -1108,6 +1135,7 @@ export function LiveSchedule() {
                    assignmentById={assignmentById}
                    resourceChoices={resourceChoices}
                    guards={data.guards}
+                   guardOperationalMeta={operationalGroupByGuard}
                    onQuickAdd={quickAddGuard}
                    onSectionRef={(section, element) => {
                      if (element) sectionRefs.current.set(section, element);
@@ -1552,6 +1580,7 @@ type RowProps = {
   groupFirst: boolean;
   operationalGroup: string | null;
   operationalTeam: string | null;
+  operationalGroupColor: string | null;
   collapsed: boolean;
   onToggleSection: () => void;
   shifts: typeof SHIFT_DEFS;
@@ -1561,6 +1590,7 @@ type RowProps = {
   assignmentById: Map<number, Rec>;
   resourceChoices: ResourceChoice[];
   guards: Rec[];
+  guardOperationalMeta: Map<number, Rec>;
   onQuickAdd: (guardId: number, kind: "post" | "vehicle", resource: Rec, shift: string) => void | Promise<void>;
   onSectionRef: (section: string, element: HTMLTableRowElement | null) => void;
   serviceAdjustments: Rec[];
@@ -1601,6 +1631,7 @@ function Row({
   groupFirst,
   operationalGroup,
   operationalTeam,
+  operationalGroupColor,
   collapsed,
   onToggleSection,
   shifts: visibleShifts,
@@ -1610,6 +1641,7 @@ function Row({
   assignmentById,
   resourceChoices,
   guards,
+  guardOperationalMeta,
   onQuickAdd,
   onSectionRef,
   serviceAdjustments,
@@ -1763,8 +1795,8 @@ function Row({
       )}
       {!collapsed && groupFirst && operationalGroup && (
         <tr className="operational-group-heading">
-          <td colSpan={1 + visibleShifts.length}>
-            <span className="operational-group-title">{operationalGroup}</span>
+          <td colSpan={1 + visibleShifts.length} style={operationalGroupColor ? { borderTopColor: operationalGroupColor } : undefined}>
+            <span className="operational-group-title" style={operationalGroupColor ? { color: operationalGroupColor } : undefined}>{operationalGroup}</span>
             <small>Grupamento operacional</small>
           </td>
         </tr>
@@ -1875,6 +1907,7 @@ function Row({
                     </span>
                   )}
                   <b>{a.guard_name}</b>
+                  {(() => { const guardMeta = guardOperationalMeta.get(Number(a.guard_id)); return guardMeta && (guardMeta.team_label || guardMeta.group_short_name || guardMeta.group_name) ? <span className="person-operational-chip">{guardMeta.team_label ? `Equipe ${guardMeta.team_label}` : String(guardMeta.group_short_name || guardMeta.group_name)}</span> : null; })()}
                   {visualStatus !== "normal" && (
                     <span className={`badge ${statusClass(visualStatus)} ${adjustmentBadge.startsWith("BH+")?"settlement-badge":""}`}>
                       {adjustmentBadge|| (String(a.work_kind)==="overtime_extension"?overtimeHoursLabel(a):visualStatus==="overtime"&&a.regular_ends_at?`HE · após ${String(a.regular_ends_at).slice(11,16)}`:statusShort(visualStatus))}
@@ -1978,6 +2011,7 @@ const MemoizedRow = memo(Row, (previous, next) =>
   previous.groupFirst === next.groupFirst &&
   previous.operationalGroup === next.operationalGroup &&
   previous.operationalTeam === next.operationalTeam &&
+  previous.operationalGroupColor === next.operationalGroupColor &&
   previous.collapsed === next.collapsed &&
   previous.shifts === next.shifts &&
   previous.assignmentIndex === next.assignmentIndex &&
@@ -1986,6 +2020,7 @@ const MemoizedRow = memo(Row, (previous, next) =>
   previous.assignmentById === next.assignmentById &&
   previous.resourceChoices === next.resourceChoices &&
   previous.guards === next.guards &&
+  previous.guardOperationalMeta === next.guardOperationalMeta &&
   previous.serviceAdjustments === next.serviceAdjustments &&
   previous.movements === next.movements &&
   previous.availableForRedeployment === next.availableForRedeployment &&

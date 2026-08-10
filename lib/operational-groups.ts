@@ -5,6 +5,37 @@ export type OperationalResource = {
   group_name?: string | null;
 };
 
+export type OperationalGroup = {
+  id: number;
+  name: string;
+  short_name?: string | null;
+  color?: string | null;
+  sort_order: number;
+  active?: number | boolean;
+};
+
+export type OperationalGroupMember = {
+  id: number;
+  group_id: number;
+  resource_kind: "guard" | "post" | "vehicle" | string;
+  resource_id: number;
+  team_label?: string | null;
+  group_name?: string | null;
+  group_short_name?: string | null;
+  group_color?: string | null;
+  group_sort_order?: number;
+};
+
+export const OPERATIONAL_GROUP_DEFAULTS = [
+  { name: "GESCOM", short_name: "GESCOM", color: "#1769aa", sort_order: 10 },
+  { name: "CANIL", short_name: "CANIL", color: "#6a1b9a", sort_order: 20 },
+  { name: "ROMU", short_name: "ROMU", color: "#c62828", sort_order: 30 },
+  { name: "AMBIENTAL", short_name: "AMBIENTAL", color: "#2e7d32", sort_order: 40 },
+  { name: "PATRULHA RURAL", short_name: "RURAL", color: "#8d6e63", sort_order: 50 },
+] as const;
+
+export const OPERATIONAL_TEAM_OPTIONS = ["ALFA", "BRAVO", "CHARLIE", "DELTA", "ECHO", "FOXTROT"] as const;
+
 const GROUPS = [
   "GESCOM",
   "CANIL",

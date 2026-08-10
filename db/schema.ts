@@ -76,6 +76,12 @@ export const vehicleReturnReconciliations = sqliteTable("vehicle_return_reconcil
   index("idx_vehicle_return_pending").on(t.scheduleId,t.vehicleId,t.status),
 ]);
 export const scheduleSections=sqliteTable("schedule_sections",{sectionKey:text("section_key").primaryKey(),label:text("label").notNull(),sortOrder:integer("sort_order").notNull().default(0),updatedAt:text("updated_at").notNull().default("CURRENT_TIMESTAMP")});
+export const operationalGroups = sqliteTable("operational_groups", {
+  id:integer("id").primaryKey({autoIncrement:true}), name:text("name").notNull().unique(), shortName:text("short_name"), color:text("color"), sortOrder:integer("sort_order").notNull().default(0), active:integer("active",{mode:"boolean"}).notNull().default(true), ...audit,
+});
+export const operationalGroupMembers = sqliteTable("operational_group_members", {
+  id:integer("id").primaryKey({autoIncrement:true}), groupId:integer("group_id").notNull().references(()=>operationalGroups.id), resourceKind:text("resource_kind").notNull(), resourceId:integer("resource_id").notNull(), teamLabel:text("team_label"), ...audit,
+},t=>[uniqueIndex("idx_operational_group_member_unique").on(t.groupId,t.resourceKind,t.resourceId),index("idx_operational_group_member_resource").on(t.resourceKind,t.resourceId)]);
 export const movements = sqliteTable("movements", {
   id:integer("id").primaryKey({autoIncrement:true}), guardId:integer("guard_id").notNull().references(()=>guards.id), type:text("type",{enum:["day_off","vacation","course","medical_leave","technical_reserve","time_bank","swap"]}).notNull(), startsAt:text("starts_at").notNull(), endsAt:text("ends_at").notNull(), requestRef:text("request_ref"), notes:text("notes"), status:text("status",{enum:["pending","approved","rejected"]}).notNull().default("approved"), ...audit,
 });

@@ -13,6 +13,7 @@ import { rankGuardSuggestions, describeReasons } from "../../../lib/suggest-gm";
 import { hasRequiredVehicleCrew, hasUniqueCrewMembers } from "../../../lib/crew-rules";
 import { orderedResourceGuardIds } from "../../../lib/schedule-lanes";
 import { copiedBlockStatus } from "../../../lib/copy-rules";
+import { ensureOperationalGroups } from "../../../lib/operational-groups-db";
 
 export const dynamic = "force-dynamic";
 
@@ -317,6 +318,7 @@ async function seedSchedule(date: string, scheduleId: number) {
 
 async function ensureBase(date: string) {
   await ensureServiceAdjustmentsTable();
+  await ensureOperationalGroups(env.DB);
   await ensureAssignmentLaneOrder();
   await env.DB.prepare(
     `CREATE TABLE IF NOT EXISTS schedule_resource_exclusions (
@@ -430,7 +432,7 @@ export async function GET(request: Request) {
   const schedule = await env.DB.prepare("SELECT * FROM schedules WHERE date=?")
     .bind(date)
     .first<Record<string, unknown>>();
-  const [guards, posts, vehicles, allVehicles, assignments, movements, notices, outages, sections, operations, serviceAdjustments] =
+  const [guards, posts, vehicles, allVehicles, assignments, movements, notices, outages, sections, operations, serviceAdjustments, operationalGroups, operationalGroupMembers] =
     await Promise.all([
       env.DB.prepare(
         "SELECT id,name,registration,platoon,base_shift,work_regime,overtime_eligible FROM guards WHERE active=1 ORDER BY name",
@@ -470,6 +472,10 @@ export async function GET(request: Request) {
         LEFT JOIN guards c ON c.id=sa.counterpart_guard_id
         WHERE sa.status='active' AND (sa.service_date=? OR sa.counterpart_service_date=? OR sa.settlement_date=?)
         ORDER BY CASE WHEN sa.service_date=? THEN sa.starts_at WHEN sa.counterpart_service_date=? THEN sa.counterpart_starts_at ELSE sa.settlement_starts_at END,sa.id`).bind(date,date,date,date,date).all(),
+      env.DB.prepare("SELECT id,name,short_name,color,sort_order,active FROM operational_groups WHERE active=1 ORDER BY sort_order,name").all(),
+      env.DB.prepare(`SELECT m.id,m.group_id,m.resource_kind,m.resource_id,m.team_label,g.name group_name,g.short_name group_short_name,g.color group_color,g.sort_order group_sort_order
+        FROM operational_group_members m JOIN operational_groups g ON g.id=m.group_id
+        WHERE g.active=1 ORDER BY g.sort_order,g.name,m.resource_kind,m.resource_id`).all(),
     ]);
   const operationAssignments=(await env.DB.prepare(`SELECT os.guard_id,o.starts_at,o.ends_at FROM operation_slots os JOIN operations o ON o.id=os.operation_id WHERE o.schedule_id=? AND o.status!='cancelled' AND os.guard_id IS NOT NULL`).bind(schedule?.id).all<{guard_id:number;starts_at:string;ends_at:string}>()).results;
   const blocked = new Set([
@@ -511,6 +517,8 @@ export async function GET(request: Request) {
     sections: sections.results,
     operations: operations.results,
     serviceAdjustments: serviceAdjustments.results,
+    operationalGroups: operationalGroups.results,
+    operationalGroupMembers: operationalGroupMembers.results,
     patternLabel: appliedPattern?`${appliedPattern.day_code} + ${appliedPattern.night_code} + SEMANAL`:`${suggested?.dayCode} + ${suggested?.nightCode} + SEMANAL · AJUSTES`,
   });
 }
