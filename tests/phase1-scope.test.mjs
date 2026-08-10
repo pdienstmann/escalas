@@ -621,3 +621,16 @@ test("pattern editor reuses the current date cache and refreshes it after synchr
   assert.match(source, /void load\(Boolean\(readPatternCache\(date\)\)\)/);
   assert.match(source, /writePatternCache\(date, json\)/);
 });
+
+test("operational notices can be edited in place with an auditable API action", () => {
+  const api = readFileSync(resolve("app/api/notices/route.ts"), "utf8");
+  const dashboard = readFileSync(resolve("app/notices-dashboard.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/notices.css"), "utf8");
+  assert.match(api, /action==="create"\|\|action==="update"/);
+  assert.match(api, /UPDATE operational_notices SET effective_date/);
+  assert.match(api, /Editou o lembrete/);
+  assert.match(dashboard, /action: "update"/);
+  assert.match(dashboard, /NoticeEditor/);
+  assert.match(dashboard, />Editar<\/button>/);
+  assert.match(styles, /\.notice-editor-backdrop/);
+});
