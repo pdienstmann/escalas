@@ -1621,6 +1621,15 @@ function Row({
   const [positionAssignmentId, setPositionAssignmentId] = useState<number | null>(null);
   const [addShift, setAddShift] = useState<string | null>(null);
   const [addQuery, setAddQuery] = useState("");
+  const quickAddAvailableIds = useMemo(() => {
+    if (!addShift) return new Set<number>();
+    const target = operationalShiftWindow(date, addShift);
+    return new Set(
+      availableForRedeployment
+        .filter((assignment) => String(assignment.starts_at) < target.end && String(assignment.ends_at) > target.start)
+        .map((assignment) => Number(assignment.guard_id)),
+    );
+  }, [addShift, availableForRedeployment, date]);
   const moveChoices = useMemo(
     () => resourceChoices.filter((choice) => !(choice.kind === kind && Number(choice.resource.id) === Number(resource.id))),
     [kind, resource.id, resourceChoices],
@@ -1629,14 +1638,15 @@ function Row({
     if (!addShift) return [];
     const target = operationalShiftWindow(date, addShift);
     const query = addQuery.trim().toLowerCase();
-    const availableIds = new Set(
-      availableForRedeployment
-        .filter((assignment) => String(assignment.starts_at) < target.end && String(assignment.ends_at) > target.start)
-        .map((assignment) => Number(assignment.guard_id)),
+    const serviceAdjustmentBlockedIds = new Set(
+      serviceAdjustments
+        .filter((adjustment) => String(adjustment.subtype) === "negative_full" && String(adjustment.service_date) === date)
+        .map((adjustment) => Number(adjustment.guard_id)),
     );
     return guards
       .filter((guard) => {
         if (query && !`${guard.name || ""} ${guard.registration || ""} ${guard.platoon || ""}`.toLowerCase().includes(query)) return false;
+        if (serviceAdjustmentBlockedIds.has(Number(guard.id))) return false;
         if (movements.some((movement) => Number(movement.guard_id) === Number(guard.id) && String(movement.starts_at) < target.end && String(movement.ends_at) > target.start)) return false;
         return !allScheduleAssignments.some((assignment) =>
           Number(assignment.guard_id) === Number(guard.id) &&
@@ -1645,11 +1655,11 @@ function Row({
         );
       })
       .sort((left, right) => {
-        const availability = Number(availableIds.has(Number(right.id))) - Number(availableIds.has(Number(left.id)));
+        const availability = Number(quickAddAvailableIds.has(Number(right.id))) - Number(quickAddAvailableIds.has(Number(left.id)));
         return availability || String(left.name || "").localeCompare(String(right.name || ""), "pt-BR");
       })
       .slice(0, 8);
-  }, [addQuery, addShift, allScheduleAssignments, availableForRedeployment, date, guards, movements]);
+  }, [addQuery, addShift, allScheduleAssignments, date, guards, movements, quickAddAvailableIds, serviceAdjustments]);
   function moveDirectly(assignment: Rec, shift: string) {
     const [targetKind, targetId] = moveDestination.split(":");
     const destination = moveChoices.find((choice) => choice.kind === targetKind && Number(choice.resource.id) === Number(targetId));
@@ -1781,7 +1791,7 @@ function Row({
             <input value={addQuery} onChange={(event) => setAddQuery(event.target.value)} placeholder="Buscar nome ou matrícula..." aria-label="Buscar GM disponível" />
             <div className="quick-add-results">
               {quickAddCandidates.map((guard) => <button type="button" key={String(guard.id)} onClick={() => { setAddShift(null); setAddQuery(""); void onQuickAdd(Number(guard.id), kind, resource, s.id); }}>
-                <span><b>{guard.name}</b><small>{guard.registration || "Sem matrícula"} · {guard.platoon || "Disponível"}</small></span><strong>Adicionar</strong>
+                <span><b>{guard.name}</b><small><em className={`quick-add-origin ${quickAddAvailableIds.has(Number(guard.id)) ? "available" : "free"}`}>{quickAddAvailableIds.has(Number(guard.id)) ? "À disposição" : "Livre no turno"}</em> · {guard.registration || "Sem matrícula"} · {guard.platoon || "Disponível"}</small></span><strong>Adicionar</strong>
               </button>)}
               {!quickAddCandidates.length && <small>Nenhum GM livre neste horário. Use “Mais opções” para consultar a lista completa.</small>}
             </div>

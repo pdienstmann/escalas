@@ -208,7 +208,9 @@ test("completed cells expose a quick available-GM picker before the advanced edi
   assert.match(schedule, /className="cell-add-member"/);
   assert.match(schedule, /quickAddCandidates\.map/);
   assert.match(schedule, /onQuickAdd\(Number\(guard\.id\), kind, resource, s\.id\)/);
+  assert.match(schedule, /serviceAdjustmentBlockedIds/);
   assert.match(schedule, /movements\.some\(\(movement\) => Number\(movement\.guard_id\)/);
+  assert.match(schedule, /quickAddAvailableIds\.has\(Number\(guard\.id\)\)/);
   assert.match(schedule, /previous\.movements === next\.movements/);
   assert.match(schedule, /className="quick-add-advanced"/);
   assert.match(usability, /\.quick-add-picker/);
