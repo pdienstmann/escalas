@@ -174,7 +174,7 @@ export async function POST(request: Request) {
     return await publishSchedule(request);
   } catch (error) {
     console.error("publish_validation_error", error);
-    return Response.json({ error: "Não foi possível concluir a validação da escala.", detail: String(error) }, { status: 500 });
+    return Response.json({ error: "Não foi possível concluir a validação da escala." }, { status: 500 });
   }
 }
 
