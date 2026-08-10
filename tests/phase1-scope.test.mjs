@@ -822,3 +822,21 @@ test("overtime dashboard reuses a month cache while refreshing the live book", (
   assert.match(dashboard, /writeOvertimeCache\(next\)/);
   assert.match(dashboard, /const isRefreshing = loading \|\| !monthMatches/);
 });
+
+test("publication validation respects FA resources and reports actionable critical issues", () => {
+  const api = readFileSync(resolve("app/api/publish/route.ts"), "utf8");
+  const dashboard = readFileSync(resolve("app/validate-schedule.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/validation.css"), "utf8");
+  assert.match(api, /schedule_resource_exclusions/);
+  assert.match(api, /vehicle_outages/);
+  assert.match(api, /vehicle_return_reconciliations/);
+  assert.match(api, /missingRoles/);
+  assert.match(api, /overlapping/);
+  assert.match(api, /severity: "critical"/);
+  assert.match(dashboard, /normalizeIssues/);
+  assert.match(dashboard, /pendências críticas/);
+  assert.match(dashboard, /Abrir escala/);
+  assert.match(dashboard, /validation-issue/);
+  assert.match(styles, /validation-severity-summary/);
+  assert.match(styles, /validation-issue\.warning/);
+});

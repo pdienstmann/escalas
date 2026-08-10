@@ -1,11 +1,22 @@
 "use client";
-import { useEffect, useState } from "react";
+
+import { useEffect, useMemo, useState } from "react";
 import { FullPageLink as Link } from "./full-page-link";
 import { ModuleLoading } from "./module-loading";
 import { useScheduleDate } from "./use-schedule-date";
 import { formatScheduleDate } from "../lib/schedule-date";
 
 type Rec = Record<string, string | number | null>;
+type ValidationIssue = {
+  id: string;
+  severity: "critical" | "warning";
+  kind: "coverage" | "role" | "conflict";
+  label: string;
+  detail: string;
+  resourceKind?: "post" | "vehicle";
+  resourceId?: number;
+  shift?: string;
+};
 type Data = {
   schedule: Rec;
   posts: Rec[];
@@ -14,32 +25,62 @@ type Data = {
   date: string;
 };
 
+function normalizeIssues(value: unknown): ValidationIssue[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((issue, index) => {
+    if (typeof issue === "string") {
+      return [{ id: `legacy-${index}`, severity: "critical" as const, kind: "coverage" as const, label: issue, detail: "Furo que precisa ser conferido antes de publicar." }];
+    }
+    if (!issue || typeof issue !== "object") return [];
+    const item = issue as Partial<ValidationIssue>;
+    if (!item.label) return [];
+    return [{
+      id: String(item.id || `issue-${index}`),
+      severity: item.severity === "warning" ? "warning" : "critical",
+      kind: item.kind === "role" || item.kind === "conflict" ? item.kind : "coverage",
+      label: String(item.label),
+      detail: String(item.detail || "Confira esta pendência na escala."),
+      resourceKind: item.resourceKind,
+      resourceId: item.resourceId,
+      shift: item.shift,
+    }];
+  });
+}
+
 export function ValidateSchedule() {
   const { date, hrefFor } = useScheduleDate();
   const [data, setData] = useState<Data | null>(null);
-  const [issues, setIssues] = useState<string[]>([]);
+  const [issues, setIssues] = useState<ValidationIssue[]>([]);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     fetch(`/api/schedule?date=${date}&_=${Date.now()}`, { cache: "no-store" })
-      .then((r) => r.json())
-      .then(setData)
+      .then((response) => response.json())
+      .then((payload) => {
+        setIssues([]);
+        setMessage("");
+        setData(payload as Data);
+      })
       .catch(() => setMessage("Não foi possível carregar a validação."));
   }, [date]);
 
   async function publish() {
     if (!data || busy) return;
     setBusy(true);
+    setMessage("");
     try {
-      const r = await fetch("/api/publish", {
+      const response = await fetch("/api/publish", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ scheduleId: data.schedule.id }),
       });
-      const j = await r.json();
-      setIssues(j.issues || []);
-      setMessage(r.ok ? "Escala validada e publicada." : j.error);
+      const payload = await response.json() as { issues?: unknown; error?: string };
+      const nextIssues = normalizeIssues(payload.issues);
+      setIssues(nextIssues);
+      setMessage(response.ok ? "Escala validada e publicada." : payload.error || "Não foi possível publicar a escala.");
+    } catch {
+      setMessage("A validação não foi concluída. Verifique a conexão e tente novamente.");
     } finally {
       setBusy(false);
     }
@@ -49,6 +90,8 @@ export function ValidateSchedule() {
   // render it for the newly selected date. This avoids a stale flash without
   // forcing a synchronous state update from the effect.
   const currentData = data?.date === date ? data : null;
+  const criticalIssues = useMemo(() => issues.filter((issue) => issue.severity === "critical"), [issues]);
+  const warningIssues = useMemo(() => issues.filter((issue) => issue.severity === "warning"), [issues]);
 
   if (!currentData) {
     return (
@@ -68,7 +111,7 @@ export function ValidateSchedule() {
       <header>
         <span>VALIDAÇÃO OPERACIONAL</span>
         <h1>Conferência antes da publicação</h1>
-        <p>{formatScheduleDate(currentData.date)}</p>
+        <p>{formatScheduleDate(currentData.date)} · escala {String(currentData.schedule.status || "rascunho")}</p>
       </header>
       <div className="validation-stats">
         <article>
@@ -81,35 +124,46 @@ export function ValidateSchedule() {
         </article>
         <article className={filled < expected ? "bad" : "good"}>
           <b>{Math.max(0, expected - filled)}</b>
-          <span>pendências estimadas</span>
+          <span>diferença de cobertura</span>
         </article>
+      </div>
+      <div className="validation-severity-summary" aria-live="polite">
+        <article className={criticalIssues.length ? "bad" : "good"}><b>{criticalIssues.length}</b><span>pendências críticas</span><small>bloqueiam a publicação</small></article>
+        <article className={warningIssues.length ? "warning" : "good"}><b>{warningIssues.length}</b><span>alertas</span><small>exigem conferência</small></article>
       </div>
       <section>
         <h2>Verificações automáticas</h2>
         <ul>
-          <li>Conflitos de horário são bloqueados ao salvar.</li>
-          <li>Guardas afastados são retirados automaticamente.</li>
-          <li>Viaturas exigem motorista e patrulheiro em cada turno.</li>
-          <li>Postos exigem ao menos um GM em cada turno.</li>
+          <li>Conflitos de horário são bloqueados ao salvar e também na publicação.</li>
+          <li>Guardas afastados, postos excluídos e viaturas em FA não entram como pendência.</li>
+          <li>Viaturas ativas exigem motorista e patrulheiro em cada turno.</li>
+          <li>Postos ativos exigem ao menos um GM em cada turno.</li>
         </ul>
       </section>
       {message && (
-        <p className={issues.length ? "validation-message bad" : "validation-message good"}>
+        <p className={criticalIssues.length ? "validation-message bad" : "validation-message good"} role="status">
           {message}
         </p>
       )}
       {issues.length > 0 && (
-        <section>
-          <h2>Furos encontrados</h2>
+        <section className="validation-issues">
+          <header>
+            <div><small>PENDÊNCIAS ENCONTRADAS</small><h2>O que precisa ser conferido</h2></div>
+            <Link href={hrefFor("/")}>Abrir escala</Link>
+          </header>
           <div className="issue-grid">
-            {issues.map((i) => (
-              <span key={i}>{i}</span>
+            {issues.map((issue) => (
+              <article className={`validation-issue ${issue.severity}`} key={issue.id}>
+                <header><span>{issue.severity === "critical" ? "CRÍTICO" : "ALERTA"}</span><b>{issue.label}</b></header>
+                <p>{issue.detail}</p>
+                {issue.kind === "conflict" && <small>Abra a escala para mover um dos quadrantes ou retirar a duplicidade.</small>}
+              </article>
             ))}
           </div>
         </section>
       )}
       <button className="publish-button" disabled={busy} onClick={() => void publish()}>
-        {busy ? "Publicando…" : "Validar e publicar escala"}
+        {busy ? "Conferindo…" : "Validar e publicar escala"}
       </button>
     </main>
   );
