@@ -12,6 +12,7 @@ import { fullPeriodShifts, fullPeriodWindow, shiftTimes as periodShiftTimes, ope
 import { rankGuardSuggestions, describeReasons } from "../../../lib/suggest-gm";
 import { hasRequiredVehicleCrew, hasUniqueCrewMembers } from "../../../lib/crew-rules";
 import { orderedResourceGuardIds } from "../../../lib/schedule-lanes";
+import { copiedBlockStatus } from "../../../lib/copy-rules";
 
 export const dynamic = "force-dynamic";
 
@@ -1082,6 +1083,10 @@ export async function POST(request: Request) {
     const interval=periodShiftTimes(String(source.schedule_date),targetShift);
     const blocked=await assertAssignable(scheduleId,Number(source.guard_id),interval.start,interval.end,0);
     if(blocked)return Response.json({error:blocked.error},{status:blocked.status});
+    // A normal/weekly block pasted into another non-overlapping quadrant is
+    // additional service. Mark it as HE immediately for manual review.
+    const targetStatus=copiedBlockStatus(source);
+    const automaticOvertime=targetStatus==="overtime"&&String(source.status||"normal")!=="overtime";
     let role=postId?"guard":String(source.role||"third");
     if(vehicleId){
       const occupied=(await env.DB.prepare("SELECT role FROM assignments WHERE schedule_id=? AND vehicle_id=? AND starts_at<? AND ends_at>?").bind(scheduleId,vehicleId,interval.end,interval.start).all<{role:string}>()).results;
@@ -1091,10 +1096,12 @@ export async function POST(request: Request) {
     const created=await env.DB.prepare(`INSERT INTO assignments
       (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,work_kind,status,request_ref,is_reassigned,reassignment_note)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .bind(scheduleId,source.guard_id,postId,vehicleId,targetShift,role,interval.start,interval.end,"shift",["normal","overtime","time_bank","swap"].includes(String(source.status))?source.status:"normal",source.request_ref||null,source.is_reassigned||0,source.reassignment_note||null).run();
+      .bind(scheduleId,source.guard_id,postId,vehicleId,targetShift,role,interval.start,interval.end,"shift",targetStatus,source.request_ref||null,source.is_reassigned||0,source.reassignment_note||null).run();
     const assignment=await env.DB.prepare("SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id=?").bind(created.meta.last_row_id).first<Record<string,unknown>>();
     const auditEventId=await writeAudit(request,{action:"create",entityType:"assignment",entityId:Number(created.meta.last_row_id),summary:`Colou ${source.guard_name} no ${targetShift}º turno`,after:assignment,undoable:true});
-    return Response.json({ok:true,assignment,auditEventId,message:`${source.guard_name} copiado para o ${targetShift}º turno com o horário ajustado.`});
+    return Response.json({ok:true,assignment,auditEventId,automaticOvertime,message:automaticOvertime
+      ? `${source.guard_name} copiado para o ${targetShift}º turno e marcado automaticamente como HE para conferência.`
+      : `${source.guard_name} copiado para o ${targetShift}º turno com o horário ajustado.`});
   }
   if (b.action === "remove_resource_from_day") {
     const scheduleId = Number(b.scheduleId);

@@ -16,6 +16,7 @@ import { groupRedeploymentAssignments, mergeScheduleAssignments } from "../lib/s
 import { orderAssignmentsInResourceCell, orderedResourceGuardIds } from "../lib/schedule-lanes.ts";
 import { suggestionPosition } from "../lib/suggestion-position.ts";
 import { compactRequestReference } from "../lib/request-reference.ts";
+import { copiedBlockStatus } from "../lib/copy-rules.ts";
 
 test("request references stay compact and visible in the schedule and PDF", () => {
   const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
@@ -188,6 +189,17 @@ test("selected regular GM cards expose an explicit lane-position picker", () => 
   assert.match(schedule, /const sameShift = sourceShift \? sourceShift === shift/);
   assert.match(schedule, /Colocar no final/);
   assert.match(usability, /\.inline-position-picker/);
+});
+
+test("copying a regular block into another quadrant is automatically classified as HE", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const api = readFileSync(resolve("app/api/schedule/route.ts"), "utf8");
+  assert.equal(copiedBlockStatus({ status: "normal", work_kind: "weekly" }), "overtime");
+  assert.equal(copiedBlockStatus({ status: "overtime", work_kind: "shift" }), "overtime");
+  assert.equal(copiedBlockStatus({ status: "time_bank", work_kind: "time_bank_positive" }), "time_bank");
+  assert.match(api, /const targetStatus=copiedBlockStatus\(source\)/);
+  assert.match(api, /automaticOvertime/);
+  assert.match(schedule, /a cópia será marcada como HE/);
 });
 
 test("completed cells expose a quick available-GM picker before the advanced editor", () => {
