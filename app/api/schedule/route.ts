@@ -8,7 +8,7 @@ import {
 import { writeAudit } from "../../../lib/audit";
 import { permitted } from "../../../lib/access";
 import { isScheduleDate, todayScheduleDate } from "../../../lib/schedule-date";
-import { fullPeriodShifts, fullPeriodWindow, shiftTimes as periodShiftTimes, isDayShift, splitExtensionWindow } from "../../../lib/shift-rules";
+import { fullPeriodShifts, fullPeriodWindow, shiftTimes as periodShiftTimes, operationalShiftWindow, isDayShift, splitExtensionWindow } from "../../../lib/shift-rules";
 import { rankGuardSuggestions, describeReasons } from "../../../lib/suggest-gm";
 import { hasRequiredVehicleCrew, hasUniqueCrewMembers } from "../../../lib/crew-rules";
 
@@ -1108,6 +1108,121 @@ export async function POST(request: Request) {
     const assignment=await env.DB.prepare("SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id=?").bind(created.meta.last_row_id).first<Record<string,unknown>>();
     const auditEventId=await writeAudit(request,{action:"create",entityType:"assignment",entityId:Number(created.meta.last_row_id),summary:direction==="before"?`Antecipou ${base.guard_name} em HE desde ${startsAt.slice(11,16)}`:`Estendeu ${base.guard_name} em HE até ${endsAt.slice(11,16)}`,after:assignment,undoable:true});
     return Response.json({ok:true,assignment,auditEventId,message:`HE de ${base.guard_name} adicionada como bloco independente.`});
+  }
+  if (b.action === "delete_shift_segment") {
+    const id = Number(b.id || 0);
+    const scheduleId = Number(b.scheduleId || 0);
+    const shift = String(b.shift || "");
+    if (!id || !scheduleId || !["1", "2", "3", "4"].includes(shift))
+      return Response.json({ error: "Informe o horário que será removido." }, { status: 400 });
+    const schedule = await env.DB.prepare("SELECT id,date FROM schedules WHERE id=?").bind(scheduleId).first<{ id:number; date:string }>();
+    const before = await env.DB.prepare(
+      "SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id=? AND a.schedule_id=?",
+    ).bind(id, scheduleId).first<Record<string, unknown>>();
+    if (!schedule || !before)
+      return Response.json({ error: "Designação não encontrada nesta escala." }, { status: 404 });
+    if (isStaleVersion((b as Record<string, unknown>).expectedUpdatedAt, before.updated_at))
+      return staleVersionResponse(before);
+
+    // Prefer the real next-day window for 1º turno, but keep compatibility
+    // with older rows stored as date 01:00–07:00.
+    const operationalWindow = operationalShiftWindow(schedule.date, shift);
+    const legacyWindow = periodShiftTimes(schedule.date, shift);
+    const beforeStart = String(before.starts_at || "");
+    const beforeEnd = String(before.ends_at || "");
+    const overlaps = (window: { start:string; end:string }) =>
+      Date.parse(beforeStart) < Date.parse(window.end) && Date.parse(beforeEnd) > Date.parse(window.start);
+    const window = shift === "1" && !overlaps(operationalWindow) && overlaps(legacyWindow)
+      ? legacyWindow
+      : operationalWindow;
+    const segmentStart = Date.parse(window.start);
+    const segmentEnd = Date.parse(window.end);
+    const assignmentStart = Date.parse(beforeStart);
+    const assignmentEnd = Date.parse(beforeEnd);
+    if (![segmentStart, segmentEnd, assignmentStart, assignmentEnd].every(Number.isFinite) || assignmentEnd <= assignmentStart || assignmentEnd <= segmentStart || assignmentStart >= segmentEnd)
+      return Response.json({ error: "O horário selecionado não está dentro desta designação." }, { status: 409 });
+
+    const pieces = [
+      assignmentStart < segmentStart ? { start: beforeStart, end: window.start } : null,
+      assignmentEnd > segmentEnd ? { start: window.end, end: beforeEnd } : null,
+    ].filter(Boolean) as Array<{ start:string; end:string }>;
+    const pieceFields = (piece: { start:string; end:string }) => {
+      const regular = String(before.regular_ends_at || "");
+      const regularMs = Date.parse(regular);
+      const pieceStart = Date.parse(piece.start);
+      const pieceEnd = Date.parse(piece.end);
+      let regularEnd: string | null = null;
+      if (regular && Number.isFinite(regularMs) && regularMs > pieceStart) {
+        regularEnd = regularMs <= pieceEnd ? regular : piece.end;
+      }
+      const breakStart = String(before.break_starts_at || "");
+      const breakEnd = String(before.break_ends_at || "");
+      const breakStartMs = Date.parse(breakStart);
+      const breakEndMs = Date.parse(breakEnd);
+      const hasBreak = breakStart && breakEnd && Number.isFinite(breakStartMs) && Number.isFinite(breakEndMs)
+        && breakStartMs >= pieceStart && breakEndMs <= pieceEnd;
+      return {
+        regularEnd,
+        breakStart: hasBreak ? breakStart : null,
+        breakEnd: hasBreak ? breakEnd : null,
+      };
+    };
+    const beforePieces = pieces.map((piece) => ({ ...piece, ...pieceFields(piece) }));
+    let insertedId = 0;
+    if (!beforePieces.length) {
+      await env.DB.prepare("DELETE FROM assignments WHERE id=? AND schedule_id=?").bind(id, scheduleId).run();
+    } else {
+      const first = beforePieces[0];
+      await env.DB.prepare(
+        "UPDATE assignments SET starts_at=?,ends_at=?,regular_ends_at=?,break_starts_at=?,break_ends_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND schedule_id=?",
+      ).bind(first.start, first.end, first.regularEnd, first.breakStart, first.breakEnd, id, scheduleId).run();
+      if (beforePieces.length > 1) {
+        const second = beforePieces[1];
+        const created = await env.DB.prepare(
+          "INSERT INTO assignments (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,regular_ends_at,break_starts_at,break_ends_at,work_kind,status,request_ref,is_reassigned,reassignment_note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ).bind(
+          scheduleId,
+          before.guard_id,
+          before.post_id || null,
+          before.vehicle_id || null,
+          before.shift,
+          before.role,
+          second.start,
+          second.end,
+          second.regularEnd,
+          second.breakStart,
+          second.breakEnd,
+          before.work_kind || "shift",
+          before.status || "normal",
+          before.request_ref || null,
+          before.is_reassigned || 0,
+          before.reassignment_note || null,
+        ).run();
+        insertedId = Number(created.meta.last_row_id);
+      }
+    }
+    const changedIds = beforePieces.length ? [id, insertedId].filter(Boolean) : [];
+    const assignments = changedIds.length
+      ? (await env.DB.prepare(`SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id IN (${changedIds.map(() => "?").join(",")}) ORDER BY a.starts_at`).bind(...changedIds).all<Record<string, unknown>>()).results
+      : [];
+    const auditEventId = await writeAudit(request, {
+      action: beforePieces.length ? "update" : "delete",
+      entityType: "assignment_segment",
+      entityId: id,
+      summary: `Removeu ${before.guard_name} somente de ${shift}º turno`,
+      before: { assignment: before, shift, window },
+      after: beforePieces.length ? { assignments } : undefined,
+      undoable: true,
+    });
+    return Response.json({
+      ok: true,
+      assignments,
+      deletedId: beforePieces.length ? undefined : id,
+      auditEventId,
+      message: beforePieces.length
+        ? `Horário de ${before.guard_name} removido. Os demais períodos foram preservados.`
+        : `${before.guard_name} removido somente deste horário.`,
+    });
   }
   if (b.action === "delete") {
     const before = await env.DB.prepare(

@@ -151,6 +151,19 @@ test("overtime shortcut lives inside the GM card and stays distinct from add act
   assert.match(density, /border-bottom:4px solid/);
 });
 
+test("the inline X removes only the selected schedule segment", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const api = readFileSync(resolve("app/api/schedule/route.ts"), "utf8");
+  const styles = readFileSync(resolve("app/segment-remove.css"), "utf8");
+  assert.match(schedule, /className="live-person-remove"/);
+  assert.match(schedule, /action: "delete_shift_segment"/);
+  assert.match(api, /if \(b\.action === "delete_shift_segment"\)/);
+  assert.match(api, /UPDATE assignments SET starts_at=\?,ends_at=\?/);
+  assert.match(api, /INSERT INTO assignments \(schedule_id,guard_id,post_id,vehicle_id/);
+  assert.match(styles, /\.live-person-card \.live-person-remove/);
+  assert.match(styles, /@media print\{\.live-person-card \.live-person-remove\{display:none/);
+});
+
 test("formatHoursDuration renders 2h and 2h30 without decimals", () => {
   assert.equal(formatHoursDuration(2), "2h");
   assert.equal(formatHoursDuration(2.5), "2h30");

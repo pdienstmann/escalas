@@ -311,6 +311,19 @@ export function LiveSchedule() {
       expectedUpdatedAt: pick.assignment.updated_at || null,
     });
   }
+  async function removeAssignmentSegment(assignment: Rec, shift?: string) {
+    if (!data) return;
+    const targetShift = shift || String(contextPick?.shift || pick?.shift || assignment.shift || "2");
+    const window = operationalShiftWindow(data.date, targetShift);
+    if (!confirm(`Remover ${assignment.guard_name} somente de ${window.start.slice(11, 16)}–${window.end.slice(11, 16)}? Os outros horários serão preservados.`)) return;
+    await postAssignment({
+      action: "delete_shift_segment",
+      id: Number(assignment.id),
+      scheduleId: data.schedule.id,
+      shift: targetShift,
+      expectedUpdatedAt: assignment.updated_at || null,
+    });
+  }
   async function saveQuickExtension(event:FormEvent<HTMLFormElement>){
     event.preventDefault();
     if(!data||!extensionPick)return;
@@ -931,7 +944,7 @@ export function LiveSchedule() {
                   copiedAssignment={copiedAssignment}
                   onCopy={copyAssignment}
                   onPaste={pasteAssignment}
-                  onQuickDelete={(assignment)=>confirm(`Remover ${assignment.guard_name} da escala?`)&&postAssignment({action:"delete",id:assignment.id,expectedUpdatedAt:assignment.updated_at||null})}
+                  onQuickDelete={removeAssignmentSegment}
                   onMove={move}
                   onMoveGroup={moveGroup}
                   onHolePick={openHoleSuggest}
@@ -1329,7 +1342,7 @@ function Row({
   copiedAssignment: Rec | null;
   onCopy: (assignment:Rec) => void;
   onPaste: (kind:"post"|"vehicle",resource:Rec,shift:string) => void | Promise<void>;
-  onQuickDelete: (assignment:Rec) => void;
+  onQuickDelete: (assignment:Rec, shift?:string) => void;
   onMove: (a: Rec, k: "post" | "vehicle", r: Rec, s: string, sourceShift?: string) => void;
   onMoveGroup: (a: Rec[], k: "post" | "vehicle", r: Rec) => void;
   onHolePick: (
@@ -1473,6 +1486,18 @@ function Row({
             >
               {list.map((a) => {const visualStatus=statusInShift(a,date,s.id),canExtendAfter=showExtensionShortcut(a,s.id),canExtendBefore=showEarlyExtensionShortcut(a,s.id);return (<Fragment key={String(a.id)}>
                 <div className={`live-person-card ${canExtendAfter||canExtendBefore?"has-he-action":""}`}>
+                <button
+                  type="button"
+                  className="live-person-remove"
+                  aria-label={`Remover ${String(a.guard_name)} somente deste horário`}
+                  title="Remover somente este horário"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onQuickDelete(a, s.id);
+                  }}
+                >
+                  ×
+                </button>
                 <button
                   draggable
                   className={`live-person ${visualStatus} ${Number(a.is_reassigned)?"reassigned":""} ${Number(a.id) === selectedId ? "is-selected" : ""} ${recentAssignmentIds.includes(Number(a.id))?"recent-update":""}`}
