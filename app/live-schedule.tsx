@@ -1096,6 +1096,7 @@ export function LiveSchedule() {
                      else sectionRefs.current.delete(section);
                    }}
                    serviceAdjustments={data.serviceAdjustments || []}
+                   movements={data.movements}
                    availableForRedeployment={data.availableForRedeployment}
                   redeploymentGroups={redeploymentGroups}
                   selectedId={Number(contextPick?.assignment?.id || pick?.assignment?.id || 0)}
@@ -1542,6 +1543,7 @@ type RowProps = {
   onQuickAdd: (guardId: number, kind: "post" | "vehicle", resource: Rec, shift: string) => void | Promise<void>;
   onSectionRef: (section: string, element: HTMLTableRowElement | null) => void;
   serviceAdjustments: Rec[];
+  movements: Rec[];
   availableForRedeployment: Rec[];
   redeploymentGroups: RedeploymentGroup[];
   selectedId: number;
@@ -1587,6 +1589,7 @@ function Row({
   onQuickAdd,
   onSectionRef,
   serviceAdjustments,
+  movements,
   availableForRedeployment,
   redeploymentGroups,
   selectedId,
@@ -1634,6 +1637,7 @@ function Row({
     return guards
       .filter((guard) => {
         if (query && !`${guard.name || ""} ${guard.registration || ""} ${guard.platoon || ""}`.toLowerCase().includes(query)) return false;
+        if (movements.some((movement) => Number(movement.guard_id) === Number(guard.id) && String(movement.starts_at) < target.end && String(movement.ends_at) > target.start)) return false;
         return !allScheduleAssignments.some((assignment) =>
           Number(assignment.guard_id) === Number(guard.id) &&
           String(assignment.starts_at) < target.end &&
@@ -1645,7 +1649,7 @@ function Row({
         return availability || String(left.name || "").localeCompare(String(right.name || ""), "pt-BR");
       })
       .slice(0, 8);
-  }, [addQuery, addShift, allScheduleAssignments, availableForRedeployment, date, guards]);
+  }, [addQuery, addShift, allScheduleAssignments, availableForRedeployment, date, guards, movements]);
   function moveDirectly(assignment: Rec, shift: string) {
     const [targetKind, targetId] = moveDestination.split(":");
     const destination = moveChoices.find((choice) => choice.kind === targetKind && Number(choice.resource.id) === Number(targetId));
@@ -1932,6 +1936,7 @@ const MemoizedRow = memo(Row, (previous, next) =>
   previous.resourceChoices === next.resourceChoices &&
   previous.guards === next.guards &&
   previous.serviceAdjustments === next.serviceAdjustments &&
+  previous.movements === next.movements &&
   previous.availableForRedeployment === next.availableForRedeployment &&
   previous.redeploymentGroups === next.redeploymentGroups &&
   previous.selectedId === next.selectedId &&
