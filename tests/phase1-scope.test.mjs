@@ -602,3 +602,12 @@ test("manual overtime dashboard exposes actionable alerts, safe refresh state an
   assert.match(styles, /\.he-alert-grid/);
   assert.match(styles, /\.he-load-error/);
 });
+
+test("management modules reuse a date-scoped cache while synchronizing D1 silently", () => {
+  const source = readFileSync(resolve("app/gestao-client.tsx"), "utf8");
+  assert.match(source, /escala-admin-cache/);
+  assert.match(source, /sessionStorage\.getItem/);
+  assert.match(source, /sessionStorage\.setItem/);
+  assert.match(source, /writeAdminCache\(date, next\)/);
+  assert.match(source, /Nao foi possivel sincronizar os dados operacionais/);
+});

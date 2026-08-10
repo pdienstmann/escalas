@@ -56,6 +56,28 @@ const empty: Data = {
   leaveOverview: null,
 };
 
+const adminCachePrefix = "escala-admin-cache:";
+function readAdminCache(date: string): Data | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(`${adminCachePrefix}${date}`);
+    if (!raw) return null;
+    const cached = JSON.parse(raw) as Partial<Data>;
+    if (!Array.isArray(cached.guards) || !Array.isArray(cached.posts) || !Array.isArray(cached.vehicles)) return null;
+    return { ...empty, ...cached } as Data;
+  } catch {
+    return null;
+  }
+}
+function writeAdminCache(date: string, value: Data) {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(`${adminCachePrefix}${date}`, JSON.stringify(value));
+  } catch {
+    // A full or unavailable session storage must never block the operational screen.
+  }
+}
+
 const modeLabel = {
   cadastros: "cadastros operacionais",
   viaturas: "gestão de viaturas",
@@ -70,8 +92,8 @@ export function GestaoClient({
   mode: "cadastros" | "viaturas" | "folgas" | "movimentos" | "ajustes";
 }) {
   const { date } = useScheduleDate();
-  const [data, setData] = useState<Data>(empty),
-    [busy, setBusy] = useState(true),
+  const [data, setData] = useState<Data>(() => readAdminCache(date) || empty),
+    [busy, setBusy] = useState(() => !readAdminCache(date)),
     [saving, setSaving] = useState(false),
     [message, setMessage] = useState(""),
     [adjustmentSubtype, setAdjustmentSubtype] = useState("negative_early"),
@@ -86,9 +108,17 @@ export function GestaoClient({
       item: Item;
     } | null>(null);
   const load = useCallback(async () => {
-    const r = await fetch(`/api/admin?date=${date}&_=${Date.now()}`, { cache: "no-store" });
-    setData(await r.json());
-    setBusy(false);
+    try {
+      const r = await fetch(`/api/admin?date=${date}&_=${Date.now()}`, { cache: "no-store" });
+      const next = await r.json() as Data & { error?: string };
+      if (!r.ok) throw new Error(String(next.error || "Nao foi possivel sincronizar os dados operacionais."));
+      setData(next);
+      writeAdminCache(date, next);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Nao foi possivel sincronizar os dados operacionais.");
+    } finally {
+      setBusy(false);
+    }
   }, [date]);
   useEffect(() => {
     // The first request synchronizes this client view with the durable D1 state.
