@@ -8,12 +8,32 @@ import { useScheduleDate } from "./use-schedule-date";
 
 type Rec = Record<string, string | number | null>;
 type Data = { month: string; ranking: Rec[]; entries: Rec[]; suggestions: Rec[]; closure: Rec };
+const overtimeCacheKey = (month: string) => `gmnh:overtime:${month}`;
+function readOvertimeCache(month: string): Data | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(overtimeCacheKey(month));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { savedAt: number; data: Data };
+    return Date.now() - parsed.savedAt < 10 * 60_000 ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+function writeOvertimeCache(data: Data) {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.setItem(overtimeCacheKey(data.month), JSON.stringify({ savedAt: Date.now(), data }));
+  } catch {
+    // Cache is optional; the database remains the source of truth.
+  }
+}
 
 export function OvertimeDashboard() {
   const { date } = useScheduleDate();
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
   const month = selectedMonth ?? date.slice(0, 7);
-  const [data, setData] = useState<Data | null>(null);
+  const [data, setData] = useState<Data | null>(() => readOvertimeCache(date.slice(0, 7)));
   const [query, setQuery] = useState("");
   const [eligibility, setEligibility] = useState<"all" | "eligible" | "blocked">("all");
   const [teamFilter, setTeamFilter] = useState<"all" | "D1" | "D2" | "N1" | "N2" | "other">("all");
@@ -30,6 +50,8 @@ export function OvertimeDashboard() {
   const [hoursBand, setHoursBand] = useState<"all" | "zero" | "under12" | "over12">("all");
 
   const load = useCallback(async () => {
+    const cached = readOvertimeCache(month);
+    if (cached) setData(cached);
     setLoading(true);
     setLoadError("");
     try {
@@ -39,6 +61,7 @@ export function OvertimeDashboard() {
       const next = await response.json() as Data & { error?: string };
       if (!response.ok) throw new Error(String(next.error || "Nao foi possivel carregar o livro de HE."));
       setData(next);
+      writeOvertimeCache(next);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Nao foi possivel carregar o livro de HE.");
     } finally {

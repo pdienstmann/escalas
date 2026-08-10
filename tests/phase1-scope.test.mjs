@@ -788,3 +788,14 @@ test("schedule keeps a small queue of recent undoable changes", () => {
   assert.match(schedule, /undoEvents\.length>0/);
   assert.match(schedule, /undoEvents\.length>1/);
 });
+
+test("overtime dashboard reuses a month cache while refreshing the live book", () => {
+  const dashboard = readFileSync(resolve("app/overtime-dashboard.tsx"), "utf8");
+  assert.match(dashboard, /const overtimeCacheKey = \(month: string\)/);
+  assert.match(dashboard, /function readOvertimeCache\(month: string\): Data \| null/);
+  assert.match(dashboard, /function writeOvertimeCache\(data: Data\)/);
+  assert.match(dashboard, /useState<Data \| null>\(\(\) => readOvertimeCache\(date\.slice\(0, 7\)\)\)/);
+  assert.match(dashboard, /const cached = readOvertimeCache\(month\)/);
+  assert.match(dashboard, /writeOvertimeCache\(next\)/);
+  assert.match(dashboard, /const isRefreshing = loading \|\| !monthMatches/);
+});
