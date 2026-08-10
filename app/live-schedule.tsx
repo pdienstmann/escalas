@@ -12,6 +12,7 @@ import {
 } from "../lib/schedule-state";
 import { suggestionPosition, type SuggestionPosition } from "../lib/suggestion-position";
 import { orderAssignmentsInResourceCell } from "../lib/schedule-lanes";
+import { compactRequestReference } from "../lib/request-reference";
 import {
   assignmentOverlapsShift,
   coveredOperationalShifts,
@@ -1499,6 +1500,14 @@ function Row({
                   <small>
                     {assignmentDisplayInShift(a,date,s.id)}
                   </small>
+                  {a.request_ref && (
+                    <span
+                      className="request-reference"
+                      title={`Requerimento: ${String(a.request_ref)}`}
+                    >
+                      Req. {compactRequestReference(a.request_ref)}
+                    </span>
+                  )}
                 </button>
                 {canExtendAfter&&<button type="button" className="inline-he-extension" aria-label={`Adicionar hora extra para ${String(a.guard_name)} após o expediente`} title="Adicionar hora extra após o expediente" onClick={()=>onExtend(a,kind,resource,s.id,"after")}><span aria-hidden="true">◷</span>+HE</button>}
                 {canExtendBefore&&<button type="button" className="inline-he-extension early" aria-label={`Adicionar hora extra antes do turno de ${String(a.guard_name)}`} title="Fazer o GM da noite começar mais cedo em HE" onClick={()=>onExtend(a,kind,resource,s.id,"before")}><span aria-hidden="true">◷</span>+HE</button>}

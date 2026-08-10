@@ -4,6 +4,7 @@ import { ModuleLoading } from "./module-loading";
 import { useScheduleDate } from "./use-schedule-date";
 import { formatScheduleDate, withScheduleDate } from "../lib/schedule-date";
 import { orderScheduleResources } from "../lib/schedule-sections";
+import { compactRequestReference } from "../lib/request-reference";
 import { assignmentOverlapsShift, operationalShiftWindow } from "../lib/shift-rules";
 type Rec = Record<string, string | number | null>;
 type OperationSlot = Rec & { id:number; role:string; guard_name?:string|null; source_type?:string|null };
@@ -148,6 +149,14 @@ function PrintPage({
                           <small>
                             {assignmentDisplayInShift(a,data.date,s.id)}
                           </small>
+                          {a.request_ref && (
+                            <span
+                              className="request-reference"
+                              title={`Requerimento: ${String(a.request_ref)}`}
+                            >
+                              Req. {compactRequestReference(a.request_ref)}
+                            </span>
+                          )}
                         </div>
                       )})}
                       {missingRoles.length > 0 && (

@@ -15,6 +15,18 @@ import { rankGuardSuggestions, describeReasons } from "../lib/suggest-gm.ts";
 import { groupRedeploymentAssignments, mergeScheduleAssignments } from "../lib/schedule-state.ts";
 import { orderAssignmentsInResourceCell } from "../lib/schedule-lanes.ts";
 import { suggestionPosition } from "../lib/suggestion-position.ts";
+import { compactRequestReference } from "../lib/request-reference.ts";
+
+test("request references stay compact and visible in the schedule and PDF", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const print = readFileSync(resolve("app/print-schedule.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/request-reference.css"), "utf8");
+  assert.equal(compactRequestReference("  REQ-123   operação centro  "), "REQ-123 operação centro");
+  assert.equal(compactRequestReference("123456789012345678901234567890"), "123456789012345678901234567\u2026");
+  assert.match(schedule, /className="request-reference"/);
+  assert.match(print, /className="request-reference"/);
+  assert.match(styles, /#b21f2d/);
+});
 
 test("resolveScheduleDate prefers URL date over storage and today", () => {
   assert.equal(isScheduleDate("2026-08-12"), true);
