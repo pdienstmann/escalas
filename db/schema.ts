@@ -110,8 +110,8 @@ export const leaveCampaigns = sqliteTable("leave_campaigns", {
   id:integer("id").primaryKey({autoIncrement:true}), month:text("month").notNull().unique(), title:text("title").notNull(), weekdayQuota:integer("weekday_quota").notNull().default(1), weekendQuota:integer("weekend_quota").notNull().default(1), status:text("status",{enum:["draft","open","closed","published"]}).notNull().default("draft"), accessCode:text("access_code").notNull(), ...audit,
 });
 export const leaveDayLimits = sqliteTable("leave_day_limits", {
- id:integer("id").primaryKey({autoIncrement:true}), campaignId:integer("campaign_id").notNull().references(()=>leaveCampaigns.id), date:text("date").notNull(), platoon:text("platoon"), capacity:integer("capacity").notNull(), ...audit,
-},t=>[uniqueIndex("idx_leave_limits_campaign_date_platoon").on(t.campaignId,t.date,t.platoon)]);
+ id:integer("id").primaryKey({autoIncrement:true}), campaignId:integer("campaign_id").notNull().references(()=>leaveCampaigns.id), date:text("date").notNull(), platoon:text("platoon"), shift:text("shift",{enum:["day","night"]}), capacity:integer("capacity").notNull(), ...audit,
+},t=>[uniqueIndex("idx_leave_limits_campaign_date_platoon_shift").on(t.campaignId,t.date,t.platoon,t.shift)]);
 export const leaveChoices = sqliteTable("leave_choices", {
  id:integer("id").primaryKey({autoIncrement:true}), campaignId:integer("campaign_id").notNull().references(()=>leaveCampaigns.id), guardId:integer("guard_id").notNull().references(()=>guards.id), date:text("date").notNull(), category:text("category",{enum:["weekday","weekend"]}).notNull(), status:text("status",{enum:["confirmed","waitlist","cancelled"]}).notNull(), position:integer("position"), ...audit,
 },t=>[uniqueIndex("idx_leave_choices_campaign_guard_date").on(t.campaignId,t.guardId,t.date)]);

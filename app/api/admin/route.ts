@@ -202,88 +202,122 @@ async function syncConfirmedLeaves(choiceId?: number) {
   await (choiceId ? statement.bind(choiceId) : statement).run();
 }
 
+type LeavePeriod = "day" | "night";
 type LeaveCapacity = {
   capacity: number;
   used: number;
-  scope: "general" | "platoon";
+  scope: "general" | "shift" | "platoon" | "platoon_shift";
+  platoon: string | null;
+  shift: LeavePeriod | null;
 };
 
-async function resolveLeaveCapacity(
-  campaignId: number,
-  date: string,
-  platoon?: string | null,
-): Promise<LeaveCapacity | null> {
+function normalizeLeavePeriod(value: unknown): LeavePeriod | null {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "day" || normalized === "diurno" ? "day" : normalized === "night" || normalized === "noturno" ? "night" : null;
+}
+
+function guardLeavePeriod(value: unknown): LeavePeriod {
+  return /noite/i.test(String(value || "")) ? "night" : "day";
+}
+
+function leaveScopePredicate(platoon?: string | null, shift?: LeavePeriod | null, alias = "g") {
+  const clauses: string[] = [];
+  const values: string[] = [];
   const normalizedPlatoon = String(platoon || "").trim();
   if (normalizedPlatoon) {
-    const scoped = await env.DB.prepare(
-      `SELECT l.capacity,l.platoon,
-        (SELECT COUNT(*) FROM leave_choices c JOIN guards g ON g.id=c.guard_id
-         WHERE c.campaign_id=l.campaign_id AND c.date=l.date AND c.status='confirmed' AND g.platoon=l.platoon) AS used
-       FROM leave_day_limits l
-       WHERE l.campaign_id=? AND l.date=? AND TRIM(COALESCE(l.platoon,''))=? LIMIT 1`,
-    ).bind(campaignId, date, normalizedPlatoon).first<{ capacity: number; used: number }>();
-    if (scoped) return { capacity: Number(scoped.capacity), used: Number(scoped.used), scope: "platoon" };
+    clauses.push(`${alias}.platoon=?`);
+    values.push(normalizedPlatoon);
   }
-  const general = await env.DB.prepare(
-    `SELECT l.capacity,
-      (SELECT COUNT(*) FROM leave_choices c
-       WHERE c.campaign_id=l.campaign_id AND c.date=l.date AND c.status='confirmed') AS used
-     FROM leave_day_limits l
-     WHERE l.campaign_id=? AND l.date=? AND (l.platoon IS NULL OR TRIM(l.platoon)='') LIMIT 1`,
-  ).bind(campaignId, date).first<{ capacity: number; used: number }>();
-  return general
-    ? { capacity: Number(general.capacity), used: Number(general.used), scope: "general" }
-    : null;
+  if (shift) {
+    clauses.push(`CASE WHEN lower(COALESCE(${alias}.base_shift,'')) LIKE '%noite%' THEN 'night' ELSE 'day' END=?`);
+    values.push(shift);
+  }
+  return { sql: clauses.length ? ` AND ${clauses.join(" AND ")}` : "", values };
 }
 
-async function waitlistPosition(campaignId: number, date: string, platoon?: string | null) {
-  const normalizedPlatoon = String(platoon || "").trim();
-  const row = normalizedPlatoon
-    ? await env.DB.prepare(
-      `SELECT COUNT(*) total FROM leave_choices c JOIN guards g ON g.id=c.guard_id
-       WHERE c.campaign_id=? AND c.date=? AND c.status='waitlist' AND g.platoon=?`,
-    ).bind(campaignId, date, normalizedPlatoon).first<{ total: number }>()
-    : await env.DB.prepare(
-      "SELECT COUNT(*) total FROM leave_choices WHERE campaign_id=? AND date=? AND status='waitlist'",
-    ).bind(campaignId, date).first<{ total: number }>();
-  return Number(row?.total || 0) + 1;
+async function loadLeaveLimit(campaignId: number, date: string, platoon: string | null, shift: LeavePeriod | null) {
+  if (platoon && shift)
+    return env.DB.prepare("SELECT id,capacity FROM leave_day_limits WHERE campaign_id=? AND date=? AND TRIM(COALESCE(platoon,''))=? AND shift=? LIMIT 1").bind(campaignId, date, platoon, shift).first<{ id: number; capacity: number }>();
+  if (platoon)
+    return env.DB.prepare("SELECT id,capacity FROM leave_day_limits WHERE campaign_id=? AND date=? AND TRIM(COALESCE(platoon,''))=? AND (shift IS NULL OR TRIM(shift)='') LIMIT 1").bind(campaignId, date, platoon).first<{ id: number; capacity: number }>();
+  if (shift)
+    return env.DB.prepare("SELECT id,capacity FROM leave_day_limits WHERE campaign_id=? AND date=? AND (platoon IS NULL OR TRIM(platoon)='') AND shift=? LIMIT 1").bind(campaignId, date, shift).first<{ id: number; capacity: number }>();
+  return env.DB.prepare("SELECT id,capacity FROM leave_day_limits WHERE campaign_id=? AND date=? AND (platoon IS NULL OR TRIM(platoon)='') AND (shift IS NULL OR TRIM(shift)='') LIMIT 1").bind(campaignId, date).first<{ id: number; capacity: number }>();
 }
 
-async function promoteNextWaitlistedLeave(campaignId: number, date: string, platoon?: string | null) {
-  const limit = await resolveLeaveCapacity(campaignId, date, platoon);
+async function countLeaveChoices(campaignId: number, date: string, status: "confirmed" | "waitlist", platoon?: string | null, shift?: LeavePeriod | null) {
+  const scope = leaveScopePredicate(platoon, shift);
+  const row = await env.DB.prepare(`SELECT COUNT(*) total FROM leave_choices c JOIN guards g ON g.id=c.guard_id WHERE c.campaign_id=? AND c.date=? AND c.status=?${scope.sql}`)
+    .bind(campaignId, date, status, ...scope.values)
+    .first<{ total: number }>();
+  return Number(row?.total || 0);
+}
+
+async function resolveLeaveCapacity(campaignId: number, date: string, platoon?: string | null, shift?: LeavePeriod | null): Promise<LeaveCapacity | null> {
+  const normalizedPlatoon = String(platoon || "").trim() || null;
+  const normalizedShift = normalizeLeavePeriod(shift);
+  const candidates: Array<{ platoon: string | null; shift: LeavePeriod | null; scope: LeaveCapacity["scope"] }> = [
+    ...(normalizedPlatoon && normalizedShift ? [{ platoon: normalizedPlatoon, shift: normalizedShift, scope: "platoon_shift" as const }] : []),
+    ...(normalizedPlatoon ? [{ platoon: normalizedPlatoon, shift: null, scope: "platoon" as const }] : []),
+    ...(normalizedShift ? [{ platoon: null, shift: normalizedShift, scope: "shift" as const }] : []),
+    [{ platoon: null, shift: null, scope: "general" as const }],
+  ];
+  for (const candidate of candidates) {
+    const row = await loadLeaveLimit(campaignId, date, candidate.platoon, candidate.shift);
+    if (!row) continue;
+    return {
+      capacity: Number(row.capacity),
+      used: await countLeaveChoices(campaignId, date, "confirmed", candidate.platoon, candidate.shift),
+      scope: candidate.scope,
+      platoon: candidate.platoon,
+      shift: candidate.shift,
+    };
+  }
+  return null;
+}
+
+async function waitlistPosition(campaignId: number, date: string, platoon?: string | null, shift?: LeavePeriod | null) {
+  return (await countLeaveChoices(campaignId, date, "waitlist", platoon, shift)) + 1;
+}
+
+async function promoteNextWaitlistedLeave(campaignId: number, date: string, platoon?: string | null, shift?: LeavePeriod | null) {
+  const limit = await resolveLeaveCapacity(campaignId, date, platoon, shift);
   if (!limit || Number(limit.used) >= Number(limit.capacity)) return null;
-  const next = limit.scope === "platoon"
-    ? await env.DB.prepare(
-      "SELECT c.*,g.name guard_name,g.platoon FROM leave_choices c JOIN guards g ON g.id=c.guard_id WHERE c.campaign_id=? AND c.date=? AND c.status='waitlist' AND g.platoon=? ORDER BY COALESCE(c.position,2147483647),c.id LIMIT 1",
-    ).bind(campaignId, date, String(platoon || "").trim()).first<Record<string, unknown>>()
-    : await env.DB.prepare(
-      "SELECT c.*,g.name guard_name,g.platoon FROM leave_choices c JOIN guards g ON g.id=c.guard_id WHERE c.campaign_id=? AND c.date=? AND c.status='waitlist' ORDER BY COALESCE(c.position,2147483647),c.id LIMIT 1",
-    ).bind(campaignId, date).first<Record<string, unknown>>();
+  const scope = leaveScopePredicate(limit.platoon, limit.shift);
+  const next = await env.DB.prepare(`SELECT c.*,g.name guard_name,g.platoon,g.base_shift FROM leave_choices c JOIN guards g ON g.id=c.guard_id WHERE c.campaign_id=? AND c.date=? AND c.status='waitlist'${scope.sql} ORDER BY COALESCE(c.position,2147483647),c.id LIMIT 1`)
+    .bind(campaignId, date, ...scope.values)
+    .first<Record<string, unknown>>();
   if (!next) return null;
   const promoted = await env.DB.prepare(
     "UPDATE leave_choices SET status='confirmed',position=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='waitlist'",
   ).bind(next.id).run();
   if (!Number(promoted.meta.changes || 0)) return null;
   await syncConfirmedLeaves(Number(next.id));
-  await normalizeWaitlistPositions(campaignId, date, limit.scope === "platoon" ? String(platoon || "").trim() : null);
+  await normalizeWaitlistPositions(campaignId, date, limit.platoon, limit.shift);
   return { ...next, status: "confirmed", position: null };
 }
 
-async function normalizeWaitlistPositions(campaignId: number, date: string, platoon?: string | null) {
-  const normalizedPlatoon = String(platoon || "").trim();
-  const waiting = normalizedPlatoon
-    ? (await env.DB.prepare(
-      "SELECT c.id FROM leave_choices c JOIN guards g ON g.id=c.guard_id WHERE c.campaign_id=? AND c.date=? AND c.status='waitlist' AND g.platoon=? ORDER BY COALESCE(c.position,2147483647),c.id",
-    ).bind(campaignId, date, normalizedPlatoon).all<{ id: number }>()).results
-    : (await env.DB.prepare(
-      "SELECT id FROM leave_choices WHERE campaign_id=? AND date=? AND status='waitlist' ORDER BY COALESCE(position,2147483647),id",
-    ).bind(campaignId, date).all<{ id: number }>()).results;
+async function normalizeWaitlistPositions(campaignId: number, date: string, platoon?: string | null, shift?: LeavePeriod | null) {
+  const scope = leaveScopePredicate(platoon, shift);
+  const waiting = (await env.DB.prepare(`SELECT c.id FROM leave_choices c JOIN guards g ON g.id=c.guard_id WHERE c.campaign_id=? AND c.date=? AND c.status='waitlist'${scope.sql} ORDER BY COALESCE(c.position,2147483647),c.id`)
+    .bind(campaignId, date, ...scope.values)
+    .all<{ id: number }>()).results;
   if (waiting.length) {
     await env.DB.batch(waiting.map((item, index) => env.DB.prepare(
       "UPDATE leave_choices SET position=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='waitlist'",
     ).bind(index + 1, item.id)));
   }
 }
+
+async function ensureLeaveDayLimitShift() {
+  const columns = new Set(
+    (await env.DB.prepare("PRAGMA table_info(leave_day_limits)").all<{ name: string }>()).results.map((column) => column.name),
+  );
+  if (!columns.has("shift")) await env.DB.prepare("ALTER TABLE leave_day_limits ADD COLUMN shift TEXT").run();
+  await env.DB.prepare("DROP INDEX IF EXISTS idx_leave_limits_campaign_date_platoon").run();
+  await env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_leave_limits_campaign_date_platoon_shift ON leave_day_limits (campaign_id,date,platoon,shift)").run();
+}
+
 async function ensureSections(){
   const groups=(await env.DB.prepare("SELECT group_name,MIN(sort_order) sort_order FROM posts WHERE active=1 GROUP BY group_name").all<{group_name:string;sort_order:number}>()).results;
   const commands=[env.DB.prepare("INSERT OR IGNORE INTO schedule_sections (section_key,label,sort_order) VALUES ('VEHICLES','VIATURAS E ZONAS',0)")];
@@ -396,6 +430,7 @@ async function restoreVehiclePatternCrew(scheduleId:number,date:string,vehicleId
 export async function GET(request: Request) {
   if (!permitted(request))
     return Response.json({ error: "Não autorizado" }, { status: 401 });
+  await ensureLeaveDayLimitShift();
   await seed();
   await syncConfirmedLeaves();
   await ensureSections();
@@ -429,10 +464,11 @@ export async function GET(request: Request) {
           (SELECT COUNT(*) FROM leave_choices c
            LEFT JOIN guards g ON g.id=c.guard_id
            WHERE c.campaign_id=l.campaign_id AND c.date=l.date AND c.status='confirmed'
-             AND (l.platoon IS NULL OR TRIM(l.platoon)='' OR g.platoon=l.platoon)) AS used
+             AND (l.platoon IS NULL OR TRIM(l.platoon)='' OR g.platoon=l.platoon)
+             AND (l.shift IS NULL OR TRIM(l.shift)='' OR CASE WHEN lower(COALESCE(g.base_shift,'')) LIKE '%noite%' THEN 'night' ELSE 'day' END=l.shift)) AS used
          FROM leave_day_limits l
          WHERE l.campaign_id=(SELECT id FROM leave_campaigns WHERE status='open' ORDER BY month DESC LIMIT 1)
-         ORDER BY l.date,CASE WHEN l.platoon IS NULL OR TRIM(l.platoon)='' THEN 0 ELSE 1 END,l.platoon`,
+         ORDER BY l.date,CASE WHEN l.platoon IS NULL OR TRIM(l.platoon)='' THEN 0 ELSE 1 END,CASE WHEN l.shift IS NULL OR TRIM(l.shift)='' THEN 0 ELSE 1 END,l.platoon,l.shift`,
       ).all(),
       env.DB.prepare(
         "SELECT c.*,g.name AS guard_name,g.registration,g.platoon,g.base_shift FROM leave_choices c JOIN guards g ON g.id=c.guard_id WHERE c.status!='cancelled' AND c.campaign_id=(SELECT id FROM leave_campaigns WHERE status='open' ORDER BY month DESC LIMIT 1) ORDER BY c.date,g.name",
@@ -493,6 +529,7 @@ export async function POST(request: Request) {
   if (!permitted(request))
     return Response.json({ error: "Não autorizado" }, { status: 401 });
   const body = (await request.json()) as AdminBody;
+  await ensureLeaveDayLimitShift();
   await ensureFleetReturnTables();
   await ensureServiceAdjustmentsTable();
   await ensureOperationalGroups(env.DB);
@@ -867,35 +904,27 @@ export async function POST(request: Request) {
     } else if (body.action === "leave_limit_set") {
       const campaignId = Number(body.campaignId);
       const date = String(body.date || "").trim();
-      const platoon = String(body.platoon || "").trim();
+      const platoon = String(body.platoon || "").trim() || null;
+      const shift = normalizeLeavePeriod(body.shift);
       const capacity = Number(body.capacity);
       if (!Number.isInteger(campaignId) || campaignId <= 0 || !isValidIsoDate(date) || !Number.isInteger(capacity) || capacity < 0 || capacity > 500)
         return Response.json({ error: "Informe data e limite válidos (de 0 a 500 folgas)." }, { status: 400 });
       const campaign = await env.DB.prepare("SELECT id,month,status FROM leave_campaigns WHERE id=?").bind(campaignId).first<{ id: number; month: string; status: string }>();
       if (!campaign || campaign.status !== "open" || !date.startsWith(`${campaign.month}-`))
         return Response.json({ error: "A data não pertence à campanha de folgas aberta." }, { status: 400 });
-      const used = platoon
-        ? await env.DB.prepare(
-          "SELECT COUNT(*) total FROM leave_choices c JOIN guards g ON g.id=c.guard_id WHERE c.campaign_id=? AND c.date=? AND c.status='confirmed' AND g.platoon=?",
-        ).bind(campaignId, date, platoon).first<{ total: number }>()
-        : await env.DB.prepare(
-          "SELECT COUNT(*) total FROM leave_choices WHERE campaign_id=? AND date=? AND status='confirmed'",
-        ).bind(campaignId, date).first<{ total: number }>();
-      if (capacity < Number(used?.total || 0))
-        return Response.json({ error: `O limite não pode ficar abaixo das ${Number(used?.total || 0)} folgas já confirmadas neste escopo.` }, { status: 409 });
-      const before = platoon
-        ? await env.DB.prepare("SELECT * FROM leave_day_limits WHERE campaign_id=? AND date=? AND TRIM(COALESCE(platoon,''))=? LIMIT 1").bind(campaignId, date, platoon).first<Record<string, unknown>>()
-        : await env.DB.prepare("SELECT * FROM leave_day_limits WHERE campaign_id=? AND date=? AND (platoon IS NULL OR TRIM(platoon)='') LIMIT 1").bind(campaignId, date).first<Record<string, unknown>>();
+      const used = await countLeaveChoices(campaignId, date, "confirmed", platoon, shift);
+      if (capacity < used)
+        return Response.json({ error: `O limite não pode ficar abaixo das ${used} folgas já confirmadas neste escopo.` }, { status: 409 });
+      const before = await loadLeaveLimit(campaignId, date, platoon, shift) as Record<string, unknown> | null;
       if (before) {
         await env.DB.prepare("UPDATE leave_day_limits SET capacity=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(capacity, before.id).run();
       } else {
-        await env.DB.prepare("INSERT INTO leave_day_limits (campaign_id,date,platoon,capacity) VALUES (?,?,?,?)").bind(campaignId, date, platoon || null, capacity).run();
+        await env.DB.prepare("INSERT INTO leave_day_limits (campaign_id,date,platoon,shift,capacity) VALUES (?,?,?,?,?)").bind(campaignId, date, platoon, shift, capacity).run();
       }
-      const after = platoon
-        ? await env.DB.prepare("SELECT * FROM leave_day_limits WHERE campaign_id=? AND date=? AND TRIM(COALESCE(platoon,''))=? LIMIT 1").bind(campaignId, date, platoon).first<Record<string, unknown>>()
-        : await env.DB.prepare("SELECT * FROM leave_day_limits WHERE campaign_id=? AND date=? AND (platoon IS NULL OR TRIM(platoon)='') LIMIT 1").bind(campaignId, date).first<Record<string, unknown>>();
-      await writeAudit(request, { action: before ? "update" : "create", entityType: "leave_day_limit", entityId: Number(after?.id || campaignId), summary: `Definiu limite de folgas de ${date}${platoon ? ` para a equipe ${platoon}` : " geral"}`, before, after: after as Record<string, unknown>, undoable: true });
-      return Response.json({ ok: true, message: `Limite ${platoon ? `da equipe ${platoon}` : "geral"} salvo para ${date}.`, limit: after });
+      const after = await loadLeaveLimit(campaignId, date, platoon, shift) as Record<string, unknown> | null;
+      const scopeLabel = [platoon ? `equipe ${platoon}` : "geral", shift === "day" ? "diurno" : shift === "night" ? "noturno" : "todos os turnos"].join(" · ");
+      await writeAudit(request, { action: before ? "update" : "create", entityType: "leave_day_limit", entityId: Number(after?.id || campaignId), summary: `Definiu limite de folgas de ${date} · ${scopeLabel}`, before, after: after as Record<string, unknown>, undoable: true });
+      return Response.json({ ok: true, message: `Limite ${scopeLabel} salvo para ${date}.`, limit: after });
     } else if (body.action === "leave_import") {
       const month = String(body.month || "").trim();
       const rows = Array.isArray(body.rows) ? body.rows.slice(0, 500) : [];
@@ -1007,10 +1036,11 @@ export async function POST(request: Request) {
           { error: "A data não corresponde à categoria escolhida." },
           { status: 400 },
         );
-      const guard = await env.DB.prepare("SELECT id,name,platoon FROM guards WHERE id=? AND active=1").bind(guardId).first<{ id: number; name: string; platoon: string | null }>();
+      const guard = await env.DB.prepare("SELECT id,name,platoon,base_shift FROM guards WHERE id=? AND active=1").bind(guardId).first<{ id: number; name: string; platoon: string | null; base_shift: string | null }>();
       if (!guard)
         return Response.json({ error: "GM não encontrado ou inativo." }, { status: 404 });
-      const limit = await resolveLeaveCapacity(campaignId, date, guard.platoon);
+      const guardShift = guardLeavePeriod(guard.base_shift);
+      const limit = await resolveLeaveCapacity(campaignId, date, guard.platoon, guardShift);
       if (!limit)
         return Response.json(
           { error: "Data indisponível nesta campanha." },
@@ -1022,7 +1052,7 @@ export async function POST(request: Request) {
         return Response.json({error:"Este GM já possui uma escolha nesta categoria."},{status:409});
       const status = limit.used < limit.capacity ? "confirmed" : "waitlist";
       const position = status === "waitlist"
-        ? await waitlistPosition(campaignId, date, limit.scope === "platoon" ? guard.platoon : null)
+        ? await waitlistPosition(campaignId, date, limit.platoon, limit.shift)
         : null;
       const created = await env.DB.prepare(
         "INSERT INTO leave_choices (campaign_id,guard_id,date,category,status,position) VALUES (?,?,?,?,?,?)",
@@ -1047,16 +1077,16 @@ export async function POST(request: Request) {
       });
     } else if (body.action === "leave_approve") {
       const choice = await env.DB.prepare(
-        "SELECT c.*,g.name guard_name,g.platoon FROM leave_choices c JOIN guards g ON g.id=c.guard_id WHERE c.id=?",
+        "SELECT c.*,g.name guard_name,g.platoon,g.base_shift FROM leave_choices c JOIN guards g ON g.id=c.guard_id WHERE c.id=?",
       )
         .bind(body.id)
-        .first<{ id: number; campaign_id: number; date: string; platoon: string | null; status: string }>();
+        .first<{ id: number; campaign_id: number; date: string; platoon: string | null; base_shift: string | null; status: string }>();
       if (!choice)
         return Response.json(
           { error: "Solicitação não encontrada." },
           { status: 404 },
         );
-      const limit = await resolveLeaveCapacity(choice.campaign_id, choice.date, choice.platoon);
+      const limit = await resolveLeaveCapacity(choice.campaign_id, choice.date, choice.platoon, guardLeavePeriod(choice.base_shift));
       if (!limit || Number(limit.used) >= Number(limit.capacity))
         return Response.json(
           { error: "O limite deste dia já foi atingido." },
@@ -1068,12 +1098,12 @@ export async function POST(request: Request) {
         .bind(choice.id)
         .run();
       await syncConfirmedLeaves(choice.id);
-      await normalizeWaitlistPositions(choice.campaign_id, choice.date, limit.scope === "platoon" ? choice.platoon : null);
+      await normalizeWaitlistPositions(choice.campaign_id, choice.date, limit.platoon, limit.shift);
       const after = await env.DB.prepare("SELECT c.*,g.name guard_name FROM leave_choices c JOIN guards g ON g.id=c.guard_id WHERE c.id=?").bind(choice.id).first();
       await writeAudit(request,{action:"approve",entityType:"leave_choice",entityId:choice.id,summary:`Aprovou a folga de ${after?.guard_name} em ${choice.date}`,before:choice as unknown as Record<string,unknown>,after:after as Record<string,unknown>});
       return Response.json({ ok: true });
     } else if (body.action === "leave_cancel") {
-      const before = await env.DB.prepare("SELECT c.*,g.name guard_name,g.platoon FROM leave_choices c JOIN guards g ON g.id=c.guard_id WHERE c.id=?").bind(body.id).first<Record<string,unknown>>();
+      const before = await env.DB.prepare("SELECT c.*,g.name guard_name,g.platoon,g.base_shift FROM leave_choices c JOIN guards g ON g.id=c.guard_id WHERE c.id=?").bind(body.id).first<Record<string,unknown>>();
       if (!before) return Response.json({ error: "Solicitação não encontrada." }, { status: 404 });
       if (String(before.status) === "cancelled") return Response.json({ error: "Esta solicitação já foi cancelada." }, { status: 409 });
       await env.DB.batch([
@@ -1085,11 +1115,11 @@ export async function POST(request: Request) {
         ),
       ]);
       const promoted = String(before.status) === "confirmed"
-        ? await promoteNextWaitlistedLeave(Number(before.campaign_id), String(before.date), String(before.platoon || "") || null)
+        ? await promoteNextWaitlistedLeave(Number(before.campaign_id), String(before.date), String(before.platoon || "") || null, guardLeavePeriod(before.base_shift))
         : null;
       if (!promoted) {
-        const capacity = await resolveLeaveCapacity(Number(before.campaign_id), String(before.date), String(before.platoon || "") || null);
-        await normalizeWaitlistPositions(Number(before.campaign_id), String(before.date), capacity?.scope === "platoon" ? String(before.platoon || "") : null);
+        const capacity = await resolveLeaveCapacity(Number(before.campaign_id), String(before.date), String(before.platoon || "") || null, guardLeavePeriod(before.base_shift));
+        await normalizeWaitlistPositions(Number(before.campaign_id), String(before.date), capacity?.platoon, capacity?.shift);
       }
       const after = await env.DB.prepare("SELECT * FROM leave_choices WHERE id=?").bind(body.id).first();
       await writeAudit(request,{action:"cancel",entityType:"leave_choice",entityId:body.id,summary:`Cancelou a folga de ${before?.guard_name}`,before,after:after as Record<string,unknown>});

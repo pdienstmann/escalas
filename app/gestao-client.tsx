@@ -744,7 +744,7 @@ export function GestaoClient({
       />
       <section className="leave-limit-panel">
         <header>
-          <div><small>CAPACIDADE DA CAMPANHA</small><h3>Limite por dia e equipe</h3><p>Use o limite geral para todo o efetivo ou crie um limite específico para uma equipe/pelotão. O limite da equipe tem prioridade.</p></div>
+          <div><small>CAPACIDADE DA CAMPANHA</small><h3>Limite por dia, equipe e turno</h3><p>Use o limite geral ou crie uma regra para equipe/pelotão, turno diurno/noturno ou os dois. A regra mais específica tem prioridade.</p></div>
         </header>
         <form onSubmit={(event) => void submit(event, "leave_limit_set")}>
           <input type="hidden" name="campaignId" value={String(campaign?.id || "")} />
@@ -755,6 +755,11 @@ export function GestaoClient({
           <label>Escopo<select name="platoon" defaultValue="">
             <option value="">Limite geral do dia</option>
             {leavePlatoons.map((platoon) => <option key={platoon} value={platoon}>Equipe / pelotão {platoon}</option>)}
+          </select></label>
+          <label>Turno<select name="shift" defaultValue="">
+            <option value="">Todos os turnos</option>
+            <option value="day">Diurno (2º + 3º)</option>
+            <option value="night">Noturno (4º + 1º)</option>
           </select></label>
           <label>Máximo de folgas<input name="capacity" type="number" min="0" max="500" step="1" defaultValue="3" required /></label>
           <button className="save" disabled={saving}>Salvar limite</button>
@@ -786,7 +791,7 @@ export function GestaoClient({
           <h3>Capacidade por dia</h3>
           {data.days.map((d) => (
             <div key={`${String(d.date)}:${String(d.platoon || "geral")}`}>
-              <span>{formatDate(d.date)}{d.platoon ? ` · ${String(d.platoon)}` : " · geral"}</span>
+              <span>{formatDate(d.date)}{d.platoon ? ` · ${String(d.platoon)}` : " · geral"}{d.shift ? ` · ${String(d.shift) === "night" ? "noite" : "dia"}` : ""}</span>
               <progress value={Number(d.used)} max={Math.max(1, Number(d.capacity))} />
               <b>
                 {d.used}/{d.capacity}
