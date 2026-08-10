@@ -852,3 +852,18 @@ test("cancelling a confirmed leave promotes the next waitlisted GM and syncs the
   assert.match(dashboard, /foi promovido\(a\) automaticamente da lista de espera/);
   assert.match(dashboard, /posição \$\{item\.position\}/);
 });
+
+test("monthly leave capacity supports platoon overrides with a general fallback", () => {
+  const api = readFileSync(resolve("app/api/admin/route.ts"), "utf8");
+  const dashboard = readFileSync(resolve("app/gestao-client.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/management.css"), "utf8");
+  assert.match(api, /resolveLeaveCapacity/);
+  assert.match(api, /leave_limit_set/);
+  assert.match(api, /TRIM\(COALESCE\(l\.platoon,''\)\)/);
+  assert.match(api, /g\.platoon=l\.platoon/);
+  assert.match(api, /waitlistPosition/);
+  assert.match(dashboard, /Limite por dia e equipe/);
+  assert.match(dashboard, /Limite geral do dia/);
+  assert.match(dashboard, /leave_limit_set/);
+  assert.match(styles, /leave-limit-panel/);
+});

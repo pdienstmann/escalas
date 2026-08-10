@@ -724,6 +724,8 @@ export function GestaoClient({
       </Module>
     );
   const campaign = data.campaign;
+  const leaveDaysByDate = [...new Map(data.days.map((day) => [String(day.date), day])).keys()].map((dateKey) => data.days.find((day) => String(day.date) === dateKey && !String(day.platoon || "").trim()) || data.days.find((day) => String(day.date) === dateKey)!).filter(Boolean);
+  const leavePlatoons = [...new Set(data.guards.map((guard) => String(guard.platoon || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR"));
   return (
     <Module
       date={date}
@@ -740,6 +742,24 @@ export function GestaoClient({
         saving={saving}
         onImport={importLeaves}
       />
+      <section className="leave-limit-panel">
+        <header>
+          <div><small>CAPACIDADE DA CAMPANHA</small><h3>Limite por dia e equipe</h3><p>Use o limite geral para todo o efetivo ou crie um limite específico para uma equipe/pelotão. O limite da equipe tem prioridade.</p></div>
+        </header>
+        <form onSubmit={(event) => void submit(event, "leave_limit_set")}>
+          <input type="hidden" name="campaignId" value={String(campaign?.id || "")} />
+          <label>Dia<select name="date" required defaultValue={String(leaveDaysByDate[0]?.date || "")}>
+            <option value="">Selecione uma data</option>
+            {leaveDaysByDate.map((day) => <option key={String(day.date)} value={String(day.date)}>{formatDate(day.date)}</option>)}
+          </select></label>
+          <label>Escopo<select name="platoon" defaultValue="">
+            <option value="">Limite geral do dia</option>
+            {leavePlatoons.map((platoon) => <option key={platoon} value={platoon}>Equipe / pelotão {platoon}</option>)}
+          </select></label>
+          <label>Máximo de folgas<input name="capacity" type="number" min="0" max="500" step="1" defaultValue="3" required /></label>
+          <button className="save" disabled={saving}>Salvar limite</button>
+        </form>
+      </section>
       <div className="leave-layout">
         <Form title="Registrar escolha" onSubmit={(e) => submit(e, "leave")}>
           <input
@@ -754,7 +774,7 @@ export function GestaoClient({
           </select>
           <select name="date" required>
             <option value="">Selecione uma data</option>
-            {data.days.map((d) => (
+            {leaveDaysByDate.map((d) => (
               <option key={String(d.date)} value={String(d.date)}>
                 {formatDate(d.date)} · {Number(d.capacity) - Number(d.used)}{" "}
                 vagas
@@ -765,9 +785,9 @@ export function GestaoClient({
         <section className="capacity">
           <h3>Capacidade por dia</h3>
           {data.days.map((d) => (
-            <div key={String(d.date)}>
-              <span>{formatDate(d.date)}</span>
-              <progress value={Number(d.used)} max={Number(d.capacity)} />
+            <div key={`${String(d.date)}:${String(d.platoon || "geral")}`}>
+              <span>{formatDate(d.date)}{d.platoon ? ` · ${String(d.platoon)}` : " · geral"}</span>
+              <progress value={Number(d.used)} max={Math.max(1, Number(d.capacity))} />
               <b>
                 {d.used}/{d.capacity}
               </b>
