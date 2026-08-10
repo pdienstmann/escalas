@@ -34,3 +34,34 @@
 .person-operational-chip{display:inline-block;margin-left:4px;padding:1px 4px;border-radius:6px;background:#eef5d8;color:#50721b;font-size:8px;font-weight:900;vertical-align:middle;white-space:nowrap}
 @media(max-width:700px){.app.compact .schedule{min-width:900px}.app.compact .schedule th:first-child{width:190px}.operational-group-heading td{padding:4px 7px!important}.operational-group-heading small{display:none}}
 @media print{.operational-group-heading td{height:auto!important;padding:2px 4px!important;border-top:1px solid #9eaeba!important}.operational-group-heading td:before{width:3px;height:10px;margin-right:4px}.resource-unit-tags{gap:2px}.resource-unit-tags em{padding:0 3px;font-size:6px}}
+
+/* HE e o atalho +HE ocupam áreas próprias do card, sem se sobrepor. */
+.live-person-card.has-he-action .live-person{padding-right:54px}
+.live-person-card .inline-he-extension{top:50%;right:4px;width:44px;min-width:44px;max-width:44px;transform:translateY(-50%);white-space:nowrap}
+.live-person-card .inline-he-extension:focus-visible{transform:translateY(-50%)}
+.live-person-card .badge{max-width:calc(100% - 4px);vertical-align:middle;white-space:nowrap}
+
+/* No celular, a identificação da VTR mantém prefixo, zona e ações dentro da primeira coluna. */
+@media(max-width:700px){
+  .schedule tbody tr.vehicle-row .resource{display:grid;grid-template-columns:22px minmax(0,1fr) auto;grid-template-rows:auto auto;align-items:start;gap:3px 5px;min-width:0}
+  .schedule tbody tr.vehicle-row .resource>.vehicle{grid-column:1;grid-row:1 / span 2}
+  .schedule tbody tr.vehicle-row .resource>div{grid-column:2;grid-row:1;min-width:0;width:auto;padding:0}
+  .schedule tbody tr.vehicle-row .resource>div>b,.schedule tbody tr.vehicle-row .resource>div>small{display:block;overflow:visible;text-overflow:clip;white-space:normal;overflow-wrap:anywhere}
+  .schedule tbody tr.vehicle-row .vehicle-quick-button{grid-column:3;grid-row:1;align-self:start;margin-left:0}
+  .schedule tbody tr.vehicle-row .resource-add-person{grid-column:2;grid-row:2;justify-self:start;align-self:start}
+  .schedule tbody tr.vehicle-row .resource-remove-button{grid-column:3;grid-row:2;justify-self:end;align-self:start}
+}
+
+/* O menu contextual fica em uma faixa curta, em vez de crescer uma coluna de botões. */
+.cell-quick-actions{display:flex!important;flex-wrap:wrap;align-items:center;width:min(430px,calc(100vw - 24px));gap:4px;padding:6px}
+.cell-quick-actions>b{flex:1 0 calc(100% - 30px);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cell-quick-actions button{flex:1 1 92px;min-width:0;padding:5px 6px;line-height:1.15;white-space:nowrap}
+.cell-quick-actions button:last-child{flex:0 0 26px;width:26px;padding:4px}
+.inline-move-tools{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.inline-move-tools>button{flex:1 1 112px;width:auto}
+.inline-move-tools .inline-move-picker,.inline-move-tools .inline-position-picker{flex:1 0 100%}
+@media(max-width:600px){
+  .cell-quick-actions{left:6px;right:6px;bottom:6px;top:auto;width:auto;max-height:31vh;overflow:auto}
+  .cell-quick-actions button{flex-basis:82px;font-size:9px}
+  .inline-move-tools{display:flex}
+}

@@ -667,10 +667,12 @@ async function upsertAssignment(
   let assignmentId = id;
   if (id)
     await env.DB.prepare(
-      "UPDATE assignments SET guard_id=?,post_id=?,vehicle_id=?,shift=?,role=?,starts_at=?,ends_at=?,regular_ends_at=?,break_starts_at=COALESCE(?,break_starts_at),break_ends_at=COALESCE(?,break_ends_at),work_kind=COALESCE(?,work_kind),status=?,request_ref=?,is_reassigned=?,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+      "UPDATE assignments SET guard_id=?,post_id=?,vehicle_id=?,lane_order=CASE WHEN COALESCE(post_id,0)<>COALESCE(?,0) OR COALESCE(vehicle_id,0)<>COALESCE(?,0) THEN NULL ELSE lane_order END,shift=?,role=?,starts_at=?,ends_at=?,regular_ends_at=?,break_starts_at=COALESCE(?,break_starts_at),break_ends_at=COALESCE(?,break_ends_at),work_kind=COALESCE(?,work_kind),status=?,request_ref=?,is_reassigned=?,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
     )
       .bind(
         opts.guardId,
+        b.postId || null,
+        b.vehicleId || null,
         b.postId || null,
         b.vehicleId || null,
         opts.shift,
@@ -1322,7 +1324,7 @@ export async function POST(request: Request) {
       b.reassignmentNote || "Avisar o GM: remanejamento para cobrir furo de escala",
     );
     await env.DB.prepare(
-      `UPDATE assignments SET post_id=?,vehicle_id=?,role=CASE WHEN ? IS NOT NULL THEN 'guard' WHEN ? IS NOT NULL THEN ? ELSE role END,is_reassigned=1,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id IN (${placeholders})`,
+      `UPDATE assignments SET post_id=?,vehicle_id=?,lane_order=NULL,role=CASE WHEN ? IS NOT NULL THEN 'guard' WHEN ? IS NOT NULL THEN ? ELSE role END,is_reassigned=1,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id IN (${placeholders})`,
     )
       .bind(postId, vehicleId, postId, requestedRole, requestedRole, reassignmentNote, ...assignmentIds)
       .run();
@@ -1387,9 +1389,11 @@ export async function POST(request: Request) {
     await env.DB.batch([
       env.DB.prepare("UPDATE vehicles SET zone=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(zone, toVehicleId),
       env.DB.prepare(
-        "UPDATE assignments SET vehicle_id=?,is_reassigned=CASE WHEN ?!=? THEN 1 ELSE is_reassigned END,reassignment_note=CASE WHEN ?!=? THEN ? ELSE reassignment_note END,updated_at=CURRENT_TIMESTAMP WHERE schedule_id=? AND vehicle_id=?",
+        "UPDATE assignments SET vehicle_id=?,lane_order=CASE WHEN ?!=? THEN NULL ELSE lane_order END,is_reassigned=CASE WHEN ?!=? THEN 1 ELSE is_reassigned END,reassignment_note=CASE WHEN ?!=? THEN ? ELSE reassignment_note END,updated_at=CURRENT_TIMESTAMP WHERE schedule_id=? AND vehicle_id=?",
       ).bind(
         toVehicleId,
+        toVehicleId,
+        fromVehicleId,
         toVehicleId,
         fromVehicleId,
         toVehicleId,
@@ -1458,7 +1462,7 @@ export async function POST(request: Request) {
     const statements = [];
     const regularStatus = String(b.status || "normal") === "overtime" ? "normal" : String(b.status || "normal");
     if (id) {
-      statements.push(env.DB.prepare("UPDATE assignments SET guard_id=?,post_id=?,vehicle_id=?,shift=?,role=?,starts_at=?,ends_at=?,regular_ends_at=NULL,status=?,request_ref=?,is_reassigned=?,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(guardId, regularPostId, regularVehicleId, b.shift, b.role, regularStart, regularEnd, regularStatus, b.requestRef || null, b.isReassigned ? 1 : 0, b.reassignmentNote || null, id));
+      statements.push(env.DB.prepare("UPDATE assignments SET guard_id=?,post_id=?,vehicle_id=?,lane_order=CASE WHEN COALESCE(post_id,0)<>COALESCE(?,0) OR COALESCE(vehicle_id,0)<>COALESCE(?,0) THEN NULL ELSE lane_order END,shift=?,role=?,starts_at=?,ends_at=?,regular_ends_at=NULL,status=?,request_ref=?,is_reassigned=?,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(guardId, regularPostId, regularVehicleId, regularPostId, regularVehicleId, b.shift, b.role, regularStart, regularEnd, regularStatus, b.requestRef || null, b.isReassigned ? 1 : 0, b.reassignmentNote || null, id));
     } else {
       statements.push(env.DB.prepare("INSERT INTO assignments (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,work_kind,status,request_ref,is_reassigned,reassignment_note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(scheduleId, guardId, regularPostId, regularVehicleId, b.shift, b.role, regularStart, regularEnd, b.workKind || "shift", regularStatus, b.requestRef || null, b.isReassigned ? 1 : 0, b.reassignmentNote || null));
     }

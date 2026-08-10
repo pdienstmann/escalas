@@ -437,6 +437,29 @@ test("saved resource lane order aligns regular GMs and ignores independent overt
   assert.deepEqual(orderAssignmentsInResourceCell(rows, rows, "post").map((item) => item.id), [2, 1, 3]);
 });
 
+test("partial lane metadata does not drag a remanejamento to the last row", () => {
+  const rows = [
+    { id: 1, guard_id: 10, guard_name: "ALMEIDA", role: "guard", work_kind: "shift", lane_order: 8 },
+    { id: 2, guard_id: 20, guard_name: "BRUNO", role: "guard", work_kind: "shift" },
+  ];
+  assert.deepEqual(orderAssignmentsInResourceCell(rows, rows, "post").map((item) => item.guard_name), ["ALMEIDA", "BRUNO"]);
+});
+
+test("schedule moves reset destination lane metadata and offer HE for a third vehicle member", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const api = readFileSync(resolve("app/api/schedule/route.ts"), "utf8");
+  const density = readFileSync(resolve("app/schedule-density.css"), "utf8");
+  assert.match(schedule, /const regularCrew = list\.filter/);
+  assert.match(schedule, /: "third"/);
+  assert.match(schedule, /quickPicker\(kind === "vehicle"\)/);
+  assert.match(api, /lane_order=CASE WHEN COALESCE\(post_id,0\)/);
+  assert.match(api, /post_id=\?,vehicle_id=\?,lane_order=NULL/);
+  assert.match(density, /has-he-action \.live-person\{padding-right:54px\}/);
+  assert.match(density, /inline-he-extension\{top:50%/);
+  assert.match(density, /vehicle-row \.resource>div>small/);
+  assert.match(density, /\.cell-quick-actions\{display:flex!important/);
+});
+
 test("every expanded schedule section ends with an inline resource action", () => {
   const source = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
   assert.match(source, /last && !isCollapsed/);

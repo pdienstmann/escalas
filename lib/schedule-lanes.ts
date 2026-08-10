@@ -29,7 +29,7 @@ export function orderedResourceGuardIds(
     current.push(assignment);
     regularByGuard.set(guardId, current);
   }
-  return [...regularByGuard.entries()]
+  const lanes = [...regularByGuard.entries()]
     .map(([guardId, assignments]) => {
       const savedOrders = assignments
         .map((assignment) => Number(assignment.lane_order))
@@ -43,9 +43,17 @@ export function orderedResourceGuardIds(
         role,
         name: String(assignments[0]?.guard_name || ""),
       };
-    })
+    });
+  // A GM moved from another post/VTR may carry the old lane_order for one
+  // render.  Treat a partial lane map as legacy data and fall back to the
+  // deterministic role/name order until the destination is explicitly
+  // normalized.  This prevents a remanejamento from jumping to the last row.
+  const hasCompleteLaneMap = lanes.length > 0 &&
+    lanes.every((item) => item.laneOrder !== null) &&
+    new Set(lanes.map((item) => item.laneOrder)).size === lanes.length;
+  return lanes
     .sort((a, b) => {
-      if (a.laneOrder !== null || b.laneOrder !== null) {
+      if (hasCompleteLaneMap) {
         if (a.laneOrder === null) return 1;
         if (b.laneOrder === null) return -1;
         if (a.laneOrder !== b.laneOrder) return a.laneOrder - b.laneOrder;

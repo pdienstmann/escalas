@@ -605,8 +605,15 @@ export function LiveSchedule() {
     if (!data) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const list = assignmentIndex.get(assignmentKey(kind, Number(resource.id), shift)) || [];
+    const regularCrew = list.filter((assignment) => !isOvertimeExtensionCell(assignment, data.date, shift));
     const missingRole =
-      kind === "vehicle" ? (list.length === 0 ? "driver" : "patrol") : "guard";
+      kind === "vehicle"
+        ? !regularCrew.some((assignment) => String(assignment.role) === "driver")
+          ? "driver"
+          : !regularCrew.some((assignment) => String(assignment.role) === "patrol")
+            ? "patrol"
+            : "third"
+        : "guard";
     setHolePick({
       kind,
       resource,
@@ -2282,7 +2289,7 @@ function Row({
                 >
                   ＋ GM
                 </button>
-                {quickPicker()}
+                {quickPicker(kind === "vehicle")}
                 </>
               )}
             </td>
