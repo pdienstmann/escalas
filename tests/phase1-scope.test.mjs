@@ -458,3 +458,25 @@ test("confirmed operations must be explicitly reopened before editing slots", ()
   assert.match(dashboard, /Reabrir edição/);
   assert.match(dashboard, /bloqueada para evitar alterações acidentais/);
 });
+
+test("general service adjustments expose BH-, BH+ and service swaps in schedule and PDF", () => {
+  const api = readFileSync(resolve("app/api/schedule/route.ts"), "utf8");
+  const admin = readFileSync(resolve("app/api/admin/route.ts"), "utf8");
+  const dashboard = readFileSync(resolve("app/gestao-client.tsx"), "utf8");
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const print = readFileSync(resolve("app/print-schedule.tsx"), "utf8");
+  const nav = readFileSync(resolve("app/schedule-nav.tsx"), "utf8");
+  const migration = readFileSync(resolve("drizzle/0014_service_adjustments.sql"), "utf8");
+  assert.match(api, /create_service_adjustment/);
+  assert.match(api, /cancel_service_adjustment/);
+  assert.match(api, /time_bank_positive/);
+  assert.match(api, /subtype === "swap"/);
+  assert.match(api, /serviceAdjustments/);
+  assert.match(admin, /service_adjustments/);
+  assert.match(dashboard, /Banco de horas e trocas/);
+  assert.match(dashboard, /BH\+ · pagar banco em dia extra/);
+  assert.match(schedule, /service-adjustment-inline/);
+  assert.match(print, /print-service-adjustments/);
+  assert.match(nav, /\/bancos/);
+  assert.match(migration, /idx_service_adjustments_date/);
+});

@@ -37,6 +37,7 @@ type Data = {
   vehicleCrews: Item[];
   sections: Item[];
   vehicleReturnImpacts: Item[];
+  serviceAdjustments: Item[];
   leaveOverview: LeaveOverview | null;
 };
 const empty: Data = {
@@ -51,6 +52,7 @@ const empty: Data = {
   vehicleCrews: [],
   sections: [],
   vehicleReturnImpacts: [],
+  serviceAdjustments: [],
   leaveOverview: null,
 };
 
@@ -59,12 +61,13 @@ const modeLabel = {
   viaturas: "gestão de viaturas",
   folgas: "folgas mensais",
   movimentos: "movimentações do efetivo",
+  ajustes: "banco de horas e trocas",
 } as const;
 
 export function GestaoClient({
   mode,
 }: {
-  mode: "cadastros" | "viaturas" | "folgas" | "movimentos";
+  mode: "cadastros" | "viaturas" | "folgas" | "movimentos" | "ajustes";
 }) {
   const { date } = useScheduleDate();
   const [data, setData] = useState<Data>(empty),
@@ -306,6 +309,34 @@ export function GestaoClient({
     setMessage(r.ok?(action==="movement_delete"?"Movimentação removida.":"Movimentação atualizada."):j.error);
     if(r.ok){setMovementEditing(null);await load()}
   }
+  async function saveServiceAdjustment(event:FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (saving) return;
+    const form = event.currentTarget;
+    const values = Object.fromEntries(new FormData(form));
+    if (String(values.subtype) === "negative_full" && !confirm("Confirmar retirada integral deste GM da escala na data informada?")) return;
+    setSaving(true); setMessage("");
+    try {
+      const response = await fetch("/api/schedule", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "create_service_adjustment", ...values }),
+      });
+      const result = await response.json();
+      setMessage(response.ok ? result.message : result.error);
+      if (response.ok) { form.reset(); await load(); }
+    } finally { setSaving(false); }
+  }
+  async function cancelServiceAdjustment(item:Item) {
+    if (!confirm(`Cancelar o lançamento de ${String(item.guard_name)} e restaurar a escala?`)) return;
+    setSaving(true); setMessage("");
+    try {
+      const response = await fetch("/api/schedule", { method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify({action:"cancel_service_adjustment",id:item.id}) });
+      const result = await response.json();
+      setMessage(response.ok ? result.message : result.error);
+      if (response.ok) await load();
+    } finally { setSaving(false); }
+  }
   if (busy)
     return <ModuleLoading area={modeLabel[mode]} detail="Sincronizando cadastros e regras operacionais…" />;
   if (mode === "cadastros")
@@ -496,6 +527,58 @@ export function GestaoClient({
           onDelete={(item)=>void movementAction("movement_delete",{id:item.id})}
         />
         {movementEditing&&<MovementEditor item={movementEditing} guards={data.guards} onClose={()=>setMovementEditing(null)} onSubmit={(body)=>void movementAction("movement_update",body)}/>}
+      </Module>
+    );
+  if (mode === "ajustes")
+    return (
+      <Module
+        date={date}
+        title="Banco de horas e trocas"
+        subtitle="Registre o requerimento uma vez e aplique o ajuste automaticamente na escala da data."
+        busy={saving}
+        busyArea={modeLabel[mode]}
+      >
+        <div className="service-adjustment-layout">
+          <Form title="Novo banco ou troca" onSubmit={(e) => void saveServiceAdjustment(e)}>
+            <select name="subtype" required defaultValue="negative_early">
+              <option value="negative_early">BH- · sair mais cedo</option>
+              <option value="negative_full">BH- · retirar o dia inteiro</option>
+              <option value="positive">BH+ · pagar banco em dia extra</option>
+              <option value="swap">Troca de serviço · dois GMs</option>
+            </select>
+            <GuardSelect guards={data.guards} />
+            <select name="counterpartGuardId" defaultValue="">
+              <option value="">Segundo GM (somente troca)</option>
+              {data.guards.map((guard) => <option key={guard.id} value={String(guard.id)}>{guard.name}</option>)}
+            </select>
+            <label className="field-caption">Data da escala<input name="serviceDate" type="date" defaultValue={date} required /></label>
+            <div className="two">
+              <label className="field-caption">Início<input name="startsAt" type="datetime-local" defaultValue={`${date}T07:00`} required /></label>
+              <label className="field-caption">Fim / saída<input name="endsAt" type="datetime-local" defaultValue={`${date}T19:00`} required /></label>
+            </div>
+            <input name="requestRef" placeholder="Nº do requerimento" required />
+            <input name="notes" placeholder="Observação ou motivo" />
+            <small className="service-adjustment-help">BH- integral retira o GM e deixa o registro no rodapé. BH+ cria um GM à disposição para ser remanejado.</small>
+          </Form>
+          <section className="service-adjustment-guide">
+            <h3>Como cada opção funciona</h3>
+            <p><b>BH- parcial:</b> encurta o horário e destaca o quadradinho.</p>
+            <p><b>BH- integral:</b> remove o GM do dia, sem apagar o cadastro.</p>
+            <p><b>BH+:</b> coloca o GM à disposição; ao escalar, o requerimento acompanha o card.</p>
+            <p><b>Troca:</b> troca os postos dos dois GMs nos mesmos horários e sinaliza ambos.</p>
+          </section>
+        </div>
+        {message && <p className="notice" role="status">{message}</p>}
+        <section className="service-adjustment-records">
+          <header><div><small>LANÇAMENTOS ATIVOS DO MÊS</small><h3>Banco de horas e trocas aplicados</h3></div><span>{data.serviceAdjustments.length}</span></header>
+          {data.serviceAdjustments.length ? data.serviceAdjustments.map((item) => (
+            <article key={String(item.id)} className={`service-adjustment-card ${String(item.subtype)}`}>
+              <div><b>{String(item.guard_name)}</b>{item.counterpart_guard_name && <span> ⇄ {String(item.counterpart_guard_name)}</span>}<small>{serviceAdjustmentLabel(String(item.subtype))} · {String(item.service_date)} · {String(item.starts_at).slice(11,16)}–{String(item.ends_at).slice(11,16)}</small></div>
+              <div><strong>{item.request_ref ? `Req. ${item.request_ref}` : "Sem requerimento"}</strong>{item.notes && <small>{String(item.notes)}</small>}</div>
+              <button type="button" className="danger-link" onClick={() => void cancelServiceAdjustment(item)}>Cancelar e restaurar</button>
+            </article>
+          )) : <p>Nenhum banco ou troca ativo neste mês.</p>}
+        </section>
       </Module>
     );
   const campaign = data.campaign;
@@ -913,6 +996,14 @@ function movementPeriod(item: Item) {
   const start = new Date(String(item.starts_at)),
     end = new Date(String(item.ends_at));
   return `${start.toLocaleDateString("pt-BR")} a ${end.toLocaleDateString("pt-BR")}`;
+}
+function serviceAdjustmentLabel(subtype: string) {
+  return ({
+    negative_early: "BH- · saída antecipada",
+    negative_full: "BH- · retirada integral",
+    positive: "BH+ · dia extra",
+    swap: "Troca de serviço",
+  } as Record<string,string>)[subtype] || subtype;
 }
 function FleetAvailability({date,vehicles,outages,onSubmit,onDelete}:{date:string;vehicles:Item[];outages:Item[];onSubmit:(e:FormEvent<HTMLFormElement>)=>void;onDelete:(id:Item["id"])=>void}){
   const activeOutages=outages.filter(item=>String(item.starts_on)<=date&&(!item.ends_on||String(item.ends_on)>=date));

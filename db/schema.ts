@@ -79,6 +79,19 @@ export const scheduleSections=sqliteTable("schedule_sections",{sectionKey:text("
 export const movements = sqliteTable("movements", {
   id:integer("id").primaryKey({autoIncrement:true}), guardId:integer("guard_id").notNull().references(()=>guards.id), type:text("type",{enum:["day_off","vacation","course","medical_leave","technical_reserve","time_bank","swap"]}).notNull(), startsAt:text("starts_at").notNull(), endsAt:text("ends_at").notNull(), requestRef:text("request_ref"), notes:text("notes"), status:text("status",{enum:["pending","approved","rejected"]}).notNull().default("approved"), ...audit,
 });
+export const serviceAdjustments = sqliteTable("service_adjustments", {
+  id:integer("id").primaryKey({autoIncrement:true}),
+  kind:text("kind").notNull(),
+  subtype:text("subtype").notNull(),
+  guardId:integer("guard_id").notNull().references(()=>guards.id),
+  counterpartGuardId:integer("counterpart_guard_id").references(()=>guards.id),
+  serviceDate:text("service_date").notNull(),
+  startsAt:text("starts_at").notNull(),
+  endsAt:text("ends_at").notNull(),
+  requestRef:text("request_ref"),notes:text("notes"),
+  status:text("status").notNull().default("active"),snapshotJson:text("snapshot_json"),
+  ...audit,
+});
 export const leaveCampaigns = sqliteTable("leave_campaigns", {
   id:integer("id").primaryKey({autoIncrement:true}), month:text("month").notNull().unique(), title:text("title").notNull(), weekdayQuota:integer("weekday_quota").notNull().default(1), weekendQuota:integer("weekend_quota").notNull().default(1), status:text("status",{enum:["draft","open","closed","published"]}).notNull().default("draft"), accessCode:text("access_code").notNull(), ...audit,
 });

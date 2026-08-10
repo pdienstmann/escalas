@@ -239,6 +239,26 @@ async function vehicleReturnImpact(outageId:number,returnOn:string){
 
 function previousDate(date:string){const value=new Date(`${date}T12:00:00Z`);value.setUTCDate(value.getUTCDate()-1);return value.toISOString().slice(0,10)}
 
+async function ensureServiceAdjustmentsTable(){
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS service_adjustments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,
+    subtype TEXT NOT NULL,
+    guard_id INTEGER NOT NULL REFERENCES guards(id),
+    counterpart_guard_id INTEGER REFERENCES guards(id),
+    service_date TEXT NOT NULL,
+    starts_at TEXT NOT NULL,
+    ends_at TEXT NOT NULL,
+    request_ref TEXT,
+    notes TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    snapshot_json TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`).run();
+  await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_service_adjustments_date ON service_adjustments(service_date,status)").run();
+}
+
 function assignmentTimes(date:string,shift:string){
   const values:Record<string,[string,string]>={"2":["07:00","13:00"],"3":["13:00","19:00"],"4":["19:00","01:00"],"1":["01:00","07:00"]};
   const [start,end]=values[shift];const next=new Date(`${date}T12:00:00Z`);next.setUTCDate(next.getUTCDate()+1);
@@ -280,8 +300,13 @@ export async function GET(request: Request) {
   await syncConfirmedLeaves();
   await ensureSections();
   await ensureFleetReturnTables();
+  await ensureServiceAdjustmentsTable();
   const requestedDate = new URL(request.url).searchParams.get("date") || todayScheduleDate();
-  const [guards, posts, vehicles, movements, campaign, days, choices, vehicleOutages, sections, vehicleCrews, vehicleReturnImpacts, leavePatternSlots] =
+  const monthStart = `${String(requestedDate).slice(0,7)}-01`;
+  const nextMonth = new Date(`${monthStart}T12:00:00Z`);
+  nextMonth.setUTCMonth(nextMonth.getUTCMonth()+1);
+  const monthEnd = nextMonth.toISOString().slice(0,10);
+  const [guards, posts, vehicles, movements, campaign, days, choices, vehicleOutages, sections, vehicleCrews, vehicleReturnImpacts, leavePatternSlots, serviceAdjustments] =
     await Promise.all([
       env.DB.prepare(
         "SELECT * FROM guards WHERE active = 1 ORDER BY name",
@@ -323,6 +348,11 @@ export async function GET(request: Request) {
         JOIN shift_patterns p ON p.id=ps.pattern_id AND p.active=1
         LEFT JOIN vehicles v ON v.id=ps.vehicle_id
         LEFT JOIN posts po ON po.id=ps.post_id`).all(),
+      env.DB.prepare(`SELECT sa.*,g.name guard_name,c.name counterpart_guard_name
+        FROM service_adjustments sa JOIN guards g ON g.id=sa.guard_id
+        LEFT JOIN guards c ON c.id=sa.counterpart_guard_id
+        WHERE sa.service_date>=? AND sa.service_date<? AND sa.status='active'
+        ORDER BY sa.service_date,sa.starts_at,sa.id`).bind(monthStart,monthEnd).all(),
     ]);
   return Response.json({
     guards: guards.results,
@@ -336,6 +366,7 @@ export async function GET(request: Request) {
     vehicleCrews: vehicleCrews.results,
     sections: sections.results,
     vehicleReturnImpacts: vehicleReturnImpacts.results,
+    serviceAdjustments: serviceAdjustments.results,
     leaveOverview: buildLeaveOverview(
       campaign as Record<string, unknown> | null,
       choices.results,
@@ -349,6 +380,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "Não autorizado" }, { status: 401 });
   const body = (await request.json()) as AdminBody;
   await ensureFleetReturnTables();
+  await ensureServiceAdjustmentsTable();
   try {
     if (body.action === "guard_import") {
       const rows = ((body as unknown as {rows?:Array<{registration?:string;name?:string;platoon?:string;baseShift?:string}>}).rows || []).slice(0,500).filter(row=>row.registration?.trim()&&row.name?.trim());

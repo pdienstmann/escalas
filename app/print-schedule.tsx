@@ -16,6 +16,7 @@ type State = {
   vehicles: Rec[];
   assignments: Rec[];
   movements: Rec[];
+  serviceAdjustments?: Rec[];
   sections?: Rec[];
   patternLabel?: string;
   operations?: PrintOperation[];
@@ -196,6 +197,17 @@ function PrintPage({
               </section>
             );
           })}
+          {data.serviceAdjustments?.length ? (
+            <section className="print-service-adjustments">
+              <b>Banco de horas / trocas</b>
+              {data.serviceAdjustments.map((item) => (
+                <p key={String(item.id)}>
+                  {String(item.guard_name)}{item.counterpart_guard_name ? ` ⇄ ${String(item.counterpart_guard_name)}` : ""}
+                  <small>{printServiceAdjustmentLabel(String(item.subtype))} · {String(item.request_ref || "Sem requerimento")}</small>
+                </p>
+              ))}
+            </section>
+          ) : null}
         </div>
       </footer>
       <div className="print-page-number">
@@ -233,6 +245,7 @@ function movementDetail(m: Rec) {
     return date(start);
   return `${date(start)} ${time(start)}–${time(end)}`;
 }
+function printServiceAdjustmentLabel(subtype:string){return ({negative_early:"BH- · saída antecipada",negative_full:"BH- · retirada integral",positive:"BH+ · dia extra",swap:"Troca de serviço"} as Record<string,string>)[subtype]||subtype}
 const status = (s: string) =>
   s === "overtime" ? "HE" : s === "time_bank" ? "BH" : "TROCA";
 const vehicleIcon=(type:string)=>type==="moto"?"🏍️":type==="pickup"?"🛻":type==="van"?"🚐":type==="suv"?"🚙":"🚓";

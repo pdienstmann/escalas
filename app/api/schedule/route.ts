@@ -314,6 +314,7 @@ async function seedSchedule(date: string, scheduleId: number) {
 }
 
 async function ensureBase(date: string) {
+  await ensureServiceAdjustmentsTable();
   await env.DB.prepare(
     `CREATE TABLE IF NOT EXISTS schedule_resource_exclusions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -359,6 +360,28 @@ async function ensureBase(date: string) {
   }
 }
 
+async function ensureServiceAdjustmentsTable() {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS service_adjustments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,
+    subtype TEXT NOT NULL,
+    guard_id INTEGER NOT NULL REFERENCES guards(id),
+    counterpart_guard_id INTEGER REFERENCES guards(id),
+    service_date TEXT NOT NULL,
+    starts_at TEXT NOT NULL,
+    ends_at TEXT NOT NULL,
+    request_ref TEXT,
+    notes TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    snapshot_json TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`).run();
+  await env.DB.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_service_adjustments_date ON service_adjustments(service_date,status)",
+  ).run();
+}
+
 export async function GET(request: Request) {
   if (!permitted(request))
     return Response.json({ error: "Não autorizado" }, { status: 401 });
@@ -372,7 +395,7 @@ export async function GET(request: Request) {
   const schedule = await env.DB.prepare("SELECT * FROM schedules WHERE date=?")
     .bind(date)
     .first<Record<string, unknown>>();
-  const [guards, posts, vehicles, allVehicles, assignments, movements, notices, outages, sections, operations] =
+  const [guards, posts, vehicles, allVehicles, assignments, movements, notices, outages, sections, operations, serviceAdjustments] =
     await Promise.all([
       env.DB.prepare(
         "SELECT id,name,registration,platoon,base_shift,work_regime,overtime_eligible FROM guards WHERE active=1 ORDER BY name",
@@ -407,9 +430,17 @@ export async function GET(request: Request) {
         COUNT(os.id) total_slots,SUM(CASE WHEN os.guard_id IS NOT NULL THEN 1 ELSE 0 END) filled
         FROM operations o LEFT JOIN operation_slots os ON os.operation_id=o.id
         WHERE o.schedule_id=? AND o.status!='cancelled' GROUP BY o.id ORDER BY o.starts_at,o.title`).bind(schedule?.id).all(),
+      env.DB.prepare(`SELECT sa.*,g.name guard_name,c.name counterpart_guard_name
+        FROM service_adjustments sa JOIN guards g ON g.id=sa.guard_id
+        LEFT JOIN guards c ON c.id=sa.counterpart_guard_id
+        WHERE sa.service_date=? AND sa.status='active'
+        ORDER BY sa.starts_at,sa.id`).bind(date).all(),
     ]);
   const operationAssignments=(await env.DB.prepare(`SELECT os.guard_id,o.starts_at,o.ends_at FROM operation_slots os JOIN operations o ON o.id=os.operation_id WHERE o.schedule_id=? AND o.status!='cancelled' AND os.guard_id IS NOT NULL`).bind(schedule?.id).all<{guard_id:number;starts_at:string;ends_at:string}>()).results;
-  const blocked = new Set(movements.results.map((m) => Number(m.guard_id))),
+  const blocked = new Set([
+      ...movements.results.map((m) => Number(m.guard_id)),
+      ...serviceAdjustments.results.filter((item) => String(item.subtype)==="negative_full").map((item) => Number(item.guard_id)),
+    ]),
     visibleVehicleIds=new Set(vehicles.results.map((v)=>Number(v.id))),
     visiblePostIds=new Set(posts.results.map((p)=>Number(p.id))),
     awaitingRedeploy = (a: Record<string, unknown>) => {
@@ -444,6 +475,7 @@ export async function GET(request: Request) {
     outages: outages.results,
     sections: sections.results,
     operations: operations.results,
+    serviceAdjustments: serviceAdjustments.results,
     patternLabel: appliedPattern?`${appliedPattern.day_code} + ${appliedPattern.night_code} + SEMANAL`:`${suggested?.dayCode} + ${suggested?.nightCode} + SEMANAL · AJUSTES`,
   });
 }
@@ -687,6 +719,133 @@ export async function POST(request: Request) {
   if (!permitted(request))
     return Response.json({ error: "Não autorizado" }, { status: 401 });
   const b = (await request.json()) as Record<string, string | number | boolean | null>;
+  if (b.action === "create_service_adjustment") {
+    await ensureServiceAdjustmentsTable();
+    const subtype = String(b.subtype || "");
+    const serviceDate = String(b.serviceDate || "");
+    const guardId = Number(b.guardId || 0);
+    const counterpartGuardId = Number(b.counterpartGuardId || 0) || null;
+    const requestRef = String(b.requestRef || "").trim() || null;
+    const notes = String(b.notes || "").trim() || null;
+    if (!isScheduleDate(serviceDate) || !["negative_early", "negative_full", "positive", "swap"].includes(subtype) || !guardId)
+      return Response.json({ error: "Informe o GM, a data e o tipo do lançamento." }, { status: 400 });
+    const guard = await env.DB.prepare("SELECT id,name FROM guards WHERE id=? AND active=1").bind(guardId).first<{id:number;name:string}>();
+    if (!guard) return Response.json({ error: "GM não encontrado ou inativo." }, { status: 404 });
+    if (subtype === "swap" && (!counterpartGuardId || counterpartGuardId === guardId))
+      return Response.json({ error: "Selecione dois GMs diferentes para a troca." }, { status: 400 });
+    if (counterpartGuardId) {
+      const counterpart = await env.DB.prepare("SELECT id FROM guards WHERE id=? AND active=1").bind(counterpartGuardId).first();
+      if (!counterpart) return Response.json({ error: "O segundo GM não foi encontrado ou está inativo." }, { status: 404 });
+    }
+    await ensureBase(serviceDate);
+    const schedule = await env.DB.prepare("SELECT id FROM schedules WHERE date=?").bind(serviceDate).first<{id:number}>();
+    if (!schedule) return Response.json({ error: "Não foi possível abrir a escala da data." }, { status: 500 });
+    const tomorrow = new Date(`${serviceDate}T12:00:00Z`);
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+    const dayStart = `${serviceDate}T00:00`;
+    // A 12x36 operational day includes the 1º turno until 07:00 of the
+    // following calendar day.  This also covers legacy rows stored on the
+    // service date itself (01:00–07:00).
+    const tomorrowDate = tomorrow.toISOString().slice(0, 10);
+    const dayEnd = `${tomorrowDate}T07:00`;
+    const startsAt = subtype === "negative_full" ? dayStart : String(b.startsAt || "");
+    const endsAt = subtype === "negative_full" ? dayEnd : String(b.endsAt || "");
+    const startMs = Date.parse(startsAt), endMs = Date.parse(endsAt);
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs)
+      return Response.json({ error: "Informe um intervalo válido para o lançamento." }, { status: 400 });
+    const loadGuardAssignments = async (id:number) => (await env.DB.prepare(
+      "SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.schedule_id=? AND a.guard_id=? AND a.starts_at<? AND a.ends_at>? ORDER BY a.starts_at,a.id",
+    ).bind(schedule.id,id,endsAt,startsAt).all<Record<string,unknown>>()).results;
+    const base = {
+      kind: subtype === "swap" ? "swap" : "time_bank",
+      subtype, guardId, counterpartGuardId, serviceDate, startsAt, endsAt, requestRef, notes,
+    };
+    const existingAdjustment = await env.DB.prepare(`SELECT id FROM service_adjustments
+      WHERE status='active' AND service_date=?
+        AND (guard_id=? OR counterpart_guard_id=? OR guard_id=? OR counterpart_guard_id=?)
+        AND starts_at<? AND ends_at>? LIMIT 1`)
+      .bind(serviceDate, guardId, guardId, counterpartGuardId || -1, counterpartGuardId || -1, endsAt, startsAt)
+      .first();
+    if (existingAdjustment)
+      return Response.json({ error: "Já existe um banco ou troca ativa para este GM nesse intervalo." }, { status: 409 });
+    if (subtype === "positive") {
+      const existing = await loadGuardAssignments(guardId);
+      if (existing.length) return Response.json({ error: `${guard.name} já possui uma designação neste intervalo.` }, { status: 409 });
+      const conflictingMovement = await env.DB.prepare("SELECT type FROM movements WHERE guard_id=? AND status='approved' AND starts_at<? AND ends_at>? LIMIT 1").bind(guardId,endsAt,startsAt).first<{type:string}>();
+      if (conflictingMovement) return Response.json({ error: `${guard.name} possui uma movimentação neste intervalo.` }, { status: 409 });
+      const hour = Number(startsAt.slice(11, 13));
+      const shift = hour < 7 ? "1" : hour < 13 ? "2" : hour < 19 ? "3" : "4";
+      const results = await env.DB.batch([
+        env.DB.prepare("INSERT INTO service_adjustments (kind,subtype,guard_id,service_date,starts_at,ends_at,request_ref,notes,status,snapshot_json) VALUES (?,?,?,?,?,?,?,?,'active',?)").bind(base.kind,subtype,guardId,serviceDate,startsAt,endsAt,requestRef,notes,"{}"),
+        env.DB.prepare("INSERT INTO assignments (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,work_kind,status,request_ref,is_reassigned,reassignment_note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(schedule.id,guardId,null,null,shift,"guard",startsAt,endsAt,"time_bank_positive","time_bank",requestRef,0,notes||"BH+ aguardando remanejamento"),
+      ]);
+      const adjustmentId = Number(results[0].meta.last_row_id), assignmentId = Number(results[1].meta.last_row_id);
+      await env.DB.prepare("UPDATE service_adjustments SET snapshot_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(JSON.stringify({createdAssignmentId:assignmentId}),adjustmentId).run();
+      const adjustment = await env.DB.prepare("SELECT sa.*,g.name guard_name FROM service_adjustments sa JOIN guards g ON g.id=sa.guard_id WHERE sa.id=?").bind(adjustmentId).first();
+      const auditEventId = await writeAudit(request,{action:"create",entityType:"service_adjustment",entityId:adjustmentId,summary:`Registrou BH+ de ${guard.name} em ${serviceDate}`,after:adjustment as Record<string,unknown>,undoable:false});
+      return Response.json({ok:true,adjustment,auditEventId,message:`BH+ de ${guard.name} criado e colocado à disposição para ${serviceDate}.`});
+    }
+    if (subtype === "swap") {
+      const left = await loadGuardAssignments(guardId);
+      const right = await loadGuardAssignments(counterpartGuardId!);
+      if (!left.length || !right.length || left.length !== right.length || left.some((item,index)=>String(item.starts_at)!==String(right[index].starts_at)||String(item.ends_at)!==String(right[index].ends_at)))
+        return Response.json({ error: "A troca precisa encontrar os dois GMs escalados nos mesmos horários." }, { status: 409 });
+      const snapshot = JSON.stringify({assignments:[...left,...right]});
+      const updates = left.map((item,index) => {
+        const other = right[index];
+        return env.DB.prepare("UPDATE assignments SET post_id=?,vehicle_id=?,shift=?,role=?,status='swap',request_ref=?,is_reassigned=1,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(other.post_id||null,other.vehicle_id||null,other.shift,other.role,requestRef,`Troca de serviço com ${other.guard_name}`,item.id);
+      }).concat(right.map((item,index) => {
+        const other = left[index];
+        return env.DB.prepare("UPDATE assignments SET post_id=?,vehicle_id=?,shift=?,role=?,status='swap',request_ref=?,is_reassigned=1,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(other.post_id||null,other.vehicle_id||null,other.shift,other.role,requestRef,`Troca de serviço com ${other.guard_name}`,item.id);
+      }));
+      const results = await env.DB.batch([
+        env.DB.prepare("INSERT INTO service_adjustments (kind,subtype,guard_id,counterpart_guard_id,service_date,starts_at,ends_at,request_ref,notes,status,snapshot_json) VALUES (?,?,?,?,?,?,?,?,?,'active',?)").bind(base.kind,subtype,guardId,counterpartGuardId,serviceDate,startsAt,endsAt,requestRef,notes,snapshot),
+        ...updates,
+      ]);
+      const adjustmentId = Number(results[0].meta.last_row_id);
+      const adjustment = await env.DB.prepare("SELECT sa.*,g.name guard_name,c.name counterpart_guard_name FROM service_adjustments sa JOIN guards g ON g.id=sa.guard_id LEFT JOIN guards c ON c.id=sa.counterpart_guard_id WHERE sa.id=?").bind(adjustmentId).first();
+      const auditEventId = await writeAudit(request,{action:"create",entityType:"service_adjustment",entityId:adjustmentId,summary:`Registrou troca entre ${guard.name} e ${adjustment?.counterpart_guard_name}`,after:adjustment as Record<string,unknown>,undoable:false});
+      return Response.json({ok:true,adjustment,auditEventId,message:`Troca aplicada entre ${guard.name} e ${adjustment?.counterpart_guard_name}.`});
+    }
+    const assignments = await loadGuardAssignments(guardId);
+    const affectedAssignments = subtype === "negative_full"
+      ? assignments
+      : assignments.filter((item) => Date.parse(String(item.ends_at)) > endMs);
+    const snapshot = JSON.stringify({assignments: affectedAssignments});
+    const updates = affectedAssignments.map((item) => subtype === "negative_full"
+      ? env.DB.prepare("UPDATE assignments SET post_id=NULL,vehicle_id=NULL,status='time_bank',request_ref=?,is_reassigned=1,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(requestRef,notes||`BH- de ${guard.name}`,item.id)
+      : env.DB.prepare("UPDATE assignments SET ends_at=?,regular_ends_at=CASE WHEN regular_ends_at IS NOT NULL AND regular_ends_at>? THEN ? ELSE regular_ends_at END,status='time_bank',request_ref=?,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(endsAt,endsAt,endsAt,requestRef,notes||`BH- de ${guard.name}`,item.id));
+    const results = await env.DB.batch([
+      env.DB.prepare("INSERT INTO service_adjustments (kind,subtype,guard_id,service_date,starts_at,ends_at,request_ref,notes,status,snapshot_json) VALUES (?,?,?,?,?,?,?,?,'active',?)").bind(base.kind,subtype,guardId,serviceDate,startsAt,endsAt,requestRef,notes,snapshot),
+      ...updates,
+    ]);
+    const adjustmentId = Number(results[0].meta.last_row_id);
+    const adjustment = await env.DB.prepare("SELECT sa.*,g.name guard_name FROM service_adjustments sa JOIN guards g ON g.id=sa.guard_id WHERE sa.id=?").bind(adjustmentId).first();
+    const auditEventId = await writeAudit(request,{action:"create",entityType:"service_adjustment",entityId:adjustmentId,summary:`Registrou ${subtype==='negative_full'?'BH- integral':'BH- com saída antecipada'} de ${guard.name}`,after:adjustment as Record<string,unknown>,undoable:false});
+    return Response.json({ok:true,adjustment,auditEventId,message:`Banco de horas negativo aplicado para ${guard.name} em ${serviceDate}.`});
+  }
+  if (b.action === "cancel_service_adjustment") {
+    await ensureServiceAdjustmentsTable();
+    const id = Number(b.id || 0);
+    const adjustment = await env.DB.prepare("SELECT sa.*,g.name guard_name FROM service_adjustments sa JOIN guards g ON g.id=sa.guard_id WHERE sa.id=? AND sa.status='active'").bind(id).first<Record<string,unknown>>();
+    if (!adjustment) return Response.json({ error: "Lançamento não encontrado ou já cancelado." }, { status: 404 });
+    let snapshot:Record<string,unknown> = {};
+    try { snapshot = JSON.parse(String(adjustment.snapshot_json || "{}")) as Record<string,unknown>; } catch { return Response.json({ error: "O histórico deste lançamento está inválido." }, { status: 409 }); }
+    const statements:D1PreparedStatement[] = [];
+    if (String(adjustment.subtype) === "positive") {
+      const assignmentId = Number(snapshot.createdAssignmentId || 0);
+      const current = assignmentId ? await env.DB.prepare("SELECT post_id,vehicle_id FROM assignments WHERE id=?").bind(assignmentId).first<{post_id:number|null;vehicle_id:number|null}>() : null;
+      if (current?.post_id || current?.vehicle_id) statements.push(env.DB.prepare("UPDATE assignments SET status='normal',work_kind='shift',request_ref=NULL,reassignment_note=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(assignmentId));
+      else if (assignmentId) statements.push(env.DB.prepare("DELETE FROM assignments WHERE id=?").bind(assignmentId));
+    } else {
+      const originals = Array.isArray(snapshot.assignments) ? snapshot.assignments as Array<Record<string,unknown>> : [];
+      for (const row of originals) statements.push(env.DB.prepare("UPDATE assignments SET guard_id=?,post_id=?,vehicle_id=?,shift=?,role=?,starts_at=?,ends_at=?,regular_ends_at=?,break_starts_at=?,break_ends_at=?,work_kind=?,status=?,request_ref=?,is_reassigned=?,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(row.guard_id,row.post_id||null,row.vehicle_id||null,row.shift,row.role,row.starts_at,row.ends_at,row.regular_ends_at||null,row.break_starts_at||null,row.break_ends_at||null,row.work_kind||"shift",row.status||"normal",row.request_ref||null,row.is_reassigned||0,row.reassignment_note||null,row.id));
+    }
+    statements.push(env.DB.prepare("UPDATE service_adjustments SET status='cancelled',updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(id));
+    await env.DB.batch(statements);
+    const auditEventId = await writeAudit(request,{action:"cancel",entityType:"service_adjustment",entityId:id,summary:`Cancelou lançamento de ${adjustment.guard_name}`,before:adjustment,undoable:false});
+    return Response.json({ok:true,auditEventId,message:`Lançamento de ${adjustment.guard_name} cancelado e escala restaurada.`});
+  }
   if (b.action === "copy_assignment_to_cell") {
     const sourceId=Number(b.sourceAssignmentId||0),scheduleId=Number(b.scheduleId||0),targetShift=String(b.shift||"");
     const source=await env.DB.prepare("SELECT a.*,g.name guard_name,s.date schedule_date FROM assignments a JOIN guards g ON g.id=a.guard_id JOIN schedules s ON s.id=a.schedule_id WHERE a.id=? AND a.schedule_id=?").bind(sourceId,scheduleId).first<Record<string,unknown>>();

@@ -48,6 +48,7 @@ type State = {
   assignments: Rec[];
   removed: Rec[];
   movements: Rec[];
+  serviceAdjustments?: Rec[];
   notices: Rec[];
   sections: Rec[];
   availableForRedeployment: Rec[];
@@ -1013,6 +1014,7 @@ export function LiveSchedule() {
                     </div>
                   </article>
                 ))}
+                {data.serviceAdjustments?.length ? <article className="movement-group service-adjustment-inline"><header><b>Banco de horas / trocas</b><span>{data.serviceAdjustments.length}</span></header><div>{data.serviceAdjustments.map((item)=><span key={String(item.id)} className="movement-person"><strong>{String(item.guard_name)}{item.counterpart_guard_name?` ⇄ ${String(item.counterpart_guard_name)}`:""}</strong><small>{liveServiceAdjustmentLabel(String(item.subtype))}{item.request_ref?` · Req. ${String(item.request_ref)}`:""}</small></span>)}</div></article>:null}
               </div>
             )}
           </section>
@@ -1254,6 +1256,7 @@ function movementDetail(m: Rec) {
     return `Dia ${date(start)}`;
   return `${date(start)} · ${time(start)}–${time(end)}`;
 }
+function liveServiceAdjustmentLabel(subtype:string){return ({negative_early:"BH- · saída antecipada",negative_full:"BH- · retirada integral",positive:"BH+ · dia extra",swap:"Troca de serviço"} as Record<string,string>)[subtype]||subtype}
 function VehicleQuickEditor({data,vehicle,saving,onClose,onSave}:{data:State;vehicle:Rec;saving:boolean;onClose:()=>void;onSave:(e:FormEvent<HTMLFormElement>)=>void}) {
   const[selectedId,setSelectedId]=useState(String(vehicle.id));
   const[zone,setZone]=useState(String(vehicle.zone||""));
