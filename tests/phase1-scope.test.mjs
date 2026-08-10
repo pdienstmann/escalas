@@ -767,3 +767,15 @@ test("schedule collaboration exposes refresh time and conflict recovery", () => 
   assert.match(styles, /\.schedule-conflict-notice/);
   assert.match(styles, /\.sync-refresh/);
 });
+
+test("schedule cells support keyboard navigation and contextual activation", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/drag-edit.css"), "utf8");
+  assert.match(schedule, /KeyboardEvent as ReactKeyboardEvent/);
+  assert.match(schedule, /function navigateCell/);
+  assert.match(schedule, /event\.key === "ArrowLeft"/);
+  assert.match(schedule, /event\.key === "Enter" \|\| event\.key === " "/);
+  assert.match(schedule, /tabIndex=\{0\}/);
+  assert.match(schedule, /className="keyboard-help"/);
+  assert.match(styles, /\.drop-cell:focus-visible/);
+});
