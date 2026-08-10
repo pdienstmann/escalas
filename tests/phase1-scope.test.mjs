@@ -475,8 +475,10 @@ test("general service adjustments expose BH-, BH+ and service swaps in schedule 
   assert.match(admin, /service_adjustments/);
   assert.match(dashboard, /Banco de horas e trocas/);
   assert.match(dashboard, /BH\+ · pagar banco em dia extra/);
-  assert.match(schedule, /service-adjustment-inline/);
+  assert.match(schedule, /service-adjustment-bottom/);
+  assert.match(schedule, /liveServiceAdjustmentCode/);
   assert.match(print, /print-service-adjustments/);
+  assert.match(print, /printServiceAdjustmentCode/);
   assert.match(nav, /\/bancos/);
   assert.match(migration, /idx_service_adjustments_date/);
 });

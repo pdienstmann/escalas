@@ -201,9 +201,10 @@ function PrintPage({
             <section className="print-service-adjustments">
               <b>Banco de horas / trocas</b>
               {data.serviceAdjustments.map((item) => (
-                <p key={String(item.id)}>
-                  {String(item.guard_name)}{item.counterpart_guard_name ? ` ⇄ ${String(item.counterpart_guard_name)}` : ""}
-                  <small>{printServiceAdjustmentLabel(String(item.subtype))} · {String(item.request_ref || "Sem requerimento")}</small>
+                <p key={String(item.id)} className={`print-adjustment-${String(item.subtype)}`}>
+                  <span className="print-adjustment-kind">{printServiceAdjustmentCode(String(item.subtype))}</span>
+                  <b>{String(item.guard_name)}{item.counterpart_guard_name ? ` ⇄ ${String(item.counterpart_guard_name)}` : ""}</b>
+                  <small>{printServiceAdjustmentLabel(String(item.subtype))} · {String(item.starts_at).slice(11, 16)}–{String(item.ends_at).slice(11, 16)} · {item.request_ref ? `Req. ${String(item.request_ref)}` : "Sem requerimento"}</small>
                 </p>
               ))}
             </section>
@@ -246,6 +247,7 @@ function movementDetail(m: Rec) {
   return `${date(start)} ${time(start)}–${time(end)}`;
 }
 function printServiceAdjustmentLabel(subtype:string){return ({negative_early:"BH- · saída antecipada",negative_full:"BH- · retirada integral",positive:"BH+ · dia extra",swap:"Troca de serviço"} as Record<string,string>)[subtype]||subtype}
+function printServiceAdjustmentCode(subtype:string){return ({negative_early:"BH-",negative_full:"BH-",positive:"BH+",swap:"TROCA"} as Record<string,string>)[subtype]||"AJUSTE"}
 const status = (s: string) =>
   s === "overtime" ? "HE" : s === "time_bank" ? "BH" : "TROCA";
 const vehicleIcon=(type:string)=>type==="moto"?"🏍️":type==="pickup"?"🛻":type==="van"?"🚐":type==="suv"?"🚙":"🚓";

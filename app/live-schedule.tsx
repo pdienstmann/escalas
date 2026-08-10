@@ -1014,10 +1014,38 @@ export function LiveSchedule() {
                     </div>
                   </article>
                 ))}
-                {data.serviceAdjustments?.length ? <article className="movement-group service-adjustment-inline"><header><b>Banco de horas / trocas</b><span>{data.serviceAdjustments.length}</span></header><div>{data.serviceAdjustments.map((item)=><span key={String(item.id)} className="movement-person"><strong>{String(item.guard_name)}{item.counterpart_guard_name?` ⇄ ${String(item.counterpart_guard_name)}`:""}</strong><small>{liveServiceAdjustmentLabel(String(item.subtype))}{item.request_ref?` · Req. ${String(item.request_ref)}`:""}</small></span>)}</div></article>:null}
               </div>
             )}
           </section>
+          {data.serviceAdjustments?.length ? (
+            <section className="service-adjustment-bottom" aria-label="Bancos de horas e trocas da escala">
+              <header>
+                <div>
+                  <span>ALTERAÇÕES COM REQUERIMENTO</span>
+                  <h2>Banco de horas e trocas</h2>
+                  <p>Confira os ajustes aplicados nesta data antes de liberar a escala.</p>
+                </div>
+                <strong>{data.serviceAdjustments.length}</strong>
+              </header>
+              <div className="service-adjustment-bottom-grid">
+                {data.serviceAdjustments.map((item) => (
+                  <article key={String(item.id)} className={`service-adjustment-entry ${String(item.subtype)}`}>
+                    <div className="service-adjustment-entry-main">
+                      <span className="service-adjustment-kind">{liveServiceAdjustmentCode(String(item.subtype))}</span>
+                      <div>
+                        <b>{String(item.guard_name)}{item.counterpart_guard_name ? ` ⇄ ${String(item.counterpart_guard_name)}` : ""}</b>
+                        <small>{liveServiceAdjustmentLabel(String(item.subtype))} · {String(item.starts_at).slice(11, 16)}–{String(item.ends_at).slice(11, 16)}</small>
+                      </div>
+                    </div>
+                    <div className="service-adjustment-entry-ref">
+                      <span>{item.request_ref ? `Req. ${String(item.request_ref)}` : "Sem requerimento"}</span>
+                      {item.notes && <small>{String(item.notes)}</small>}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          ) : null}
           {showRedeploy && data.availableForRedeployment.length > 0 && (
             <section className={`redeployment-pool ${redeploymentExpanded||view==="redeploy"?"expanded":"collapsed"}`}>
               <header><div><span>À DISPOSIÇÃO</span><h2>{redeploymentGroups.length} GM(s) aguardando destino</h2><p>Arraste o bloco para um posto/VTR ou escolha o destino.</p></div><button type="button" onClick={()=>setRedeploymentExpanded(value=>!value)}>{redeploymentExpanded||view==="redeploy"?"Recolher":"Abrir bandeja"}</button></header>
@@ -1257,6 +1285,7 @@ function movementDetail(m: Rec) {
   return `${date(start)} · ${time(start)}–${time(end)}`;
 }
 function liveServiceAdjustmentLabel(subtype:string){return ({negative_early:"BH- · saída antecipada",negative_full:"BH- · retirada integral",positive:"BH+ · dia extra",swap:"Troca de serviço"} as Record<string,string>)[subtype]||subtype}
+function liveServiceAdjustmentCode(subtype:string){return ({negative_early:"BH-",negative_full:"BH-",positive:"BH+",swap:"TROCA"} as Record<string,string>)[subtype]||"AJUSTE"}
 function VehicleQuickEditor({data,vehicle,saving,onClose,onSave}:{data:State;vehicle:Rec;saving:boolean;onClose:()=>void;onSave:(e:FormEvent<HTMLFormElement>)=>void}) {
   const[selectedId,setSelectedId]=useState(String(vehicle.id));
   const[zone,setZone]=useState(String(vehicle.zone||""));
