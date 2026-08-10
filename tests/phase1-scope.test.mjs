@@ -587,4 +587,18 @@ test("general service adjustments expose BH-, BH+ and service swaps in schedule 
   const laneMigration = readFileSync(resolve("drizzle/0015_assignment_lane_order.sql"), "utf8");
   assert.match(laneMigration, /lane_order/);
   assert.match(history, /assignment_lane/);
- });
+  });
+
+test("manual overtime dashboard exposes actionable alerts, safe refresh state and an hours-band filter", () => {
+  const dashboard = readFileSync(resolve("app/overtime-dashboard.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/overtime-enhancements.css"), "utf8");
+  assert.match(dashboard, /const pendingCount = data\.suggestions\.length/);
+  assert.match(dashboard, /className="he-alerts"/);
+  assert.match(dashboard, /missingRequestCount/);
+  assert.match(dashboard, /hoursBand/);
+  assert.match(dashboard, /value="over12"/);
+  assert.match(dashboard, /isRefreshing/);
+  assert.match(dashboard, /Tentar novamente/);
+  assert.match(styles, /\.he-alert-grid/);
+  assert.match(styles, /\.he-load-error/);
+});
