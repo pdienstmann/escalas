@@ -611,3 +611,13 @@ test("management modules reuse a date-scoped cache while synchronizing D1 silent
   assert.match(source, /writeAdminCache\(date, next\)/);
   assert.match(source, /Nao foi possivel sincronizar os dados operacionais/);
 });
+
+test("pattern editor reuses the current date cache and refreshes it after synchronization", () => {
+  const source = readFileSync(resolve("app/patterns-dashboard.tsx"), "utf8");
+  assert.match(source, /escala-patterns-cache/);
+  assert.match(source, /sessionStorage\.getItem/);
+  assert.match(source, /sessionStorage\.setItem/);
+  assert.match(source, /useState<Data \| null>\(\(\) => readPatternCache\(date\)\)/);
+  assert.match(source, /void load\(Boolean\(readPatternCache\(date\)\)\)/);
+  assert.match(source, /writePatternCache\(date, json\)/);
+});

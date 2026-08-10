@@ -34,16 +34,38 @@ type Resource = {
   members: Rec[];
 };
 
+const patternCachePrefix = "escala-patterns-cache:";
+function readPatternCache(date: string): Data | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(`${patternCachePrefix}${date}`);
+    if (!raw) return null;
+    const cached = JSON.parse(raw) as Data;
+    if (!Array.isArray(cached.patterns) || !Array.isArray(cached.slots) || !Array.isArray(cached.guards)) return null;
+    return cached;
+  } catch {
+    return null;
+  }
+}
+function writePatternCache(date: string, value: Data) {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(`${patternCachePrefix}${date}`, JSON.stringify(value));
+  } catch {
+    // Cache is optional; storage limits must never interrupt the pattern editor.
+  }
+}
+
 export function PatternsDashboard() {
   const { date, setDate, hrefFor } = useScheduleDate();
-  const [data, setData] = useState<Data | null>(null);
+  const [data, setData] = useState<Data | null>(() => readPatternCache(date));
   const [selected, setSelected] = useState<number | null>(null);
   const [dayCode, setDayCode] = useState("D1");
   const [nightCode, setNightCode] = useState("N1");
   const [message, setMessage] = useState("");
   const [loadError, setLoadError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !readPatternCache(date));
   const [workspace, setWorkspace] = useState<"shift" | "weekly">("shift");
   const [memberEditing, setMemberEditing] = useState<number | null>(null);
   const [addDestination, setAddDestination] = useState("");
@@ -64,6 +86,7 @@ export function PatternsDashboard() {
         throw new Error(json.error || "Não foi possível consultar os padrões.");
       }
       setData(json);
+      writePatternCache(date, json);
       setSelected((current) =>
         current && json.patterns.some((pattern) => Number(pattern.id) === current)
           ? current
@@ -80,8 +103,8 @@ export function PatternsDashboard() {
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load();
-  }, [load]);
+    void load(Boolean(readPatternCache(date)));
+  }, [date, load]);
 
   async function action(body: Record<string, unknown>) {
     if (busy) return false;
