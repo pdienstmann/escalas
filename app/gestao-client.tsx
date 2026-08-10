@@ -477,6 +477,7 @@ export function GestaoClient({
           vehicles={data.vehicles}
           outages={data.vehicleOutages}
           crews={data.vehicleCrews}
+          saving={saving}
           onEdit={(item) => setEditing({ kind: "vehicle", item })}
           onQuickOutage={(item)=>void quickOutage(item)}
           onClearOutage={(id)=>{const outage=data.vehicleOutages.find(item=>Number(item.id)===Number(id));if(outage){setReturningOutage(outage);setReturnPreview(null)}}}
@@ -1112,7 +1113,7 @@ function VehicleReturnDialog({outage,preview,saving,onClose,onPreview,onConfirm}
   return <div className="fleet-return-backdrop"><section className="fleet-return-dialog" role="dialog" aria-modal="true" aria-labelledby="fleet-return-title"><header><div><small>RETORNO SEGURO DE FA</small><h2 id="fleet-return-title">Registrar retorno de {outage.prefix}</h2><p>FA desde {formatDate(outage.starts_on)} · o histórico será preservado.</p></div><button type="button" onClick={onClose} aria-label="Fechar">×</button></header>{!preview?<div className="fleet-return-step"><label>Disponível novamente a partir de<input type="date" min={String(outage.starts_on)} value={returnOn} onChange={event=>setReturnOn(event.target.value)}/></label><div className="fleet-return-note"><b>O aplicativo verificará todas as escalas já criadas.</b><span>Rascunhos seguros podem ser restaurados; escalas modificadas ou publicadas exigirão decisão.</span></div></div>:<div className="fleet-return-step"><div className="fleet-return-summary"><span><b>{preview.impacts.length}</b> escalas afetadas</span><span className="safe"><b>{automatic}</b> restaurações seguras</span><span className="warning"><b>{protectedCount}</b> aguardam decisão</span></div><div className="fleet-return-impact-list">{preview.impacts.length?preview.impacts.slice(0,12).map(item=><span key={String(item.schedule_id)}><b>{formatDate(item.date)}</b><small>{item.automatic?"Rascunho com guarnição preservada":"Será mantida sem alteração até decisão"} · {item.status}</small></span>):<p>Nenhuma escala já criada será afetada. A VTR entrará normalmente nas próximas escalas.</p>}</div></div>}<footer><button type="button" onClick={onClose}>Cancelar</button>{preview?<><button type="button" onClick={()=>onPreview(returnOn)}>Atualizar análise</button><button type="button" className="save" disabled={saving} onClick={()=>onConfirm(returnOn)}>{saving?"Registrando…":"Confirmar retorno"}</button></>:<button type="button" className="save" disabled={saving||!returnOn} onClick={()=>onPreview(returnOn)}>{saving?"Analisando…":"Analisar impacto"}</button>}</footer></section></div>
 }
 
-function FleetPanorama({date,vehicles,outages,crews,onEdit,onQuickOutage,onClearOutage}:{date:string;vehicles:Item[];outages:Item[];crews:Item[];onEdit:(item:Item)=>void;onQuickOutage:(item:Item)=>void;onClearOutage:(id:Item["id"])=>void}){
+function FleetPanorama({date,vehicles,outages,crews,saving,onEdit,onQuickOutage,onClearOutage}:{date:string;vehicles:Item[];outages:Item[];crews:Item[];saving:boolean;onEdit:(item:Item)=>void;onQuickOutage:(item:Item)=>void;onClearOutage:(id:Item["id"])=>void}){
   const[query,setQuery]=useState(""),[filter,setFilter]=useState<"all"|"available"|"service"|"outage">("all");
   const rows=useMemo(()=>vehicles.map(vehicle=>{
     const outage=outages.find(item=>Number(item.vehicle_id)===Number(vehicle.id)&&String(item.starts_on)<=date&&(!item.ends_on||String(item.ends_on)>=date));
@@ -1136,7 +1137,7 @@ function FleetPanorama({date,vehicles,outages,crews,onEdit,onQuickOutage,onClear
     <div className="fleet-map">{visible.map(({vehicle,outage,crew,status})=><article key={String(vehicle.id)} className={`fleet-card ${status}`}>
       <span className="fleet-card-icon">{vehicleIconLabel(String(vehicle.type))}</span>
       <div><header><b>{String(vehicle.prefix)}</b><span>{status==="outage"?"EM FA":status==="service"?"EM SERVIÇO":"DISPONÍVEL"}</span></header><strong>{String(vehicle.zone||"Zona não definida")}</strong><small>{vehicleTypeLabel(String(vehicle.type))}</small>{crew&&<p><b>Equipe:</b> {String(crew.crew_names)}</p>}{outage&&<p><b>FA:</b> {String(outage.reason||"Sem motivo informado")} · {outage.ends_on?`retorno ${formatDate(outage.ends_on)}`:"prazo indeterminado"}</p>}</div>
-      <div className="fleet-card-actions"><button onClick={()=>onEdit(vehicle)}>Editar</button>{outage?<button className="available" onClick={()=>onClearOutage(outage.id)}>Registrar retorno</button>:<button className="outage" onClick={()=>onQuickOutage(vehicle)}>Marcar FA</button>}</div>
+       <div className="fleet-card-actions"><button disabled={saving} onClick={()=>onEdit(vehicle)}>Editar</button>{outage?<button className="available" disabled={saving} onClick={()=>onClearOutage(outage.id)}>Registrar retorno</button>:<button className="outage" disabled={saving} onClick={()=>onQuickOutage(vehicle)}>Marcar FA</button>}</div>
     </article>)}</div>
     {!visible.length&&<p className="fleet-empty">Nenhuma viatura corresponde aos filtros.</p>}
   </section>
