@@ -370,9 +370,14 @@ async function ensureServiceAdjustmentsTable() {
     service_date TEXT NOT NULL,
     starts_at TEXT NOT NULL,
     ends_at TEXT NOT NULL,
+    hours REAL,
     counterpart_service_date TEXT,
     counterpart_starts_at TEXT,
     counterpart_ends_at TEXT,
+    settlement_date TEXT,
+    settlement_starts_at TEXT,
+    settlement_ends_at TEXT,
+    settlement_hours REAL,
     request_ref TEXT,
     notes TEXT,
     status TEXT NOT NULL DEFAULT 'active',
@@ -383,7 +388,7 @@ async function ensureServiceAdjustmentsTable() {
   const columns = new Set(
     (await env.DB.prepare("PRAGMA table_info(service_adjustments)").all<{ name: string }>()).results.map((column) => column.name),
   );
-  for (const [name, definition] of [["counterpart_service_date", "TEXT"], ["counterpart_starts_at", "TEXT"], ["counterpart_ends_at", "TEXT"]] as const) {
+  for (const [name, definition] of [["hours", "REAL"], ["counterpart_service_date", "TEXT"], ["counterpart_starts_at", "TEXT"], ["counterpart_ends_at", "TEXT"], ["settlement_date", "TEXT"], ["settlement_starts_at", "TEXT"], ["settlement_ends_at", "TEXT"], ["settlement_hours", "REAL"]] as const) {
     if (!columns.has(name)) await env.DB.prepare(`ALTER TABLE service_adjustments ADD COLUMN ${name} ${definition}`).run();
   }
   await env.DB.prepare(
@@ -391,6 +396,9 @@ async function ensureServiceAdjustmentsTable() {
   ).run();
   await env.DB.prepare(
     "CREATE INDEX IF NOT EXISTS idx_service_adjustments_counterpart_date ON service_adjustments(counterpart_service_date,status)",
+  ).run();
+  await env.DB.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_service_adjustments_settlement_date ON service_adjustments(settlement_date,status)",
   ).run();
 }
 
@@ -445,13 +453,13 @@ export async function GET(request: Request) {
       env.DB.prepare(`SELECT sa.*,g.name guard_name,c.name counterpart_guard_name
         FROM service_adjustments sa JOIN guards g ON g.id=sa.guard_id
         LEFT JOIN guards c ON c.id=sa.counterpart_guard_id
-        WHERE sa.status='active' AND (sa.service_date=? OR sa.counterpart_service_date=?)
-        ORDER BY CASE WHEN sa.service_date=? THEN sa.starts_at ELSE sa.counterpart_starts_at END,sa.id`).bind(date,date,date).all(),
+        WHERE sa.status='active' AND (sa.service_date=? OR sa.counterpart_service_date=? OR sa.settlement_date=?)
+        ORDER BY CASE WHEN sa.service_date=? THEN sa.starts_at WHEN sa.counterpart_service_date=? THEN sa.counterpart_starts_at ELSE sa.settlement_starts_at END,sa.id`).bind(date,date,date,date,date).all(),
     ]);
   const operationAssignments=(await env.DB.prepare(`SELECT os.guard_id,o.starts_at,o.ends_at FROM operation_slots os JOIN operations o ON o.id=os.operation_id WHERE o.schedule_id=? AND o.status!='cancelled' AND os.guard_id IS NOT NULL`).bind(schedule?.id).all<{guard_id:number;starts_at:string;ends_at:string}>()).results;
   const blocked = new Set([
       ...movements.results.map((m) => Number(m.guard_id)),
-      ...serviceAdjustments.results.filter((item) => String(item.subtype)==="negative_full").map((item) => Number(item.guard_id)),
+      ...serviceAdjustments.results.filter((item) => String(item.subtype)==="negative_full" && String(item.service_date)===date).map((item) => Number(item.guard_id)),
     ]),
     visibleVehicleIds=new Set(vehicles.results.map((v)=>Number(v.id))),
     visiblePostIds=new Set(posts.results.map((p)=>Number(p.id))),
@@ -736,10 +744,23 @@ export async function POST(request: Request) {
     const subtype = String(b.subtype || "");
     const serviceDate = String(b.serviceDate || "");
     const counterpartServiceDate = subtype === "swap" ? String(b.counterpartServiceDate || "") : null;
+    const negativeSubtype = ["negative_early", "negative_late", "negative_full"].includes(subtype);
+    const settlementEnabled = negativeSubtype && ["1", "true", "on", "yes"].includes(String(b.settlementEnabled || b.payBhp || "").toLowerCase());
+    const settlementDate = settlementEnabled ? String(b.settlementDate || "") : null;
+    const settlementStartsAt = settlementEnabled ? String(b.settlementStartsAt || "") : null;
+    const settlementEndsAt = settlementEnabled ? String(b.settlementEndsAt || "") : null;
+    const requestedHoursRaw = String(b.negativeHours || b.hours || "").trim();
+    const requestedHours = requestedHoursRaw ? Number(requestedHoursRaw.replace(",", ".")) : NaN;
     const guardId = Number(b.guardId || 0);
     const counterpartGuardId = Number(b.counterpartGuardId || 0) || null;
     const requestRef = String(b.requestRef || "").trim() || null;
     const notes = String(b.notes || "").trim() || null;
+    if (settlementEnabled && (!settlementDate || !isScheduleDate(settlementDate) || !settlementStartsAt || !settlementEndsAt))
+      return Response.json({ error: "Informe a data e o horario em que o BH- sera pago como BH+." }, { status: 400 });
+    if (settlementEnabled && settlementDate! <= serviceDate)
+      return Response.json({ error: "O dia do BH+ deve ser posterior ao dia do BH-." }, { status: 400 });
+    if (negativeSubtype && requestedHoursRaw && (!Number.isFinite(requestedHours) || requestedHours <= 0 || requestedHours > 24))
+      return Response.json({ error: "A quantidade de horas do BH- deve estar entre 0,5 e 24 horas." }, { status: 400 });
     if (!isScheduleDate(serviceDate) || !["negative_early", "negative_late", "negative_full", "positive", "swap"].includes(subtype) || !guardId)
       return Response.json({ error: "Informe o GM, a data e o tipo do lançamento." }, { status: 400 });
     const guard = await env.DB.prepare("SELECT id,name FROM guards WHERE id=? AND active=1").bind(guardId).first<{id:number;name:string}>();
@@ -754,6 +775,7 @@ export async function POST(request: Request) {
     }
     await ensureBase(serviceDate);
     if (counterpartServiceDate) await ensureBase(counterpartServiceDate);
+    if (settlementDate) await ensureBase(settlementDate);
     const schedule = await env.DB.prepare("SELECT id FROM schedules WHERE date=?").bind(serviceDate).first<{id:number}>();
     if (!schedule) return Response.json({ error: "Não foi possível abrir a escala da data." }, { status: 500 });
     const counterpartSchedule = counterpartServiceDate
@@ -761,6 +783,11 @@ export async function POST(request: Request) {
       : null;
     if (subtype === "swap" && !counterpartSchedule)
       return Response.json({ error: "Não foi possível abrir a escala do segundo dia." }, { status: 500 });
+    const settlementSchedule = settlementDate
+      ? await env.DB.prepare("SELECT id FROM schedules WHERE date=?").bind(settlementDate).first<{id:number}>()
+      : null;
+    if (settlementEnabled && !settlementSchedule)
+      return Response.json({ error: "Nao foi possivel abrir a escala do dia do BH+." }, { status: 500 });
     const tomorrow = new Date(`${serviceDate}T12:00:00Z`);
     tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
     const dayStart = `${serviceDate}T00:00`;
@@ -782,6 +809,13 @@ export async function POST(request: Request) {
       return Response.json({ error: "Informe um intervalo válido para o segundo dia da troca." }, { status: 400 });
     if (subtype === "swap" && (!startsAt.startsWith(`${serviceDate}T`) || !counterpartStartsAt?.startsWith(`${counterpartServiceDate}T`)))
       return Response.json({ error: "As datas dos horários precisam corresponder aos respectivos dias da troca." }, { status: 400 });
+    const settlementStartMs = settlementStartsAt ? Date.parse(settlementStartsAt) : NaN;
+    const settlementEndMs = settlementEndsAt ? Date.parse(settlementEndsAt) : NaN;
+    if (settlementEnabled && (!Number.isFinite(settlementStartMs) || !Number.isFinite(settlementEndMs) || settlementEndMs <= settlementStartMs))
+      return Response.json({ error: "Informe um intervalo valido para o BH+." }, { status: 400 });
+    if (settlementEnabled && !settlementStartsAt!.startsWith(`${settlementDate}T`))
+      return Response.json({ error: "A data do horario do BH+ precisa corresponder ao dia selecionado." }, { status: 400 });
+    const intervalHours = (start:number, end:number) => Math.round(((end - start) / 3600000) * 100) / 100;
     const loadGuardAssignments = async (scheduleId:number, id:number, rangeStart:string, rangeEnd:string) => (await env.DB.prepare(
       "SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.schedule_id=? AND a.guard_id=? AND a.starts_at<? AND a.ends_at>? ORDER BY a.starts_at,a.id",
     ).bind(scheduleId,id,rangeEnd,rangeStart).all<Record<string,unknown>>()).results;
@@ -789,6 +823,7 @@ export async function POST(request: Request) {
       kind: subtype === "swap" ? "swap" : "time_bank",
       subtype, guardId, counterpartGuardId, serviceDate, startsAt, endsAt,
       counterpartServiceDate, counterpartStartsAt, counterpartEndsAt, requestRef, notes,
+      settlementDate, settlementStartsAt, settlementEndsAt,
     };
     const existingAdjustment = subtype === "swap"
       ? await env.DB.prepare(`SELECT id FROM service_adjustments
@@ -799,10 +834,10 @@ export async function POST(request: Request) {
         .bind(guardId, guardId, counterpartGuardId || -1, counterpartGuardId || -1, serviceDate, endsAt, startsAt, counterpartServiceDate, counterpartEndsAt, counterpartStartsAt)
         .first()
       : await env.DB.prepare(`SELECT id FROM service_adjustments
-          WHERE status='active' AND service_date=?
-            AND (guard_id=? OR counterpart_guard_id=?)
-            AND starts_at<? AND ends_at>? LIMIT 1`)
-        .bind(serviceDate, guardId, guardId, endsAt, startsAt)
+          WHERE status='active' AND (guard_id=? OR counterpart_guard_id=?)
+            AND ((service_date=? AND starts_at<? AND ends_at>?) OR
+                 (settlement_date=? AND settlement_starts_at<? AND settlement_ends_at>?)) LIMIT 1`)
+        .bind(guardId, guardId, serviceDate, endsAt, startsAt, settlementDate || "", settlementEndsAt || "", settlementStartsAt || "")
         .first();
     if (existingAdjustment)
       return Response.json({ error: "Já existe um banco ou troca ativa para este GM nesse intervalo." }, { status: 409 });
@@ -813,8 +848,9 @@ export async function POST(request: Request) {
       if (conflictingMovement) return Response.json({ error: `${guard.name} possui uma movimentação neste intervalo.` }, { status: 409 });
       const hour = Number(startsAt.slice(11, 13));
       const shift = hour < 7 ? "1" : hour < 13 ? "2" : hour < 19 ? "3" : "4";
+      const positiveHours = Number.isFinite(requestedHours) && requestedHours > 0 ? requestedHours : intervalHours(startMs, endMs);
       const results = await env.DB.batch([
-        env.DB.prepare("INSERT INTO service_adjustments (kind,subtype,guard_id,service_date,starts_at,ends_at,request_ref,notes,status,snapshot_json) VALUES (?,?,?,?,?,?,?,?,'active',?)").bind(base.kind,subtype,guardId,serviceDate,startsAt,endsAt,requestRef,notes,"{}"),
+        env.DB.prepare("INSERT INTO service_adjustments (kind,subtype,guard_id,service_date,starts_at,ends_at,hours,request_ref,notes,status,snapshot_json) VALUES (?,?,?,?,?,?,?,?,?,'active',?)").bind(base.kind,subtype,guardId,serviceDate,startsAt,endsAt,positiveHours,requestRef,notes,"{}"),
         env.DB.prepare("INSERT INTO assignments (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,work_kind,status,request_ref,is_reassigned,reassignment_note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(schedule.id,guardId,null,null,shift,"guard",startsAt,endsAt,"time_bank_positive","time_bank",requestRef,0,notes||"BH+ aguardando remanejamento"),
       ]);
       const adjustmentId = Number(results[0].meta.last_row_id), assignmentId = Number(results[1].meta.last_row_id);
@@ -869,20 +905,57 @@ export async function POST(request: Request) {
           return Response.json({ error: "Para BH- de saída antecipada, o novo fim deve ficar entre o início e o fim do horário original." }, { status: 400 });
       }
     }
-    const snapshot = JSON.stringify({assignments: affectedAssignments});
+    const calculatedHours = affectedAssignments.reduce((total, item) => {
+      const itemStart = Date.parse(String(item.starts_at));
+      const itemEnd = Date.parse(String(item.ends_at));
+      const lost = subtype === "negative_full"
+        ? intervalHours(itemStart, itemEnd)
+        : subtype === "negative_late"
+          ? intervalHours(itemStart, endMs)
+          : intervalHours(endMs, itemEnd);
+      return total + Math.max(0, lost);
+    }, 0);
+    const adjustmentHours = negativeSubtype
+      ? (Number.isFinite(requestedHours) && requestedHours > 0 ? requestedHours : calculatedHours)
+      : intervalHours(startMs, endMs);
+    if (negativeSubtype && (!Number.isFinite(adjustmentHours) || adjustmentHours <= 0))
+      return Response.json({ error: "Nao foi possivel calcular a quantidade de horas do BH-." }, { status: 400 });
+    if (settlementEnabled && Math.abs(intervalHours(settlementStartMs, settlementEndMs) - adjustmentHours) > 0.01)
+      return Response.json({ error: `O intervalo do BH+ precisa ter exatamente ${adjustmentHours}h.` }, { status: 400 });
+    const settlementHours = settlementEnabled ? adjustmentHours : null;
+    const snapshotData:Record<string,unknown> = { assignments: affectedAssignments };
+    if (settlementEnabled) {
+      const existingSettlement = await loadGuardAssignments(settlementSchedule!.id, guardId, settlementStartsAt!, settlementEndsAt!);
+      if (existingSettlement.length)
+        return Response.json({ error: `${guard.name} ja possui uma designacao no horario escolhido para o BH+.` }, { status: 409 });
+      const conflictingMovement = await env.DB.prepare("SELECT type FROM movements WHERE guard_id=? AND status='approved' AND starts_at<? AND ends_at>? LIMIT 1").bind(guardId,settlementEndsAt,settlementStartsAt).first<{type:string}>();
+      if (conflictingMovement)
+        return Response.json({ error: `${guard.name} possui uma movimentaÃ§Ã£o no dia escolhido para o BH+.` }, { status: 409 });
+    }
     const updates = affectedAssignments.map((item) => subtype === "negative_full"
       ? env.DB.prepare("UPDATE assignments SET post_id=NULL,vehicle_id=NULL,status='time_bank',request_ref=?,is_reassigned=1,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(requestRef,notes||`BH- de ${guard.name}`,item.id)
       : subtype === "negative_late"
         ? env.DB.prepare("UPDATE assignments SET starts_at=?,status='time_bank',request_ref=?,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(endsAt,requestRef,notes||`BH- de ${guard.name}`,item.id)
         : env.DB.prepare("UPDATE assignments SET ends_at=?,regular_ends_at=CASE WHEN regular_ends_at IS NOT NULL AND regular_ends_at>? THEN ? ELSE regular_ends_at END,status='time_bank',request_ref=?,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(endsAt,endsAt,endsAt,requestRef,notes||`BH- de ${guard.name}`,item.id));
+    const settlementHour = settlementStartsAt ? Number(settlementStartsAt.slice(11, 13)) : 0;
+    const settlementShift = settlementHour < 7 ? "1" : settlementHour < 13 ? "2" : settlementHour < 19 ? "3" : "4";
+    const settlementAssignment = settlementEnabled
+      ? env.DB.prepare("INSERT INTO assignments (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,work_kind,status,request_ref,is_reassigned,reassignment_note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(settlementSchedule!.id,guardId,null,null,settlementShift,"guard",settlementStartsAt,settlementEndsAt,"time_bank_positive","time_bank",requestRef,0,notes||"BH+ criado pelo pagamento de BH-")
+      : null;
     const results = await env.DB.batch([
-      env.DB.prepare("INSERT INTO service_adjustments (kind,subtype,guard_id,service_date,starts_at,ends_at,request_ref,notes,status,snapshot_json) VALUES (?,?,?,?,?,?,?,?,'active',?)").bind(base.kind,subtype,guardId,serviceDate,startsAt,endsAt,requestRef,notes,snapshot),
+      env.DB.prepare("INSERT INTO service_adjustments (kind,subtype,guard_id,service_date,starts_at,ends_at,hours,settlement_date,settlement_starts_at,settlement_ends_at,settlement_hours,request_ref,notes,status,snapshot_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'active',?)").bind(base.kind,subtype,guardId,serviceDate,startsAt,endsAt,adjustmentHours,settlementDate,settlementStartsAt,settlementEndsAt,settlementHours,requestRef,notes,JSON.stringify(snapshotData)),
       ...updates,
+      ...(settlementAssignment ? [settlementAssignment] : []),
     ]);
     const adjustmentId = Number(results[0].meta.last_row_id);
+    if (settlementEnabled) {
+      snapshotData.createdSettlementAssignmentId = Number(results[1 + updates.length].meta.last_row_id);
+      await env.DB.prepare("UPDATE service_adjustments SET snapshot_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(JSON.stringify(snapshotData),adjustmentId).run();
+    }
     const adjustment = await env.DB.prepare("SELECT sa.*,g.name guard_name FROM service_adjustments sa JOIN guards g ON g.id=sa.guard_id WHERE sa.id=?").bind(adjustmentId).first();
+    const paymentMessage = settlementEnabled ? ` BH+ de ${adjustmentHours}h criado para ${settlementDate}.` : "";
     const auditEventId = await writeAudit(request,{action:"create",entityType:"service_adjustment",entityId:adjustmentId,summary:`Registrou ${subtype==='negative_full'?'BH- integral':subtype==='negative_late'?'BH- com entrada tardia':'BH- com saída antecipada'} de ${guard.name}`,after:adjustment as Record<string,unknown>,undoable:false});
-    return Response.json({ok:true,adjustment,auditEventId,message:`Banco de horas negativo aplicado para ${guard.name} em ${serviceDate}.`});
+    return Response.json({ok:true,adjustment,auditEventId,message:`Banco de horas negativo de ${adjustmentHours}h aplicado para ${guard.name} em ${serviceDate}.${paymentMessage}`});
   }
   if (b.action === "cancel_service_adjustment") {
     await ensureServiceAdjustmentsTable();
@@ -892,12 +965,13 @@ export async function POST(request: Request) {
     let snapshot:Record<string,unknown> = {};
     try { snapshot = JSON.parse(String(adjustment.snapshot_json || "{}")) as Record<string,unknown>; } catch { return Response.json({ error: "O histórico deste lançamento está inválido." }, { status: 409 }); }
     const statements:D1PreparedStatement[] = [];
-    if (String(adjustment.subtype) === "positive") {
-      const assignmentId = Number(snapshot.createdAssignmentId || 0);
-      const current = assignmentId ? await env.DB.prepare("SELECT post_id,vehicle_id FROM assignments WHERE id=?").bind(assignmentId).first<{post_id:number|null;vehicle_id:number|null}>() : null;
+    const createdAssignmentIds = [Number(snapshot.createdAssignmentId || 0), Number(snapshot.createdSettlementAssignmentId || 0)].filter((value, index, values) => value > 0 && values.indexOf(value) === index);
+    for (const assignmentId of createdAssignmentIds) {
+      const current = await env.DB.prepare("SELECT post_id,vehicle_id FROM assignments WHERE id=?").bind(assignmentId).first<{post_id:number|null;vehicle_id:number|null}>();
       if (current?.post_id || current?.vehicle_id) statements.push(env.DB.prepare("UPDATE assignments SET status='normal',work_kind='shift',request_ref=NULL,reassignment_note=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(assignmentId));
-      else if (assignmentId) statements.push(env.DB.prepare("DELETE FROM assignments WHERE id=?").bind(assignmentId));
-    } else {
+      else statements.push(env.DB.prepare("DELETE FROM assignments WHERE id=?").bind(assignmentId));
+    }
+    if (String(adjustment.subtype) !== "positive") {
       const originals = Array.isArray(snapshot.assignments) ? snapshot.assignments as Array<Record<string,unknown>> : [];
       for (const row of originals) statements.push(env.DB.prepare("UPDATE assignments SET guard_id=?,post_id=?,vehicle_id=?,shift=?,role=?,starts_at=?,ends_at=?,regular_ends_at=?,break_starts_at=?,break_ends_at=?,work_kind=?,status=?,request_ref=?,is_reassigned=?,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(row.guard_id,row.post_id||null,row.vehicle_id||null,row.shift,row.role,row.starts_at,row.ends_at,row.regular_ends_at||null,row.break_starts_at||null,row.break_ends_at||null,row.work_kind||"shift",row.status||"normal",row.request_ref||null,row.is_reassigned||0,row.reassignment_note||null,row.id));
     }

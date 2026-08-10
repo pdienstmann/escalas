@@ -249,9 +249,14 @@ async function ensureServiceAdjustmentsTable(){
     service_date TEXT NOT NULL,
     starts_at TEXT NOT NULL,
     ends_at TEXT NOT NULL,
+    hours REAL,
     counterpart_service_date TEXT,
     counterpart_starts_at TEXT,
     counterpart_ends_at TEXT,
+    settlement_date TEXT,
+    settlement_starts_at TEXT,
+    settlement_ends_at TEXT,
+    settlement_hours REAL,
     request_ref TEXT,
     notes TEXT,
     status TEXT NOT NULL DEFAULT 'active',
@@ -262,11 +267,12 @@ async function ensureServiceAdjustmentsTable(){
   const columns = new Set(
     (await env.DB.prepare("PRAGMA table_info(service_adjustments)").all<{name:string}>()).results.map((column) => column.name),
   );
-  for (const [name, definition] of [["counterpart_service_date", "TEXT"], ["counterpart_starts_at", "TEXT"], ["counterpart_ends_at", "TEXT"]] as const) {
+  for (const [name, definition] of [["hours", "REAL"], ["counterpart_service_date", "TEXT"], ["counterpart_starts_at", "TEXT"], ["counterpart_ends_at", "TEXT"], ["settlement_date", "TEXT"], ["settlement_starts_at", "TEXT"], ["settlement_ends_at", "TEXT"], ["settlement_hours", "REAL"]] as const) {
     if (!columns.has(name)) await env.DB.prepare(`ALTER TABLE service_adjustments ADD COLUMN ${name} ${definition}`).run();
   }
   await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_service_adjustments_date ON service_adjustments(service_date,status)").run();
   await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_service_adjustments_counterpart_date ON service_adjustments(counterpart_service_date,status)").run();
+  await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_service_adjustments_settlement_date ON service_adjustments(settlement_date,status)").run();
 }
 
 function assignmentTimes(date:string,shift:string){
@@ -361,8 +367,8 @@ export async function GET(request: Request) {
       env.DB.prepare(`SELECT sa.*,g.name guard_name,c.name counterpart_guard_name
         FROM service_adjustments sa JOIN guards g ON g.id=sa.guard_id
         LEFT JOIN guards c ON c.id=sa.counterpart_guard_id
-        WHERE sa.status='active' AND ((sa.service_date>=? AND sa.service_date<?) OR (sa.counterpart_service_date>=? AND sa.counterpart_service_date<?))
-        ORDER BY sa.service_date,sa.starts_at,sa.id`).bind(monthStart,monthEnd,monthStart,monthEnd).all(),
+        WHERE sa.status='active' AND ((sa.service_date>=? AND sa.service_date<?) OR (sa.counterpart_service_date>=? AND sa.counterpart_service_date<?) OR (sa.settlement_date>=? AND sa.settlement_date<?))
+        ORDER BY sa.service_date,sa.starts_at,sa.id`).bind(monthStart,monthEnd,monthStart,monthEnd,monthStart,monthEnd).all(),
     ]);
   return Response.json({
     guards: guards.results,

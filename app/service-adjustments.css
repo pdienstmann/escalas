@@ -16,6 +16,13 @@
 .service-adjustment-guide p { margin: 8px 0; font-size: 12px; line-height: 1.4; }
 .field-caption { display: grid; gap: 4px; color: #45647b; font-size: 11px; font-weight: 800; }
 .field-caption input { font: inherit; color: #172f47; }
+.adjustment-hours-field input { max-width: 150px; font-size: 15px; font-weight: 900; }
+.settlement-toggle { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid #b9d7c2; border-radius: 7px; background: #f1fbf4; color: #176b3c; font-weight: 850; }
+.settlement-toggle input { accent-color: #1c8c51; }
+.settlement-fields { display: grid; gap: 8px; padding: 10px; border: 1px solid #a9d8b8; border-left: 4px solid #21884e; border-radius: 7px; background: #f5fcf7; }
+.settlement-fields strong { color: #176b3c; }
+.settlement-fields small { color: #4e725d; line-height: 1.35; }
+.badge.settlement-badge { background: #d8f2e0; color: #187541; border-color: #95cba5; }
 .service-adjustment-help {
   display: block;
   padding: 8px 10px;
@@ -117,6 +124,7 @@
 .service-adjustment-entry.negative_late,
 .service-adjustment-entry.negative_full { border-left-color: #c22d39; background: #fff8f8; }
 .service-adjustment-entry.positive { border-left-color: #208b4f; background: #f4fcf6; }
+.service-adjustment-entry.settlement { border-left-color: #208b4f; background: #f4fcf6; }
 .service-adjustment-entry.swap { border-left-color: #c5821d; background: #fffaf0; }
 .service-adjustment-entry-main { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .service-adjustment-entry-main > div { display: grid; gap: 2px; min-width: 0; }
@@ -137,6 +145,7 @@
 .negative_late .service-adjustment-kind,
 .negative_full .service-adjustment-kind { background: #ffe1e3; color: #ab202c; }
 .positive .service-adjustment-kind { background: #d8f2e0; color: #187541; }
+.settlement .service-adjustment-kind { background: #d8f2e0; color: #187541; }
 .swap .service-adjustment-kind { background: #ffe9c2; color: #895600; }
 .service-adjustment-entry-ref { display: grid; gap: 2px; justify-items: end; text-align: right; }
 .service-adjustment-entry-ref span { color: #a3212e; font-size: 10px; font-weight: 900; }
@@ -160,6 +169,7 @@
 .print-adjustment-negative_late .print-adjustment-kind,
 .print-adjustment-negative_full .print-adjustment-kind { background: #ffe1e3; color: #ab202c; }
 .print-adjustment-positive .print-adjustment-kind { background: #d8f2e0; color: #187541; }
+.print-adjustment-settlement .print-adjustment-kind { background: #d8f2e0; color: #187541; }
 .print-adjustment-swap .print-adjustment-kind { background: #ffe9c2; color: #895600; }
 
 @media (max-width: 850px) {

@@ -1,4 +1,4 @@
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 const audit = {
   createdAt: text("created_at").notNull().default("CURRENT_TIMESTAMP"),
@@ -88,9 +88,14 @@ export const serviceAdjustments = sqliteTable("service_adjustments", {
   serviceDate:text("service_date").notNull(),
   startsAt:text("starts_at").notNull(),
   endsAt:text("ends_at").notNull(),
+  hours:real("hours"),
   counterpartServiceDate:text("counterpart_service_date"),
   counterpartStartsAt:text("counterpart_starts_at"),
   counterpartEndsAt:text("counterpart_ends_at"),
+  settlementDate:text("settlement_date"),
+  settlementStartsAt:text("settlement_starts_at"),
+  settlementEndsAt:text("settlement_ends_at"),
+  settlementHours:real("settlement_hours"),
   requestRef:text("request_ref"),notes:text("notes"),
   status:text("status").notNull().default("active"),snapshotJson:text("snapshot_json"),
   ...audit,

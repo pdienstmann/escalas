@@ -74,6 +74,9 @@ export function GestaoClient({
     [busy, setBusy] = useState(true),
     [saving, setSaving] = useState(false),
     [message, setMessage] = useState(""),
+    [adjustmentSubtype, setAdjustmentSubtype] = useState("negative_early"),
+    [negativeHoursInput, setNegativeHoursInput] = useState("2"),
+    [settleNegative, setSettleNegative] = useState(false),
     [movementEditing,setMovementEditing]=useState<Item|null>(null),
     [returningOutage,setReturningOutage]=useState<Item|null>(null),
     [returnPreview,setReturnPreview]=useState<{outage:Item;impacts:Item[]}|null>(null),
@@ -324,7 +327,7 @@ export function GestaoClient({
       });
       const result = await response.json();
       setMessage(response.ok ? result.message : result.error);
-      if (response.ok) { form.reset(); await load(); }
+      if (response.ok) { form.reset(); setAdjustmentSubtype("negative_early"); setNegativeHoursInput("2"); setSettleNegative(false); await load(); }
     } finally { setSaving(false); }
   }
   async function cancelServiceAdjustment(item:Item) {
@@ -539,7 +542,7 @@ export function GestaoClient({
       >
         <div className="service-adjustment-layout">
           <Form title="Novo banco ou troca" onSubmit={(e) => void saveServiceAdjustment(e)}>
-            <select name="subtype" required defaultValue="negative_early">
+            <select name="subtype" required value={adjustmentSubtype} onChange={(event) => { const value = event.target.value; setAdjustmentSubtype(value); setNegativeHoursInput(value === "negative_full" ? "12" : "2"); setSettleNegative(false); }}>
               <option value="negative_early">BH- · sair mais cedo</option>
               <option value="negative_late">BH- · iniciar mais tarde</option>
               <option value="negative_full">BH- · retirar o dia inteiro</option>
@@ -547,7 +550,7 @@ export function GestaoClient({
               <option value="swap">Troca de serviço · dois GMs</option>
             </select>
             <div className="field-caption"><span>GM que assume o primeiro serviço</span><GuardSelect guards={data.guards} /></div>
-            <label className="field-caption">GM que assume o segundo serviço (somente troca)
+            <label className="field-caption" hidden={adjustmentSubtype !== "swap"}>GM que assume o segundo serviço (somente troca)
               <select name="counterpartGuardId" defaultValue="">
                 <option value="">Selecione o segundo GM</option>
                 {data.guards.map((guard) => <option key={guard.id} value={String(guard.id)}>{guard.name}</option>)}
@@ -555,16 +558,29 @@ export function GestaoClient({
             </label>
             <div className="two">
               <label className="field-caption">Dia do primeiro serviço<input name="serviceDate" type="date" defaultValue={date} required /></label>
-              <label className="field-caption">Dia do segundo serviço (troca)<input name="counterpartServiceDate" type="date" defaultValue={date} /></label>
+              <label className="field-caption" hidden={adjustmentSubtype !== "swap"}>Dia do segundo serviço (troca)<input name="counterpartServiceDate" type="date" defaultValue={date} /></label>
             </div>
             <div className="two">
-              <label className="field-caption">Início do primeiro serviço<input name="startsAt" type="datetime-local" defaultValue={`${date}T07:00`} required /></label>
-              <label className="field-caption">Fim do primeiro serviço<input name="endsAt" type="datetime-local" defaultValue={`${date}T19:00`} required /></label>
+              <label className="field-caption" hidden={adjustmentSubtype === "negative_full"}>Início do primeiro serviço<input name="startsAt" type="datetime-local" defaultValue={`${date}T07:00`} required={adjustmentSubtype !== "negative_full"} /></label>
+              <label className="field-caption" hidden={adjustmentSubtype === "negative_full"}>Fim do primeiro serviço<input name="endsAt" type="datetime-local" defaultValue={`${date}T19:00`} required={adjustmentSubtype !== "negative_full"} /></label>
             </div>
             <div className="two">
-              <label className="field-caption">Início do segundo serviço<input name="counterpartStartsAt" type="datetime-local" defaultValue={`${date}T07:00`} /></label>
-              <label className="field-caption">Fim do segundo serviço<input name="counterpartEndsAt" type="datetime-local" defaultValue={`${date}T19:00`} /></label>
+              <label className="field-caption" hidden={adjustmentSubtype !== "swap"}>Início do segundo serviço<input name="counterpartStartsAt" type="datetime-local" defaultValue={`${date}T07:00`} /></label>
+              <label className="field-caption" hidden={adjustmentSubtype !== "swap"}>Fim do segundo serviço<input name="counterpartEndsAt" type="datetime-local" defaultValue={`${date}T19:00`} /></label>
             </div>
+            {adjustmentSubtype.startsWith("negative_") && <>
+              <label className="field-caption adjustment-hours-field">Quantidade do BH- (horas)<input name="negativeHours" type="number" min="0.5" max="24" step="0.5" value={adjustmentSubtype === "negative_full" ? "12" : negativeHoursInput} onChange={(event) => setNegativeHoursInput(event.target.value)} readOnly={adjustmentSubtype === "negative_full"} required /></label>
+              <label className="settlement-toggle"><input name="settlementEnabled" value="1" type="checkbox" checked={settleNegative} onChange={(event) => setSettleNegative(event.target.checked)} /> Pagar este BH- com BH+ em outro dia</label>
+              {settleNegative && <div className="settlement-fields">
+                <strong>Pagamento do BH+ (mesma quantidade de horas)</strong>
+                <div className="two">
+                  <label className="field-caption">Dia do BH+<input name="settlementDate" type="date" min={nextDateValue(date)} defaultValue={nextDateValue(date)} /></label>
+                  <label className="field-caption">Início do BH+<input key={`settlement-start-${adjustmentSubtype}`} name="settlementStartsAt" type="datetime-local" defaultValue={`${nextDateValue(date)}T07:00`} /></label>
+                  <label className="field-caption">Fim do BH+<input key={`settlement-end-${adjustmentSubtype}`} name="settlementEndsAt" type="datetime-local" defaultValue={`${nextDateValue(date)}T${adjustmentSubtype === "negative_full" ? "19:00" : "09:00"}`} /></label>
+                </div>
+                <small>O GM ficará à disposição no dia escolhido. O intervalo do BH+ deve corresponder exatamente à quantidade de horas informada. Depois, ele poderá ser colocado em um posto ou viatura.</small>
+              </div>}
+            </>}
             <input name="requestRef" placeholder="Nº do requerimento" required />
             <input name="notes" placeholder="Observação ou motivo" />
             <small className="service-adjustment-help">Na troca, o primeiro dia é o serviço originalmente do segundo GM; o segundo dia é o serviço originalmente do primeiro GM. BH- de entrada tardia usa o intervalo entre o início previsto e o horário em que o GM realmente começa.</small>
@@ -573,6 +589,7 @@ export function GestaoClient({
             <h3>Como cada opção funciona</h3>
             <p><b>BH- parcial:</b> encurta o horário e destaca o quadradinho.</p>
             <p><b>BH- entrada tardia:</b> desloca o início do card para o horário informado.</p>
+            <p><b>BH- + BH+:</b> informe a quantidade de horas e marque o pagamento em outro dia; o mesmo requerimento cria o GM à disposição para o BH+.</p>
             <p><b>BH- integral:</b> remove o GM do dia, sem apagar o cadastro.</p>
             <p><b>BH+:</b> coloca o GM à disposição; ao escalar, o requerimento acompanha o card.</p>
             <p><b>Troca:</b> use dois dias: o GM selecionado assume o serviço do segundo GM no primeiro dia, e o segundo GM assume o serviço do selecionado no segundo dia.</p>
@@ -583,7 +600,7 @@ export function GestaoClient({
           <header><div><small>LANÇAMENTOS ATIVOS DO MÊS</small><h3>Banco de horas e trocas aplicados</h3></div><span>{data.serviceAdjustments.length}</span></header>
           {data.serviceAdjustments.length ? data.serviceAdjustments.map((item) => (
             <article key={String(item.id)} className={`service-adjustment-card ${String(item.subtype)}`}>
-              <div><b>{String(item.guard_name)}</b>{item.counterpart_guard_name && <span> ⇄ {String(item.counterpart_guard_name)}</span>}<small>{serviceAdjustmentRange(item)}</small></div>
+              <div><b>{String(item.guard_name)}</b>{item.counterpart_guard_name && <span> ⇄ {String(item.counterpart_guard_name)}</span>}<small>{serviceAdjustmentRangeWithSettlement(item)}</small></div>
               <div><strong>{item.request_ref ? `Req. ${item.request_ref}` : "Sem requerimento"}</strong>{item.notes && <small>{String(item.notes)}</small>}</div>
               <button type="button" className="danger-link" onClick={() => void cancelServiceAdjustment(item)}>Cancelar e restaurar</button>
             </article>
@@ -765,6 +782,11 @@ const formatDate = (value: string | number | null) =>
     day: "2-digit",
     month: "2-digit",
   });
+function nextDateValue(value:string) {
+  const date = new Date(`${value}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}
 function GuardSelect({ guards }: { guards: Item[] }) {
   return (
     <select name="guardId" required>
@@ -1015,6 +1037,26 @@ function serviceAdjustmentLabel(subtype: string) {
     positive: "BH+ · dia extra",
     swap: "Troca de serviço",
   } as Record<string,string>)[subtype] || subtype;
+}
+function adjustmentHoursLabel(value: unknown) {
+  const hours = Number(value);
+  if (!Number.isFinite(hours) || hours <= 0) return "";
+  const rounded = Math.round(hours * 100) / 100;
+  return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(2).replace(/0+$/, "").replace(".", ",")}h`;
+}
+function serviceAdjustmentRangeWithSettlement(item: Item) {
+  if (!item.settlement_date && !item.hours) return serviceAdjustmentRange(item);
+  const hours = adjustmentHoursLabel(item.hours);
+  const first = String(item.subtype) === "negative_full"
+    ? `${String(item.service_date)} · dia inteiro`
+    : `${String(item.service_date)} · ${String(item.starts_at).slice(11,16)}–${String(item.ends_at).slice(11,16)}`;
+  const primary = `${serviceAdjustmentLabel(String(item.subtype))}${hours ? ` · ${hours}` : ""} · ${first}`;
+  if (item.settlement_date) {
+    const paidHours = adjustmentHoursLabel(item.settlement_hours || item.hours);
+    return `${primary} → BH+${paidHours ? ` ${paidHours}` : ""} · ${String(item.settlement_date)} · ${String(item.settlement_starts_at || "").slice(11,16)}–${String(item.settlement_ends_at || "").slice(11,16)}`;
+  }
+  if (!item.counterpart_service_date) return primary;
+  return `${serviceAdjustmentLabel(String(item.subtype))} · ${first} ⇄ ${String(item.counterpart_service_date)} · ${String(item.counterpart_starts_at || "").slice(11,16)}–${String(item.counterpart_ends_at || "").slice(11,16)}`;
 }
 function serviceAdjustmentRange(item: Item) {
   const first = `${String(item.service_date)} · ${String(item.starts_at).slice(11,16)}–${String(item.ends_at).slice(11,16)}`;

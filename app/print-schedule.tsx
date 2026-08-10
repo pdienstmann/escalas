@@ -201,8 +201,8 @@ function PrintPage({
             <section className="print-service-adjustments">
               <b>Banco de horas / trocas</b>
               {data.serviceAdjustments.map((item) => (
-                <p key={String(item.id)} className={`print-adjustment-${String(item.subtype)}`}>
-                  <span className="print-adjustment-kind">{printServiceAdjustmentCode(String(item.subtype))}</span>
+                <p key={String(item.id)} className={`print-adjustment-${String(item.settlement_date||"")===data.date?"settlement":String(item.subtype)}`}>
+                  <span className="print-adjustment-kind">{printServiceAdjustmentCode(String(item.subtype),item,data.date)}</span>
                   <b>{String(item.guard_name)}{item.counterpart_guard_name ? ` ⇄ ${String(item.counterpart_guard_name)}` : ""}</b>
                   <small>{printServiceAdjustmentRange(item, data.date)}{item.request_ref ? ` · Req. ${String(item.request_ref)}` : " · Sem requerimento"}</small>
                 </p>
@@ -247,8 +247,30 @@ function movementDetail(m: Rec) {
   return `${date(start)} ${time(start)}–${time(end)}`;
 }
 function printServiceAdjustmentLabel(subtype:string){return ({negative_early:"BH- · saída antecipada",negative_late:"BH- · entrada tardia",negative_full:"BH- · retirada integral",positive:"BH+ · dia extra",swap:"Troca de serviço"} as Record<string,string>)[subtype]||subtype}
-function printServiceAdjustmentCode(subtype:string){return ({negative_early:"BH-",negative_late:"BH-",negative_full:"BH-",positive:"BH+",swap:"TROCA"} as Record<string,string>)[subtype]||"AJUSTE"}
+function printServiceAdjustmentCode(subtype:string,item?:Rec,date?:string){if(item&&date&&String(item.settlement_date||"")===date)return "BH+";return ({negative_early:"BH-",negative_late:"BH-",negative_full:"BH-",positive:"BH+",swap:"TROCA"} as Record<string,string>)[subtype]||"AJUSTE"}
+function printAdjustmentHoursLabel(value:unknown){
+  const hours=Number(value);
+  if(!Number.isFinite(hours)||hours<=0)return "";
+  const rounded=Math.round(hours*100)/100;
+  return `${Number.isInteger(rounded)?rounded:rounded.toFixed(2).replace(/0+$/, "").replace(".", ",")}h`;
+}
 function printServiceAdjustmentRange(item:Rec,date:string){
+  if(!item.hours&&!item.settlement_date)return printLegacyServiceAdjustmentRange(item,date);
+  const hours=printAdjustmentHoursLabel(item.hours);
+  const isSettlement=String(item.settlement_date||"")===date;
+  if(isSettlement){
+    const paidHours=printAdjustmentHoursLabel(item.settlement_hours||item.hours);
+    return `BH+${paidHours?` ${paidHours}`:""} · pagamento do BH- · ${String(item.settlement_starts_at||"").slice(11,16)}–${String(item.settlement_ends_at||"").slice(11,16)}`;
+  }
+  const isSecond=String(item.service_date)!==date&&String(item.counterpart_service_date||"")===date;
+  const start=String(isSecond?item.counterpart_starts_at:item.starts_at||"").slice(11,16),end=String(isSecond?item.counterpart_ends_at:item.ends_at||"").slice(11,16);
+  const label=printServiceAdjustmentLabel(String(item.subtype));
+  if(!isSecond&&String(item.subtype)==="negative_full")return `${label}${hours?` · ${hours}`:""} · ${String(item.service_date)} · dia inteiro${item.settlement_date?` · BH+ em ${String(item.settlement_date)}`:""}`;
+  if(String(item.subtype)!=="swap")return `${label}${hours?` · ${hours}`:""} · ${start}–${end}${item.settlement_date?` · BH+ em ${String(item.settlement_date)}`:""}`;
+  const otherDate=isSecond?String(item.service_date):String(item.counterpart_service_date||"");
+  return `${label} · ${start}–${end} · troca com ${otherDate}`;
+}
+function printLegacyServiceAdjustmentRange(item:Rec,date:string){
   const isSecond=String(item.service_date)!==date&&String(item.counterpart_service_date||"")===date;
   const start=String(isSecond?item.counterpart_starts_at:item.starts_at||"").slice(11,16),end=String(isSecond?item.counterpart_ends_at:item.ends_at||"").slice(11,16);
   const label=printServiceAdjustmentLabel(String(item.subtype));

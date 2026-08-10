@@ -1029,9 +1029,9 @@ export function LiveSchedule() {
               </header>
               <div className="service-adjustment-bottom-grid">
                 {data.serviceAdjustments.map((item) => (
-                  <article key={String(item.id)} className={`service-adjustment-entry ${String(item.subtype)}`}>
+                  <article key={String(item.id)} className={`service-adjustment-entry ${String(item.settlement_date||"")===data.date?"settlement":String(item.subtype)}`}>
                     <div className="service-adjustment-entry-main">
-                      <span className="service-adjustment-kind">{liveServiceAdjustmentCode(String(item.subtype))}</span>
+                      <span className="service-adjustment-kind">{liveServiceAdjustmentCode(String(item.subtype),item,data.date)}</span>
                       <div>
                         <b>{String(item.guard_name)}{item.counterpart_guard_name ? ` ⇄ ${String(item.counterpart_guard_name)}` : ""}</b>
                         <small>{liveServiceAdjustmentRange(item, data.date)}</small>
@@ -1285,8 +1285,39 @@ function movementDetail(m: Rec) {
   return `${date(start)} · ${time(start)}–${time(end)}`;
 }
 function liveServiceAdjustmentLabel(subtype:string){return ({negative_early:"BH- · saída antecipada",negative_late:"BH- · entrada tardia",negative_full:"BH- · retirada integral",positive:"BH+ · dia extra",swap:"Troca de serviço"} as Record<string,string>)[subtype]||subtype}
-function liveServiceAdjustmentCode(subtype:string){return ({negative_early:"BH-",negative_late:"BH-",negative_full:"BH-",positive:"BH+",swap:"TROCA"} as Record<string,string>)[subtype]||"AJUSTE"}
+function liveServiceAdjustmentCode(subtype:string,item?:Rec,date?:string){if(item&&date&&String(item.settlement_date||"")===date)return "BH+";return ({negative_early:"BH-",negative_late:"BH-",negative_full:"BH-",positive:"BH+",swap:"TROCA"} as Record<string,string>)[subtype]||"AJUSTE"}
+function scheduleAdjustmentHoursLabel(value:unknown){
+  const hours=Number(value);
+  if(!Number.isFinite(hours)||hours<=0)return "";
+  const rounded=Math.round(hours*100)/100;
+  return `${Number.isInteger(rounded)?rounded:rounded.toFixed(2).replace(/0+$/, "").replace(".", ",")}h`;
+}
+function assignmentAdjustmentBadge(assignment:Rec,adjustments:Rec[],date:string){
+  const item=adjustments.find(candidate=>Number(candidate.guard_id)===Number(assignment.guard_id)&&(
+    String(candidate.settlement_date||"")===date || (String(candidate.service_date)===date&&String(candidate.subtype).startsWith("negative_")&&String(assignment.status)==="time_bank")
+  ));
+  if(!item)return "";
+  const paid=String(item.settlement_date||"")===date;
+  const hours=scheduleAdjustmentHoursLabel(paid?item.settlement_hours||item.hours:item.hours);
+  return `${paid?"BH+":"BH-"}${hours?` ${hours}`:""}`;
+}
 function liveServiceAdjustmentRange(item:Rec,date:string){
+  if(!item.hours&&!item.settlement_date)return liveLegacyServiceAdjustmentRange(item,date);
+  const hours=scheduleAdjustmentHoursLabel(item.hours);
+  const isSettlement=String(item.settlement_date||"")===date;
+  if(isSettlement){
+    const paidHours=scheduleAdjustmentHoursLabel(item.settlement_hours||item.hours);
+    return `BH+${paidHours?` ${paidHours}`:""} · pagamento do BH- · ${String(item.settlement_starts_at||"").slice(11,16)}–${String(item.settlement_ends_at||"").slice(11,16)}${item.request_ref?` · Req. ${String(item.request_ref)}`:""}`;
+  }
+  const isSecond=String(item.service_date)!==date&&String(item.counterpart_service_date||"")===date;
+  const start=String(isSecond?item.counterpart_starts_at:item.starts_at||"").slice(11,16),end=String(isSecond?item.counterpart_ends_at:item.ends_at||"").slice(11,16);
+  const label=liveServiceAdjustmentLabel(String(item.subtype));
+  if(!isSecond&&String(item.subtype)==="negative_full")return `${label}${hours?` · ${hours}`:""} · ${String(item.service_date)} · dia inteiro${item.settlement_date?` · BH+ em ${String(item.settlement_date)}`:""}${item.request_ref?` · Req. ${String(item.request_ref)}`:""}`;
+  if(String(item.subtype)!=="swap")return `${label}${hours?` · ${hours}`:""} · ${start}–${end}${item.settlement_date?` · BH+ em ${String(item.settlement_date)}`:""}${item.request_ref?` · Req. ${String(item.request_ref)}`:""}`;
+  const otherDate=isSecond?String(item.service_date):String(item.counterpart_service_date||"");
+  return `${label} · ${start}–${end} · troca com ${otherDate}${item.request_ref?` · Req. ${String(item.request_ref)}`:""}`;
+}
+function liveLegacyServiceAdjustmentRange(item:Rec,date:string){
   const isSecond=String(item.service_date)!==date&&String(item.counterpart_service_date||"")===date;
   const start=String(isSecond?item.counterpart_starts_at:item.starts_at||"").slice(11,16),end=String(isSecond?item.counterpart_ends_at:item.ends_at||"").slice(11,16);
   const label=liveServiceAdjustmentLabel(String(item.subtype));
@@ -1524,7 +1555,7 @@ function Row({
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => drop(e, s.id)}
             >
-              {list.map((a) => {const visualStatus=statusInShift(a,date,s.id),canExtendAfter=showExtensionShortcut(a,s.id),canExtendBefore=showEarlyExtensionShortcut(a,s.id);return (<Fragment key={String(a.id)}>
+              {list.map((a) => {const visualStatus=statusInShift(a,date,s.id),adjustmentBadge=assignmentAdjustmentBadge(a,data.serviceAdjustments||[],date),canExtendAfter=showExtensionShortcut(a,s.id),canExtendBefore=showEarlyExtensionShortcut(a,s.id);return (<Fragment key={String(a.id)}>
                 <div className={`live-person-card ${canExtendAfter||canExtendBefore?"has-he-action":""}`}>
                 <button
                   type="button"
@@ -1557,8 +1588,8 @@ function Row({
                   )}
                   <b>{a.guard_name}</b>
                   {visualStatus !== "normal" && (
-                    <span className={`badge ${statusClass(visualStatus)}`}>
-                      {String(a.work_kind)==="overtime_extension"?overtimeHoursLabel(a):visualStatus==="overtime"&&a.regular_ends_at?`HE · após ${String(a.regular_ends_at).slice(11,16)}`:statusShort(visualStatus)}
+                    <span className={`badge ${statusClass(visualStatus)} ${adjustmentBadge.startsWith("BH+")?"settlement-badge":""}`}>
+                      {adjustmentBadge|| (String(a.work_kind)==="overtime_extension"?overtimeHoursLabel(a):visualStatus==="overtime"&&a.regular_ends_at?`HE · após ${String(a.regular_ends_at).slice(11,16)}`:statusShort(visualStatus))}
                     </span>
                   )}
                   {Number(a.is_reassigned)===1&&<span className="badge remanejamento" title={String(a.reassignment_note||"Avisar sobre o remanejamento")}>AVISAR REM</span>}
