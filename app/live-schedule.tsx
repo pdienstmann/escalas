@@ -85,6 +85,7 @@ type ResourceDialogState = {
   initialMode?: "existing" | "new";
   initialSection?: string;
 };
+type ResourceChoice = { kind: "post" | "vehicle"; resource: Rec; section: string };
 const shifts = SHIFT_DEFS;
 const scheduleCacheKey=(date:string)=>`gmnh:schedule:${date}`;
 function readScheduleCache(date:string):State|null{if(typeof window==="undefined")return null;try{const raw=sessionStorage.getItem(scheduleCacheKey(date));if(!raw)return null;const parsed=JSON.parse(raw) as {savedAt:number;data:State};return Date.now()-parsed.savedAt<5*60_000?parsed.data:null}catch{return null}}
@@ -177,6 +178,9 @@ export function LiveSchedule() {
   },[data?.date,date]);
   const scheduleAssignments = data?.assignments;
   const scheduleDate = data?.date;
+  const scheduleVehicles = data?.vehicles;
+  const schedulePosts = data?.posts;
+  const scheduleSections = data?.sections;
   const assignmentIndex = useMemo(() => {
     const map = new Map<string, Rec[]>();
     if (!scheduleAssignments || !scheduleDate) return map;
@@ -259,6 +263,12 @@ export function LiveSchedule() {
   const sectionOptions = useMemo(
     () => [...new Set(resources.map((item) => item.section))],
     [resources],
+  );
+  const resourceChoices = useMemo<ResourceChoice[]>(
+    () => scheduleVehicles && schedulePosts && scheduleSections
+      ? orderScheduleResources(scheduleVehicles, schedulePosts, scheduleSections).map(({ kind, r, section }) => ({ kind, resource: r, section }))
+      : [],
+    [scheduleVehicles, schedulePosts, scheduleSections],
   );
   async function postAssignment(body: Record<string, unknown>) {
     if (savingRef.current) return false;
@@ -1021,6 +1031,7 @@ export function LiveSchedule() {
                    resourceAssignments={resourceAssignmentIndex.get(resourceAssignmentKey(kind, Number(r.id))) || []}
                    allScheduleAssignments={allScheduleAssignments}
                    assignmentById={assignmentById}
+                   resourceChoices={resourceChoices}
                    onSectionRef={(section, element) => {
                      if (element) sectionRefs.current.set(section, element);
                      else sectionRefs.current.delete(section);
@@ -1467,6 +1478,7 @@ type RowProps = {
   resourceAssignments: Rec[];
   allScheduleAssignments: Rec[];
   assignmentById: Map<number, Rec>;
+  resourceChoices: ResourceChoice[];
   onSectionRef: (section: string, element: HTMLTableRowElement | null) => void;
   serviceAdjustments: Rec[];
   availableForRedeployment: Rec[];
@@ -1509,6 +1521,7 @@ function Row({
   resourceAssignments,
   allScheduleAssignments,
   assignmentById,
+  resourceChoices,
   onSectionRef,
   serviceAdjustments,
   availableForRedeployment,
@@ -1537,6 +1550,22 @@ function Row({
     orderAssignmentsInResourceCell(assignmentIndex.get(assignmentKey(kind,Number(resource.id),shift.id))||[],resourceAssignments,kind),
   ])),[assignmentIndex,kind,resource.id,resourceAssignments,visibleShifts]);
   const [dropTargetId, setDropTargetId] = useState<number | null>(null);
+  const [moveAssignmentId, setMoveAssignmentId] = useState<number | null>(null);
+  const [moveDestination, setMoveDestination] = useState("");
+  const moveChoices = useMemo(
+    () => resourceChoices.filter((choice) => !(choice.kind === kind && Number(choice.resource.id) === Number(resource.id))),
+    [kind, resource.id, resourceChoices],
+  );
+  function moveDirectly(assignment: Rec, shift: string) {
+    const [targetKind, targetId] = moveDestination.split(":");
+    const destination = moveChoices.find((choice) => choice.kind === targetKind && Number(choice.resource.id) === Number(targetId));
+    if (!destination) return;
+    setMoveAssignmentId(null);
+    setMoveDestination("");
+    // Passing the visible cell as sourceShift tells the existing move logic
+    // to preserve a cross-turn interval instead of shortening it.
+    void onMove(assignment, destination.kind, destination.resource, shift, shift);
+  }
   function showExtensionShortcut(assignment:Rec,shift:string){
     if(!isDayShift(shift))return false;
     if(String(assignment.work_kind)==="overtime_extension")return false;
@@ -1660,7 +1689,7 @@ function Row({
               onDragOver={(e) => e.preventDefault()}
                onDrop={(e) => drop(e, s.id)}
             >
-              {list.map((a) => {const visualStatus=statusInShift(a,date,s.id),adjustmentBadge=assignmentAdjustmentBadge(a,serviceAdjustments,date),canExtendAfter=showExtensionShortcut(a,s.id),canExtendBefore=showEarlyExtensionShortcut(a,s.id);return (<Fragment key={String(a.id)}>
+              {list.map((a) => {const visualStatus=statusInShift(a,date,s.id),adjustmentBadge=assignmentAdjustmentBadge(a,serviceAdjustments,date),canExtendAfter=showExtensionShortcut(a,s.id),canExtendBefore=showEarlyExtensionShortcut(a,s.id);return (<Fragment key={String(a.id)}><Fragment>
                 <div className={`live-person-card ${canExtendAfter||canExtendBefore?"has-he-action":""} ${dropTargetId===Number(a.id)?"drop-target":""}`} onDragEnter={()=>{if(String(a.work_kind)!=="overtime_extension")setDropTargetId(Number(a.id))}} onDragLeave={()=>setDropTargetId(current=>current===Number(a.id)?null:current)} onDragOver={(event)=>{event.preventDefault();event.stopPropagation()}} onDrop={(event)=>{drop(event,s.id,String(a.work_kind)==="overtime_extension"?undefined:Number(a.id))}}>
                 <button
                   type="button"
@@ -1714,7 +1743,23 @@ function Row({
                 {canExtendBefore&&<button type="button" className="inline-he-extension early" aria-label={`Adicionar hora extra antes do turno de ${String(a.guard_name)}`} title="Fazer o GM da noite começar mais cedo em HE" onClick={()=>onExtend(a,kind,resource,s.id,"before")}><span aria-hidden="true">◷</span>+HE</button>}
                 </div>
                 {Number(a.id)===selectedId&&<div className="cell-quick-actions" role="group" aria-label={`Ações rápidas de ${String(a.guard_name)}`}><b>{a.guard_name}</b><button type="button" className="swap-action" onClick={()=>onSwap(a,kind,resource,s.id)}><span aria-hidden="true">⇄</span> Trocar GM</button><button type="button" onClick={()=>onEdit({kind,resource,shift:s.id,assignment:a})}><span aria-hidden="true">✎</span> Alterar / mover</button><button type="button" className={a.status==="time_bank"?"active":""} onClick={()=>onQuickStatus(a,a.status==="time_bank"?"normal":"time_bank")}><span aria-hidden="true">◷</span> BH</button><button type="button" className="copy-action" onClick={()=>onCopy(a)}><span aria-hidden="true">▣</span> Copiar</button><button type="button" className="danger" onClick={()=>onQuickDelete(a)}><span aria-hidden="true">×</span> Remover</button><button type="button" aria-label="Fechar ações" onClick={()=>onContextPick({kind,resource,shift:s.id})}>×</button></div>}</Fragment>
-              )})}
+                {Number(a.id)===selectedId&&<div className="inline-move-tools">
+                  <button type="button" className="quick-move-trigger" onClick={()=>setMoveAssignmentId(current=>current===Number(a.id)?null:Number(a.id))}>
+                    ↗ Mover local
+                  </button>
+                  {moveAssignmentId===Number(a.id)&&<div className="inline-move-picker" role="group" aria-label={`Mover ${String(a.guard_name)} para outro local`}>
+                    <label>Destino
+                      <select value={moveDestination} onChange={(event)=>setMoveDestination(event.target.value)}>
+                        <option value="">Escolher posto ou viatura...</option>
+                        {moveChoices.map((choice)=><option key={`${choice.kind}:${choice.resource.id}`} value={`${choice.kind}:${choice.resource.id}`}>
+                          {choice.section} · {choice.kind==="vehicle"?choice.resource.prefix:choice.resource.name}
+                        </option>)}
+                      </select>
+                    </label>
+                    <div><button type="button" disabled={!moveDestination} onClick={()=>moveDirectly(a,s.id)}>Confirmar</button><button type="button" onClick={()=>{setMoveAssignmentId(null);setMoveDestination("")}}>Cancelar</button></div>
+                  </div>}
+                </div>}
+              </Fragment>)})}
               {copiedAssignment&&pasteAllowed&&<button type="button" className="cell-paste-assignment" onClick={()=>onPaste(kind,resource,s.id)}><span aria-hidden="true">▣</span> Colar aqui</button>}
               {missingRoles.length > 0 && (
                 <button
@@ -1764,6 +1809,7 @@ const MemoizedRow = memo(Row, (previous, next) =>
   previous.resourceAssignments === next.resourceAssignments &&
   previous.allScheduleAssignments === next.allScheduleAssignments &&
   previous.assignmentById === next.assignmentById &&
+  previous.resourceChoices === next.resourceChoices &&
   previous.serviceAdjustments === next.serviceAdjustments &&
   previous.availableForRedeployment === next.availableForRedeployment &&
   previous.redeploymentGroups === next.redeploymentGroups &&

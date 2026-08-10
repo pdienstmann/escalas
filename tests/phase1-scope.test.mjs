@@ -169,6 +169,16 @@ test("the operational toolbar can jump directly to a visible section", () => {
   assert.match(usability, /\.section-jump select/);
 });
 
+test("selected GM cards expose a direct move flow with available resources", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const usability = readFileSync(resolve("app/usability.css"), "utf8");
+  assert.match(schedule, /className="quick-move-trigger"/);
+  assert.match(schedule, /moveChoices\.map/);
+  assert.match(schedule, /void onMove\(assignment, destination\.kind, destination\.resource, shift, shift\)/);
+  assert.match(schedule, /Escolher posto ou viatura/);
+  assert.match(usability, /\.inline-move-picker/);
+});
+
 test("the inline X removes only the selected schedule segment", () => {
   const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
   const api = readFileSync(resolve("app/api/schedule/route.ts"), "utf8");
