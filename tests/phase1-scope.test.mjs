@@ -741,3 +741,16 @@ test("selected GM cards expose a quick adjustment dialog before the advanced edi
   assert.match(schedule, /expectedUpdatedAt: assignment\.updated_at/);
   assert.match(styles, /\.quick-inline-edit/);
 });
+
+test("dragging a GM highlights compatible and blocked schedule destinations", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/drag-edit.css"), "utf8");
+  assert.match(schedule, /\[draggingAssignmentId,setDraggingAssignmentId\]=useState/);
+  assert.match(schedule, /function canReceiveDrag/);
+  assert.match(schedule, /className=\{`\$\{missingRoles\.length/);
+  assert.match(schedule, /drag-drop-ready/);
+  assert.match(schedule, /onDragStart\(a\)/);
+  assert.match(schedule, /onDragEnd=\{onDragEnd\}/);
+  assert.match(styles, /\.drop-cell\.drag-drop-ready/);
+  assert.match(styles, /\.drop-cell\.drag-drop-blocked/);
+});

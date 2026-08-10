@@ -132,6 +132,7 @@ export function LiveSchedule() {
     [movementEdit, setMovementEdit] = useState<MovementEdit | null>(null),
     [swapPick,setSwapPick]=useState<SwapPick|null>(null),
     [copiedAssignment,setCopiedAssignment]=useState<Rec|null>(null),
+    [draggingAssignmentId,setDraggingAssignmentId]=useState<number|null>(null),
     [recentAssignmentIds,setRecentAssignmentIds]=useState<number[]>([]),
     [collapsed, setCollapsed] = useState<Record<string, boolean>>({}),
     [saving, setSaving] = useState(false),
@@ -1193,6 +1194,7 @@ export function LiveSchedule() {
         <section ref={scheduleWrapRef} className={`schedule-wrap ${data.date!==date?"is-switching":""}`}>
           {data.date!==date&&<div className="schedule-switching" role="status"><b>Abrindo escala de {formatScheduleDate(date)}</b><span>A escala anterior permanece bloqueada até a nova data terminar de carregar.</span></div>}
           <div className="drag-help">
+            {draggingAssignmentId && <strong className="drag-active-help">Arraste ativo: solte em uma célula azul compatível ou sobre outro GM para escolher a posição.</strong>}
             Arraste um GM para outra célula ou solte sobre outro quadradinho para escolher a posição. A ordem é alinhada somente dentro do mesmo posto/viatura; HE independente fica fora. Ao preencher um furo diurno, o GM é escalado no turno inteiro (07:00–19:00).
           </div>
           {showTable && (
@@ -1239,6 +1241,9 @@ export function LiveSchedule() {
                    resource={r}
                    section={section}
                    sectionKey={kind === "vehicle" ? "VEHICLES" : `POST:${r.group_name || "POSTOS"}`}
+                   draggingAssignmentId={draggingAssignmentId}
+                   onDragStart={(assignment) => setDraggingAssignmentId(Number(assignment.id))}
+                   onDragEnd={() => setDraggingAssignmentId(null)}
                    first={first}
                    groupFirst={groupFirst}
                    operationalGroup={operationalGroup}
@@ -1763,6 +1768,9 @@ type RowProps = {
   resource: Rec;
   section: string;
   sectionKey: string;
+  draggingAssignmentId: number | null;
+  onDragStart: (assignment: Rec) => void;
+  onDragEnd: () => void;
   first: boolean;
   groupFirst: boolean;
   operationalGroup: string | null;
@@ -1818,6 +1826,9 @@ function Row({
   resource,
   section,
   sectionKey,
+  draggingAssignmentId,
+  onDragStart,
+  onDragEnd,
   first,
   groupFirst,
   operationalGroup,
@@ -1910,6 +1921,20 @@ function Row({
       })
       .slice(0, 8);
   }, [addQuery, addShift, allScheduleAssignments, date, guards, movements, quickAddAvailableIds, serviceAdjustments]);
+  const draggingAssignment = useMemo(() => {
+    if (!draggingAssignmentId) return null;
+    return assignmentById.get(draggingAssignmentId) || availableForRedeployment.find((assignment) => Number(assignment.id) === draggingAssignmentId) || null;
+  }, [assignmentById, availableForRedeployment, draggingAssignmentId]);
+  function canReceiveDrag(shift: string) {
+    if (!draggingAssignment) return false;
+    const target = operationalShiftWindow(date, shift);
+    return !allScheduleAssignments.some((assignment) =>
+      Number(assignment.id) !== Number(draggingAssignment.id) &&
+      Number(assignment.guard_id) === Number(draggingAssignment.guard_id) &&
+      String(assignment.starts_at) < target.end &&
+      String(assignment.ends_at) > target.start,
+    );
+  }
   function moveDirectly(assignment: Rec, shift: string) {
     const [targetKind, targetId] = moveDestination.split(":");
     const destination = moveChoices.find((choice) => choice.kind === targetKind && Number(choice.resource.id) === Number(targetId));
@@ -2076,8 +2101,8 @@ function Row({
           return (
             <td
               key={s.id}
-              className={`${missingRoles.length ? "furo" : ""} ${pasteAllowed?"paste-target":""} drop-cell period-${s.period} ${s.id==="4"?"period-night-start":""}`}
-              onDragOver={(e) => e.preventDefault()}
+              className={`${missingRoles.length ? "furo" : ""} ${pasteAllowed?"paste-target":""} ${draggingAssignmentId && canReceiveDrag(s.id) ? "drag-drop-ready" : ""} ${draggingAssignmentId && !canReceiveDrag(s.id) ? "drag-drop-blocked" : ""} drop-cell period-${s.period} ${s.id==="4"?"period-night-start":""}`}
+              onDragOver={(e) => { if (canReceiveDrag(s.id)) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; } }}
                onDrop={(e) => drop(e, s.id)}
             >
               {list.map((a) => {const visualStatus=statusInShift(a,date,s.id),adjustmentBadge=assignmentAdjustmentBadge(a,serviceAdjustments,date),canExtendAfter=showExtensionShortcut(a,s.id),canExtendBefore=showEarlyExtensionShortcut(a,s.id);return (<Fragment key={String(a.id)}><Fragment>
@@ -2101,7 +2126,9 @@ function Row({
                     e.dataTransfer.effectAllowed = "move";
                     e.dataTransfer.setData("text/assignment", String(a.id));
                     e.dataTransfer.setData("text/assignment-source-shift", s.id);
+                    onDragStart(a);
                   }}
+                  onDragEnd={onDragEnd}
                   onClick={() =>
                     onContextPick({ kind, resource, shift: s.id, assignment: a })
                   }
@@ -2215,6 +2242,8 @@ const MemoizedRow = memo(Row, (previous, next) =>
   previous.kind === next.kind &&
   previous.resource === next.resource &&
   previous.section === next.section &&
+  previous.sectionKey === next.sectionKey &&
+  previous.draggingAssignmentId === next.draggingAssignmentId &&
   previous.first === next.first &&
   previous.groupFirst === next.groupFirst &&
   previous.operationalGroup === next.operationalGroup &&
