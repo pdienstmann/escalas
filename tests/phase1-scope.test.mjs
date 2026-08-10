@@ -717,3 +717,15 @@ test("daily scale exposes contextual post editing without a full reload", () => 
   assert.match(api, /const sortOrder = Number\.isFinite\(Number\(body\.sortOrder\)\)/);
   assert.match(styles, /\.resource-quick-button/);
 });
+
+test("daily scale exposes contextual section editing", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/simple-ux.css"), "utf8");
+  assert.match(schedule, /\[sectionEdit, setSectionEdit\] = useState/);
+  assert.match(schedule, /async function saveSectionQuick/);
+  assert.match(schedule, /action: "section_update"/);
+  assert.match(schedule, /onEditSection=\{\(sectionKey, label\) => setSectionEdit/);
+  assert.match(schedule, /function SectionQuickEditor/);
+  assert.match(schedule, /className="section-inline-edit"/);
+  assert.match(styles, /\.section-inline-edit/);
+});

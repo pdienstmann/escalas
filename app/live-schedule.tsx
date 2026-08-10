@@ -115,6 +115,7 @@ export function LiveSchedule() {
     [contextPick, setContextPick] = useState<Pick | null>(null),
     [vehicleEdit, setVehicleEdit] = useState<Rec | null>(null),
     [postEdit, setPostEdit] = useState<Rec | null>(null),
+    [sectionEdit, setSectionEdit] = useState<{ sectionKey: string; label: string } | null>(null),
     [resourceRemoval, setResourceRemoval] = useState<ResourceRemovalPick | null>(null),
     [createOpen, setCreateOpen] = useState(false),
     [createKind, setCreateKind] = useState<"guard" | "post" | "vehicle" | "section">("guard"),
@@ -915,6 +916,37 @@ export function LiveSchedule() {
       setSaving(false);
     }
   }
+  async function saveSectionQuick(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!data || !sectionEdit || savingRef.current) return;
+    const body = Object.fromEntries(new FormData(e.currentTarget));
+    const label = String(body.label || "").trim();
+    if (!label) return;
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      const response = await fetch("/api/admin", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "section_update", sectionKey: sectionEdit.sectionKey, label }),
+      });
+      const result = await response.json();
+      setMessage(response.ok ? "Seção atualizada na escala." : result.error);
+      if (!response.ok) return;
+      setData((current) => current ? {
+        ...current,
+        sections: current.sections.map((section) => String(section.section_key) === sectionEdit.sectionKey
+          ? { ...section, label }
+          : section),
+      } : current);
+      setSectionEdit(null);
+    } catch {
+      setMessage("Não foi possível atualizar a seção. A escala exibida foi preservada.");
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  }
   async function removeResourceFromDay() {
     if (!data || !resourceRemoval || savingRef.current) return;
     savingRef.current=true;setSaving(true);
@@ -1180,6 +1212,7 @@ export function LiveSchedule() {
                   kind={kind}
                    resource={r}
                    section={section}
+                   sectionKey={kind === "vehicle" ? "VEHICLES" : `POST:${r.group_name || "POSTOS"}`}
                    first={first}
                    groupFirst={groupFirst}
                    operationalGroup={operationalGroup}
@@ -1225,6 +1258,7 @@ export function LiveSchedule() {
                   onHolePick={openHoleSuggest}
                   onEditVehicle={setVehicleEdit}
                   onEditPost={setPostEdit}
+                  onEditSection={(sectionKey, label) => setSectionEdit({ sectionKey, label })}
                   onAddToResource={(kind,resource,shift)=>setResourceDialog({
                     kind,
                     initialResourceId:Number(resource.id),
@@ -1399,6 +1433,14 @@ export function LiveSchedule() {
           saving={saving}
           onClose={() => setPostEdit(null)}
           onSave={savePostQuick}
+        />
+      )}
+      {sectionEdit && (
+        <SectionQuickEditor
+          section={sectionEdit}
+          saving={saving}
+          onClose={() => setSectionEdit(null)}
+          onSave={saveSectionQuick}
         />
       )}
       {redeployPick && (
@@ -1642,6 +1684,14 @@ function PostQuickEditor({post,saving,onClose,onSave}:{post:Rec;saving:boolean;o
     <footer><button type="button" onClick={onClose}>Cancelar</button><button className="save" disabled={saving}>{saving ? "Salvando…" : "Salvar posto"}</button></footer>
   </form></div>
 }
+function SectionQuickEditor({section,saving,onClose,onSave}:{section:{sectionKey:string;label:string};saving:boolean;onClose:()=>void;onSave:(e:FormEvent<HTMLFormElement>)=>void}) {
+  return <div className="vehicle-quick-backdrop"><form className="vehicle-quick-editor" role="dialog" aria-modal="true" aria-labelledby="section-quick-title" onSubmit={onSave}>
+    <header><div><small>EDIÇÃO NA PRÓPRIA ESCALA</small><h2 id="section-quick-title">{section.label}</h2><p>Renomeie a área sem alterar os postos ou os GMs.</p></div><button type="button" onClick={onClose} aria-label="Fechar editor de seção">×</button></header>
+    <label>Nome da seção<input name="label" defaultValue={section.label} required /></label>
+    <p className="vehicle-quick-help">A nova identificação será usada na grade e no PDF. O código interno da seção permanece o mesmo.</p>
+    <footer><button type="button" onClick={onClose}>Cancelar</button><button className="save" disabled={saving}>{saving ? "Salvando…" : "Salvar seção"}</button></footer>
+  </form></div>
+}
 function ResourceRemovalDialog({pick,saving,onClose,onConfirm}:{pick:ResourceRemovalPick;saving:boolean;onClose:()=>void;onConfirm:()=>void}){
   const label=String(pick.kind==="vehicle"?pick.resource.prefix:pick.resource.name);
   const guards=[...new Map(pick.assignments.map((assignment)=>[Number(assignment.guard_id),String(assignment.guard_name)])).values()];
@@ -1659,6 +1709,7 @@ type RowProps = {
   kind: "post" | "vehicle";
   resource: Rec;
   section: string;
+  sectionKey: string;
   first: boolean;
   groupFirst: boolean;
   operationalGroup: string | null;
@@ -1701,6 +1752,7 @@ type RowProps = {
   ) => void;
   onEditVehicle: (vehicle: Rec) => void;
   onEditPost: (post: Rec) => void;
+  onEditSection: (sectionKey: string, label: string) => void;
   onAddToResource: (kind: "post" | "vehicle", resource: Rec, shift: string) => void;
   onAddInSection: (kind: "post" | "vehicle", section: string) => void;
   onRemoveResource: (kind: "post" | "vehicle", resource: Rec) => void;
@@ -1711,6 +1763,7 @@ function Row({
   kind,
   resource,
   section,
+  sectionKey,
   first,
   groupFirst,
   operationalGroup,
@@ -1748,6 +1801,7 @@ function Row({
   onHolePick,
   onEditVehicle,
   onEditPost,
+  onEditSection,
   onAddToResource,
   onAddInSection,
   onRemoveResource,
@@ -1874,6 +1928,7 @@ function Row({
               <button type="button" className="section-inline-add" onClick={()=>onAddInSection(kind,section)}>
                 ＋ {kind==="vehicle"?"Viatura":"Posto"}
               </button>
+              <button type="button" className="section-inline-edit" onClick={()=>onEditSection(sectionKey,section)} aria-label={`Editar seção ${section}`} title="Editar nome da seção">✎</button>
             </div>
           </td>
         </tr>
