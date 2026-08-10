@@ -11,6 +11,7 @@ import { isScheduleDate, todayScheduleDate } from "../../../lib/schedule-date";
 import { fullPeriodShifts, fullPeriodWindow, shiftTimes as periodShiftTimes, operationalShiftWindow, isDayShift, splitExtensionWindow } from "../../../lib/shift-rules";
 import { rankGuardSuggestions, describeReasons } from "../../../lib/suggest-gm";
 import { hasRequiredVehicleCrew, hasUniqueCrewMembers } from "../../../lib/crew-rules";
+import { orderedResourceGuardIds } from "../../../lib/schedule-lanes";
 
 export const dynamic = "force-dynamic";
 
@@ -315,6 +316,7 @@ async function seedSchedule(date: string, scheduleId: number) {
 
 async function ensureBase(date: string) {
   await ensureServiceAdjustmentsTable();
+  await ensureAssignmentLaneOrder();
   await env.DB.prepare(
     `CREATE TABLE IF NOT EXISTS schedule_resource_exclusions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -358,6 +360,18 @@ async function ensureBase(date: string) {
       ).bind("Local retirado desta escala — aguardando remanejamento", schedule.id, item.resource_id)));
     }
   }
+}
+
+async function ensureAssignmentLaneOrder() {
+  const columns = new Set(
+    (await env.DB.prepare("PRAGMA table_info(assignments)").all<{ name: string }>()).results.map((column) => column.name),
+  );
+  if (!columns.has("lane_order")) {
+    await env.DB.prepare("ALTER TABLE assignments ADD COLUMN lane_order INTEGER").run();
+  }
+  await env.DB.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_assignments_lane_order ON assignments(schedule_id,post_id,vehicle_id,lane_order)",
+  ).run();
 }
 
 async function ensureServiceAdjustmentsTable() {
@@ -738,6 +752,7 @@ async function upsertAssignment(
 export async function POST(request: Request) {
   if (!permitted(request))
     return Response.json({ error: "Não autorizado" }, { status: 401 });
+  await ensureAssignmentLaneOrder();
   const b = (await request.json()) as Record<string, string | number | boolean | null>;
   if (b.action === "create_service_adjustment") {
     await ensureServiceAdjustmentsTable();
@@ -979,6 +994,73 @@ export async function POST(request: Request) {
     await env.DB.batch(statements);
     const auditEventId = await writeAudit(request,{action:"cancel",entityType:"service_adjustment",entityId:id,summary:`Cancelou lançamento de ${adjustment.guard_name}`,before:adjustment,undoable:false});
     return Response.json({ok:true,auditEventId,message:`Lançamento de ${adjustment.guard_name} cancelado e escala restaurada.`});
+  }
+  if (b.action === "reorder_resource_assignments") {
+    const scheduleId = Number(b.scheduleId || 0);
+    const resourceKind = String(b.resourceKind || "");
+    const resourceId = Number(b.resourceId || 0);
+    const assignmentId = Number(b.assignmentId || 0);
+    const beforeAssignmentId = Number(b.beforeAssignmentId || 0) || null;
+    const targetPosition = Number(b.targetPosition);
+    if (!scheduleId || !["post", "vehicle"].includes(resourceKind) || !resourceId || !assignmentId)
+      return Response.json({ error: "Informe o recurso e o GM para reordenar." }, { status: 400 });
+    const column = resourceKind === "post" ? "post_id" : "vehicle_id";
+    const current = await env.DB.prepare(
+      `SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id
+       WHERE a.id=? AND a.schedule_id=? AND a.${column}=? AND a.work_kind!='overtime_extension'`,
+    ).bind(assignmentId, scheduleId, resourceId).first<Record<string, unknown>>();
+    if (!current) return Response.json({ error: "Este quadradinho não pertence mais a este posto/viatura." }, { status: 404 });
+    if (isStaleVersion((b as Record<string, unknown>).expectedUpdatedAt, current.updated_at))
+      return staleVersionResponse(current);
+    const rows = (
+      await env.DB.prepare(
+        `SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id
+         WHERE a.schedule_id=? AND a.${column}=? AND a.work_kind!='overtime_extension'
+         ORDER BY a.starts_at,a.id`,
+      ).bind(scheduleId, resourceId).all<Record<string, unknown>>()
+    ).results;
+    const groups = new Map<number, Record<string, unknown>[]>();
+    for (const row of rows) {
+      const guardId = Number(row.guard_id);
+      const group = groups.get(guardId) || [];
+      group.push(row);
+      groups.set(guardId, group);
+    }
+    const movingGuardId = Number(current.guard_id);
+    const laneIds = orderedResourceGuardIds(rows, resourceKind as "post" | "vehicle").filter((id) => id !== movingGuardId);
+    const targetAssignment = beforeAssignmentId
+      ? rows.find((row) => Number(row.id) === beforeAssignmentId && Number(row.guard_id) !== movingGuardId)
+      : undefined;
+    const targetGuardId = targetAssignment ? Number(targetAssignment.guard_id) : null;
+    const insertAt = targetGuardId
+      ? Math.max(0, laneIds.indexOf(targetGuardId))
+      : Number.isFinite(targetPosition)
+        ? Math.max(0, Math.min(laneIds.length, Math.trunc(targetPosition)))
+        : laneIds.length;
+    laneIds.splice(insertAt, 0, movingGuardId);
+    const statements = laneIds.flatMap((guardId, index) =>
+      (groups.get(guardId) || []).map((row) =>
+        env.DB.prepare("UPDATE assignments SET lane_order=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND schedule_id=?")
+          .bind(index, row.id, scheduleId),
+      ),
+    );
+    if (statements.length) await env.DB.batch(statements);
+    const changedAssignments = (
+      await env.DB.prepare(
+        `SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id
+         WHERE a.schedule_id=? AND a.${column}=? ORDER BY a.lane_order,a.starts_at,a.id`,
+      ).bind(scheduleId, resourceId).all<Record<string, unknown>>()
+    ).results;
+    const auditEventId = await writeAudit(request, {
+      action: "update",
+      entityType: "assignment_lane",
+      entityId: `${resourceKind}:${resourceId}`,
+      summary: `Reordenou GMs no ${resourceKind === "vehicle" ? "viatura" : "posto"}`,
+      before: { assignments: rows },
+      after: { assignments: changedAssignments },
+      undoable: true,
+    });
+    return Response.json({ ok: true, assignments: changedAssignments, auditEventId, message: "Posição dos GMs alinhada neste local." });
   }
   if (b.action === "copy_assignment_to_cell") {
     const sourceId=Number(b.sourceAssignmentId||0),scheduleId=Number(b.scheduleId||0),targetShift=String(b.shift||"");

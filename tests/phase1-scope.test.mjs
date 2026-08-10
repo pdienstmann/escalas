@@ -13,7 +13,7 @@ import { orderScheduleResources } from "../lib/schedule-sections.ts";
 import { assignmentOverlapsShift, coveredOperationalShifts, formatHoursDuration, fullPeriodWindow, fullPeriodShifts, splitExtensionWindow } from "../lib/shift-rules.ts";
 import { rankGuardSuggestions, describeReasons } from "../lib/suggest-gm.ts";
 import { groupRedeploymentAssignments, mergeScheduleAssignments } from "../lib/schedule-state.ts";
-import { orderAssignmentsInResourceCell } from "../lib/schedule-lanes.ts";
+import { orderAssignmentsInResourceCell, orderedResourceGuardIds } from "../lib/schedule-lanes.ts";
 import { suggestionPosition } from "../lib/suggestion-position.ts";
 import { compactRequestReference } from "../lib/request-reference.ts";
 
@@ -323,6 +323,16 @@ test("independent overtime stays outside regular alignment lanes", () => {
   assert.deepEqual(ordered.map((item) => item.id), [1, 2]);
 });
 
+test("saved resource lane order aligns regular GMs and ignores independent overtime", () => {
+  const rows = [
+    { id: 1, guard_id: 10, guard_name: "ALFA", role: "guard", work_kind: "shift", lane_order: 1 },
+    { id: 2, guard_id: 20, guard_name: "BRAVO", role: "guard", work_kind: "shift", lane_order: 0 },
+    { id: 3, guard_id: 30, guard_name: "HE", role: "guard", work_kind: "overtime_extension", lane_order: 0 },
+  ];
+  assert.deepEqual(orderedResourceGuardIds(rows, "post"), [20, 10]);
+  assert.deepEqual(orderAssignmentsInResourceCell(rows, rows, "post").map((item) => item.id), [2, 1, 3]);
+});
+
 test("every expanded schedule section ends with an inline resource action", () => {
   const source = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
   assert.match(source, /last && !isCollapsed/);
@@ -337,6 +347,9 @@ test("schedule editor distinguishes day and night without changing the PDF", () 
   assert.match(source, /period-day-head/);
   assert.match(source, /period-night-head period-night-start/);
   assert.match(source, /drop-cell period-\$\{s\.period\}/);
+  assert.match(source, /reorder_resource_assignments/);
+  assert.match(source, /beforeAssignmentId/);
+  assert.match(source, /overtime_extension/);
   assert.match(styles, /@media screen\{/);
   assert.match(styles, /td\.period-day:not\(\.furo\)/);
   assert.match(styles, /td\.period-night:not\(\.furo\)/);
@@ -467,7 +480,9 @@ test("general service adjustments expose BH-, BH+ and service swaps in schedule 
   const print = readFileSync(resolve("app/print-schedule.tsx"), "utf8");
   const nav = readFileSync(resolve("app/schedule-nav.tsx"), "utf8");
   const migration = readFileSync(resolve("drizzle/0014_service_adjustments.sql"), "utf8");
+  const history = readFileSync(resolve("app/api/history/route.ts"), "utf8");
   assert.match(api, /create_service_adjustment/);
+  assert.match(api, /reorder_resource_assignments/);
   assert.match(api, /cancel_service_adjustment/);
   assert.match(api, /time_bank_positive/);
   assert.match(api, /negative_late/);
@@ -495,4 +510,7 @@ test("general service adjustments expose BH-, BH+ and service swaps in schedule 
   assert.match(nav, /\/bancos/);
   assert.match(migration, /idx_service_adjustments_date/);
   assert.match(migration, /idx_service_adjustments_settlement_date/);
-});
+  const laneMigration = readFileSync(resolve("drizzle/0015_assignment_lane_order.sql"), "utf8");
+  assert.match(laneMigration, /lane_order/);
+  assert.match(history, /assignment_lane/);
+ });

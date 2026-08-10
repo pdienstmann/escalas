@@ -558,8 +558,27 @@ export function LiveSchedule() {
     resource: Rec,
     shift: string,
     sourceShift?: string,
+    targetAssignmentId?: number,
   ) {
     if (!data) return;
+    const independentOvertime = String(assignment.work_kind) === "overtime_extension";
+    const sameResource = kind === "post"
+      ? Number(assignment.post_id) === Number(resource.id)
+      : Number(assignment.vehicle_id) === Number(resource.id);
+    const sameShift = String(assignment.shift) === shift && (!sourceShift || sourceShift === shift);
+    const reorder = (expectedUpdatedAt?: unknown) => postAssignment({
+      action: "reorder_resource_assignments",
+      scheduleId: data.schedule.id,
+      resourceKind: kind,
+      resourceId: resource.id,
+      assignmentId: assignment.id,
+      beforeAssignmentId: targetAssignmentId || null,
+      expectedUpdatedAt: expectedUpdatedAt || null,
+    });
+    if (!independentOvertime && sameResource && sameShift) {
+      await reorder(assignment.updated_at);
+      return;
+    }
     const regularEnd = String(assignment.regular_ends_at || "");
     if (regularEnd && String(assignment.status) === "overtime") {
       const extensionMove = sourceShift
@@ -567,7 +586,7 @@ export function LiveSchedule() {
         : operationalShiftWindow(data.date, shift).start >= regularEnd;
       const originalPostId = assignment.post_id || null;
       const originalVehicleId = assignment.vehicle_id || null;
-      await postAssignment({
+      const moved = await postAssignment({
         action: "save_with_extension",
         id: assignment.id,
         expectedUpdatedAt: assignment.updated_at || null,
@@ -589,6 +608,7 @@ export function LiveSchedule() {
         isReassigned: 1,
         reassignmentNote: "Expediente e extensão separados durante o remanejamento",
       });
+      if (moved && !independentOvertime && !extensionMove) await reorder();
       return;
     }
     const t = times(data.date, shift),
@@ -598,7 +618,7 @@ export function LiveSchedule() {
       targetCrew=data.assignments.filter((a)=>Number(a.id)!==Number(assignment.id)&&(kind==="post"?Number(a.post_id)===Number(resource.id):Number(a.vehicle_id)===Number(resource.id))&&String(a.starts_at)<targetEnd&&String(a.ends_at)>targetStart),
       targetRoles=new Set(targetCrew.map(item=>String(item.role))),
       targetRole=kind==="post"?"guard":!targetRoles.has("driver")?"driver":!targetRoles.has("patrol")?"patrol":"third";
-    await postAssignment({
+    const moved = await postAssignment({
       id: assignment.id,
       expectedUpdatedAt: assignment.updated_at || null,
       scheduleId: data.schedule.id,
@@ -614,6 +634,7 @@ export function LiveSchedule() {
       isReassigned: 1,
       reassignmentNote: assignment.reassignment_note || "Remanejamento na escala",
     });
+    if (moved && !independentOvertime) await reorder();
   }
   async function saveRedeployment(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -889,7 +910,7 @@ export function LiveSchedule() {
         <section ref={scheduleWrapRef} className={`schedule-wrap ${data.date!==date?"is-switching":""}`}>
           {data.date!==date&&<div className="schedule-switching" role="status"><b>Abrindo escala de {formatScheduleDate(date)}</b><span>A escala anterior permanece bloqueada até a nova data terminar de carregar.</span></div>}
           <div className="drag-help">
-            Arraste um GM para outra célula ou clique para editar. Ao preencher um furo diurno, o GM é escalado no turno inteiro (07:00–19:00).
+            Arraste um GM para outra célula ou solte sobre outro quadradinho para escolher a posição. A ordem é alinhada somente dentro do mesmo posto/viatura; HE independente fica fora. Ao preencher um furo diurno, o GM é escalado no turno inteiro (07:00–19:00).
           </div>
           {showTable && (
           <table className="schedule" ref={tableRef}>
@@ -932,8 +953,9 @@ export function LiveSchedule() {
                     }))
                   }
                   shifts={visibleShifts}
-                  assignmentIndex={assignmentIndex}
-                  availableForRedeployment={data.availableForRedeployment}
+                   assignmentIndex={assignmentIndex}
+                   serviceAdjustments={data.serviceAdjustments || []}
+                   availableForRedeployment={data.availableForRedeployment}
                   redeploymentGroups={redeploymentGroups}
                   selectedId={Number(contextPick?.assignment?.id || pick?.assignment?.id || 0)}
                   recentAssignmentIds={recentAssignmentIds}
@@ -1371,6 +1393,7 @@ function Row({
   onToggleSection,
   shifts: visibleShifts,
   assignmentIndex,
+  serviceAdjustments,
   availableForRedeployment,
   redeploymentGroups,
   selectedId,
@@ -1401,6 +1424,7 @@ function Row({
   onToggleSection: () => void;
   shifts: typeof SHIFT_DEFS;
   assignmentIndex: Map<string, Rec[]>;
+  serviceAdjustments: Rec[];
   availableForRedeployment: Rec[];
   redeploymentGroups: RedeploymentGroup[];
   selectedId: number;
@@ -1414,7 +1438,7 @@ function Row({
   onCopy: (assignment:Rec) => void;
   onPaste: (kind:"post"|"vehicle",resource:Rec,shift:string) => void | Promise<void>;
   onQuickDelete: (assignment:Rec, shift?:string) => void;
-  onMove: (a: Rec, k: "post" | "vehicle", r: Rec, s: string, sourceShift?: string) => void;
+  onMove: (a: Rec, k: "post" | "vehicle", r: Rec, s: string, sourceShift?: string, targetAssignmentId?: number) => void;
   onMoveGroup: (a: Rec[], k: "post" | "vehicle", r: Rec) => void;
   onHolePick: (
     kind: "post" | "vehicle",
@@ -1433,6 +1457,7 @@ function Row({
     shift.id,
     orderAssignmentsInResourceCell(assignmentIndex.get(assignmentKey(kind,Number(resource.id),shift.id))||[],resourceAssignments,kind),
   ])),[assignmentIndex,kind,resource.id,resourceAssignments,visibleShifts]);
+  const [dropTargetId, setDropTargetId] = useState<number | null>(null);
   function showExtensionShortcut(assignment:Rec,shift:string){
     if(!isDayShift(shift))return false;
     if(String(assignment.work_kind)==="overtime_extension")return false;
@@ -1452,8 +1477,10 @@ function Row({
     const target=operationalShiftWindow(date,shift);
     return ![...knownAssignments,...availableForRedeployment].some(item=>Number(item.guard_id)===Number(copiedAssignment.guard_id)&&String(item.starts_at)<target.end&&String(item.ends_at)>target.start);
   }
-  function drop(e: DragEvent, shift: string) {
+  function drop(e: DragEvent, shift: string, targetAssignmentId?: number) {
     e.preventDefault();
+    e.stopPropagation();
+    setDropTargetId(null);
     const groupIds = e.dataTransfer
       .getData("text/assignment-group")
       .split(",")
@@ -1474,12 +1501,12 @@ function Row({
     for (const list of assignmentIndex.values()) {
       const assignment = list.find((a) => Number(a.id) === id);
       if (assignment) {
-        void onMove(assignment, kind, resource, shift, sourceShift);
+         void onMove(assignment, kind, resource, shift, sourceShift, targetAssignmentId);
         return;
       }
     }
     const available = availableForRedeployment.find((a) => Number(a.id) === id);
-    if (available) void onMove(available, kind, resource, shift, sourceShift);
+     if (available) void onMove(available, kind, resource, shift, sourceShift, targetAssignmentId);
   }
   return (
     <Fragment>
@@ -1553,10 +1580,10 @@ function Row({
               key={s.id}
               className={`${missingRoles.length ? "furo" : ""} ${pasteAllowed?"paste-target":""} drop-cell period-${s.period} ${s.id==="4"?"period-night-start":""}`}
               onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => drop(e, s.id)}
+               onDrop={(e) => drop(e, s.id)}
             >
-              {list.map((a) => {const visualStatus=statusInShift(a,date,s.id),adjustmentBadge=assignmentAdjustmentBadge(a,data.serviceAdjustments||[],date),canExtendAfter=showExtensionShortcut(a,s.id),canExtendBefore=showEarlyExtensionShortcut(a,s.id);return (<Fragment key={String(a.id)}>
-                <div className={`live-person-card ${canExtendAfter||canExtendBefore?"has-he-action":""}`}>
+              {list.map((a) => {const visualStatus=statusInShift(a,date,s.id),adjustmentBadge=assignmentAdjustmentBadge(a,serviceAdjustments,date),canExtendAfter=showExtensionShortcut(a,s.id),canExtendBefore=showEarlyExtensionShortcut(a,s.id);return (<Fragment key={String(a.id)}>
+                <div className={`live-person-card ${canExtendAfter||canExtendBefore?"has-he-action":""} ${dropTargetId===Number(a.id)?"drop-target":""}`} onDragEnter={()=>{if(String(a.work_kind)!=="overtime_extension")setDropTargetId(Number(a.id))}} onDragLeave={()=>setDropTargetId(current=>current===Number(a.id)?null:current)} onDragOver={(event)=>{event.preventDefault();event.stopPropagation()}} onDrop={(event)=>{drop(event,s.id,String(a.work_kind)==="overtime_extension"?undefined:Number(a.id))}}>
                 <button
                   type="button"
                   className="live-person-remove"

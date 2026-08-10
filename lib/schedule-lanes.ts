@@ -12,12 +12,12 @@ function roleRank(role: unknown) {
 }
 
 /**
- * Keeps regular GMs in one stable visual lane across the four shift columns of
- * the same resource. Independent overtime is deliberately kept outside those
- * lanes because it may belong to a different operational block.
+ * Returns one stable lane per GM for a resource.  A lane order saved on any
+ * regular assignment wins; legacy rows without it fall back to role/name so
+ * the first render is deterministic.  Independent HE blocks are deliberately
+ * ignored because they can belong to another post or viatura.
  */
-export function orderAssignmentsInResourceCell(
-  cellAssignments: LaneAssignment[],
+export function orderedResourceGuardIds(
   resourceAssignments: LaneAssignment[],
   kind: "post" | "vehicle",
 ) {
@@ -29,21 +29,44 @@ export function orderAssignmentsInResourceCell(
     current.push(assignment);
     regularByGuard.set(guardId, current);
   }
+  return [...regularByGuard.entries()]
+    .map(([guardId, assignments]) => {
+      const savedOrders = assignments
+        .map((assignment) => Number(assignment.lane_order))
+        .filter((value) => Number.isFinite(value));
+      const role = kind === "vehicle"
+        ? Math.min(...assignments.map((assignment) => roleRank(assignment.role)))
+        : 0;
+      return {
+        guardId,
+        laneOrder: savedOrders.length ? Math.min(...savedOrders) : null,
+        role,
+        name: String(assignments[0]?.guard_name || ""),
+      };
+    })
+    .sort((a, b) => {
+      if (a.laneOrder !== null || b.laneOrder !== null) {
+        if (a.laneOrder === null) return 1;
+        if (b.laneOrder === null) return -1;
+        if (a.laneOrder !== b.laneOrder) return a.laneOrder - b.laneOrder;
+      }
+      return a.role - b.role || a.name.localeCompare(b.name, "pt-BR") || a.guardId - b.guardId;
+    })
+    .map((item) => item.guardId);
+}
 
+/**
+ * Keeps regular GMs in one stable visual lane across the four shift columns of
+ * the same resource. Independent overtime is deliberately kept outside those
+ * lanes because it may belong to a different operational block.
+ */
+export function orderAssignmentsInResourceCell(
+  cellAssignments: LaneAssignment[],
+  resourceAssignments: LaneAssignment[],
+  kind: "post" | "vehicle",
+) {
   const laneOrder = new Map(
-    [...regularByGuard.entries()]
-      .sort(([guardA, assignmentsA], [guardB, assignmentsB]) => {
-        const roleA = kind === "vehicle"
-          ? Math.min(...assignmentsA.map((assignment) => roleRank(assignment.role)))
-          : 0;
-        const roleB = kind === "vehicle"
-          ? Math.min(...assignmentsB.map((assignment) => roleRank(assignment.role)))
-          : 0;
-        const nameA = String(assignmentsA[0]?.guard_name || "");
-        const nameB = String(assignmentsB[0]?.guard_name || "");
-        return roleA - roleB || nameA.localeCompare(nameB, "pt-BR") || guardA - guardB;
-      })
-      .map(([guardId], index) => [guardId, index]),
+    orderedResourceGuardIds(resourceAssignments, kind).map((guardId, index) => [guardId, index]),
   );
 
   return [...cellAssignments].sort((a, b) => {

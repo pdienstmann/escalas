@@ -91,6 +91,11 @@ export async function POST(request: Request) {
     else return Response.json({error:"Não foi possível reconstruir este lembrete."},{status:409});
   } else if (type === "section" && before && Array.isArray(before.orders)) {
     for (const row of before.orders as Array<{id:number;sort_order:number}>) statements.push(env.DB.prepare("UPDATE posts SET sort_order=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(row.sort_order,row.id));
+  } else if (type === "assignment_lane" && before && Array.isArray(before.assignments)) {
+    for (const row of before.assignments as Row[]) {
+      statements.push(env.DB.prepare("UPDATE assignments SET lane_order=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(row.lane_order ?? null, row.id));
+      restoredAssignments.push(row);
+    }
   } else if(type==="vehicle_outage") {
     if(action==="create")statements.push(env.DB.prepare("DELETE FROM vehicle_outages WHERE id=?").bind(id));
     else if(action==="delete"&&before)statements.push(env.DB.prepare("INSERT INTO vehicle_outages (id,vehicle_id,starts_on,ends_on,reason,active) VALUES (?,?,?,?,?,?)").bind(id,before.vehicle_id,before.starts_on,before.ends_on,before.reason,before.active));
