@@ -159,6 +159,16 @@ test("schedule rows are memoized so shell feedback does not repaint the full mat
   assert.match(schedule, /sameNumberList\(previous\.recentAssignmentIds, next\.recentAssignmentIds\)/);
 });
 
+test("the operational toolbar can jump directly to a visible section", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const usability = readFileSync(resolve("app/usability.css"), "utf8");
+  assert.match(schedule, /className="section-jump"/);
+  assert.match(schedule, /function jumpToSection\(section: string\)/);
+  assert.match(schedule, /wrapper\.scrollBy\(\{ top:/);
+  assert.match(schedule, /onSectionRef=\{/);
+  assert.match(usability, /\.section-jump select/);
+});
+
 test("the inline X removes only the selected schedule segment", () => {
   const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
   const api = readFileSync(resolve("app/api/schedule/route.ts"), "utf8");

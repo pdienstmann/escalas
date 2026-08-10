@@ -127,12 +127,14 @@ export function LiveSchedule() {
     [recentAssignmentIds,setRecentAssignmentIds]=useState<number[]>([]),
     [collapsed, setCollapsed] = useState<Record<string, boolean>>({}),
     [saving, setSaving] = useState(false),
-    [loadError, setLoadError] = useState("");
+    [loadError, setLoadError] = useState(""),
+    [sectionJump, setSectionJump] = useState("");
   const loadSequence=useRef(0);
   const loadController=useRef<AbortController|null>(null);
   const savingRef=useRef(false);
   const tableRef = useRef<HTMLTableElement | null>(null);
   const scheduleWrapRef = useRef<HTMLElement | null>(null);
+  const sectionRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
   const load = useCallback(async () => {
     const sequence=++loadSequence.current;
     loadController.current?.abort();
@@ -254,6 +256,10 @@ export function LiveSchedule() {
       return true;
     });
   }, [assignmentIndex, data, deferredQuery, view]);
+  const sectionOptions = useMemo(
+    () => [...new Set(resources.map((item) => item.section))],
+    [resources],
+  );
   async function postAssignment(body: Record<string, unknown>) {
     if (savingRef.current) return false;
     savingRef.current=true;
@@ -854,6 +860,18 @@ export function LiveSchedule() {
       tableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   }
+  function jumpToSection(section: string) {
+    setSectionJump(section);
+    if (!section) return;
+    requestAnimationFrame(() => {
+      const row = sectionRefs.current.get(section);
+      const wrapper = scheduleWrapRef.current;
+      if (!row || !wrapper) return;
+      const rowBox = row.getBoundingClientRect();
+      const wrapperBox = wrapper.getBoundingClientRect();
+      wrapper.scrollBy({ top: rowBox.top - wrapperBox.top - 42, behavior: "smooth" });
+    });
+  }
   const showRedeploy = view === "all" || view === "redeploy";
   const showTable = view !== "redeploy";
 
@@ -901,6 +919,17 @@ export function LiveSchedule() {
           <button type="button" className={view==="night"?"active":""} onClick={()=>jump("night")}>Noturno</button>
           <button type="button" className={view==="holes"||view==="redeploy"?"active":""} onClick={()=>jump("pending")}>Pendências</button>
         </div>
+        <label className="section-jump">
+          <span>Ir para área</span>
+          <select
+            aria-label="Ir diretamente para uma área da escala"
+            value={sectionJump}
+            onChange={(event) => jumpToSection(event.target.value)}
+          >
+            <option value="">Selecionar...</option>
+            {sectionOptions.map((section) => <option key={section} value={section}>{section}</option>)}
+          </select>
+        </label>
         <div className="schedule-add-menu">
           <button type="button" className="schedule-add-trigger" aria-expanded={addMenuOpen} onClick={()=>setAddMenuOpen(value=>!value)}>＋ Adicionar</button>
           {addMenuOpen&&<div role="menu"><button type="button" onClick={()=>{setAddMenuOpen(false);startManualAdd()}}>👤 Escalar GM</button><button type="button" onClick={()=>{setAddMenuOpen(false);openCreate("vehicle")}}>🚓 Viatura</button><button type="button" onClick={()=>{setAddMenuOpen(false);openCreate("post")}}>📍 Posto</button><button type="button" onClick={()=>{setAddMenuOpen(false);openCreate("section")}}>▦ Seção</button></div>}
@@ -992,6 +1021,10 @@ export function LiveSchedule() {
                    resourceAssignments={resourceAssignmentIndex.get(resourceAssignmentKey(kind, Number(r.id))) || []}
                    allScheduleAssignments={allScheduleAssignments}
                    assignmentById={assignmentById}
+                   onSectionRef={(section, element) => {
+                     if (element) sectionRefs.current.set(section, element);
+                     else sectionRefs.current.delete(section);
+                   }}
                    serviceAdjustments={data.serviceAdjustments || []}
                    availableForRedeployment={data.availableForRedeployment}
                   redeploymentGroups={redeploymentGroups}
@@ -1434,6 +1467,7 @@ type RowProps = {
   resourceAssignments: Rec[];
   allScheduleAssignments: Rec[];
   assignmentById: Map<number, Rec>;
+  onSectionRef: (section: string, element: HTMLTableRowElement | null) => void;
   serviceAdjustments: Rec[];
   availableForRedeployment: Rec[];
   redeploymentGroups: RedeploymentGroup[];
@@ -1475,6 +1509,7 @@ function Row({
   resourceAssignments,
   allScheduleAssignments,
   assignmentById,
+  onSectionRef,
   serviceAdjustments,
   availableForRedeployment,
   redeploymentGroups,
@@ -1554,6 +1589,7 @@ function Row({
     <Fragment>
       {first && (
         <tr
+          ref={(element) => onSectionRef(section, element)}
           className={`group ${section === "SEDE DA GM" ? "headquarters" : ""}`}
         >
           <td colSpan={1 + visibleShifts.length}>
