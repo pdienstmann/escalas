@@ -125,6 +125,7 @@ export function LiveSchedule() {
     [message, setMessage] = useState(""),
     [query, setQuery] = useState(()=>readUiSetting("query")||""),
     [view, setView] = useState<ViewFilter>(()=>{const value=readUiSetting("view");return value&&["all","day","night","holes","redeploy"].includes(value)?value as ViewFilter:"all"}),
+    [groupFilter, setGroupFilter] = useState(() => readUiSetting("group") || "all"),
     [movementEdit, setMovementEdit] = useState<MovementEdit | null>(null),
     [swapPick,setSwapPick]=useState<SwapPick|null>(null),
     [copiedAssignment,setCopiedAssignment]=useState<Rec|null>(null),
@@ -172,7 +173,7 @@ export function LiveSchedule() {
     void load();
   }, [load]);
   useEffect(()=>{if(data)writeScheduleCache(data)},[data]);
-  useEffect(()=>{writeUiSetting("query",query);writeUiSetting("view",view)},[query,view]);
+  useEffect(()=>{writeUiSetting("query",query);writeUiSetting("view",view);writeUiSetting("group",groupFilter)},[query,view,groupFilter]);
   useEffect(()=>{
     if(typeof window==="undefined"||data?.date!==date)return;
     const key=`gmnh:scroll:${date}`,saved=Number(readUiSetting(key)||0);
@@ -261,11 +262,26 @@ export function LiveSchedule() {
     [data?.availableForRedeployment],
   );
   const deferredQuery=useDeferredValue(query);
+  const operationalGroupOptions = useMemo(() => {
+    if (!data) return [];
+    const counts = new Map<string, number>();
+    for (const group of data.operationalGroups || []) {
+      const name = String(group.name || "").trim();
+      if (name) counts.set(name, 0);
+    }
+    for (const item of orderScheduleResources(data.vehicles, data.posts, data.sections)) {
+      const name = resourceOperationalMeta(item.kind, item.r).group;
+      if (name) counts.set(name, (counts.get(name) || 0) + 1);
+    }
+    const sortOrder = new Map((data.operationalGroups || []).map((group) => [String(group.name), Number(group.sort_order || 99)]));
+    return [...counts.entries()].sort((left, right) => (sortOrder.get(left[0]) || 99) - (sortOrder.get(right[0]) || 99) || left[0].localeCompare(right[0], "pt-BR"));
+  }, [data, resourceOperationalMeta]);
   const resources = useMemo(() => {
     if (!data) return [];
     const q = deferredQuery.toLowerCase().trim();
     const filtered = orderScheduleResources(data.vehicles, data.posts, data.sections).filter((x) => {
       const meta = resourceOperationalMeta(x.kind, x.r);
+      if (groupFilter !== "all" && meta.group !== groupFilter) return false;
       const text = `${x.r.name || ""} ${x.r.prefix || ""} ${x.r.zone || ""} ${x.r.group_name || ""} ${x.section} ${meta.group || ""} ${meta.team || ""}`
         .toLowerCase();
       if (q && !text.includes(q)) {
@@ -291,7 +307,7 @@ export function LiveSchedule() {
       operationalTeamOrder({ ...left.r, name: resourceOperationalMeta(left.kind, left.r).team }) - operationalTeamOrder({ ...right.r, name: resourceOperationalMeta(right.kind, right.r).team }) ||
       String(left.r.prefix || left.r.name || "").localeCompare(String(right.r.prefix || right.r.name || ""), "pt-BR"),
     );
-  }, [assignmentIndex, data, deferredQuery, resourceOperationalMeta, view]);
+  }, [assignmentIndex, data, deferredQuery, groupFilter, resourceOperationalMeta, view]);
   const sectionOptions = useMemo(
     () => [...new Set(resources.map((item) => item.section))],
     [resources],
@@ -1025,6 +1041,13 @@ export function LiveSchedule() {
           >
             <option value="">Selecionar...</option>
             {sectionOptions.map((section) => <option key={section} value={section}>{section}</option>)}
+          </select>
+        </label>
+        <label className="section-jump group-filter">
+          <span>Grupamento</span>
+          <select aria-label="Filtrar por grupamento operacional" value={groupFilter} onChange={(event) => setGroupFilter(event.target.value)}>
+            <option value="all">Todos</option>
+            {operationalGroupOptions.map(([name, count]) => <option key={name} value={name}>{name} · {count}</option>)}
           </select>
         </label>
         <div className="schedule-add-menu">

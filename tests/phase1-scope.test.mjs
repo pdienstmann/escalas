@@ -99,6 +99,7 @@ test("operational groups are editable and can classify existing resources", () =
   assert.match(admin, /DELETE FROM operational_group_members/);
   assert.match(catalog, /Grupamentos e equipes/);
   assert.match(catalog, /Vincular recurso/);
+  assert.match(readFileSync(resolve("app/live-schedule.tsx"), "utf8"), /Filtrar por grupamento operacional/);
 });
 
 test("redeployment visibility rule keeps crew when vehicle leaves active set", () => {
