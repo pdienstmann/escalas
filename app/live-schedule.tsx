@@ -133,6 +133,8 @@ export function LiveSchedule() {
   const loadSequence=useRef(0);
   const loadController=useRef<AbortController|null>(null);
   const savingRef=useRef(false);
+  const currentDateRef=useRef(date);
+  currentDateRef.current=date;
   const tableRef = useRef<HTMLTableElement | null>(null);
   const scheduleWrapRef = useRef<HTMLElement | null>(null);
   const sectionRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
@@ -272,6 +274,7 @@ export function LiveSchedule() {
   );
   async function postAssignment(body: Record<string, unknown>) {
     if (savingRef.current) return false;
+    const mutationDate=data?.date||date;
     savingRef.current=true;
     setSaving(true);
     try {
@@ -281,6 +284,7 @@ export function LiveSchedule() {
         body: JSON.stringify(body),
       });
       const j = await r.json();
+      if(currentDateRef.current!==mutationDate)return r.ok;
       setMessage(r.ok ? (j.message || "Alteração salva e já exibida na escala.") : j.error);
       if (!r.ok) {
         if (r.status === 409 && j.conflict) {

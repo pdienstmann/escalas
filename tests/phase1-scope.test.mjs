@@ -519,6 +519,9 @@ test("schedule edits reject stale versions and refresh the visible scale", () =>
   assert.match(schedule, /expectedUpdatedAts/);
   assert.match(schedule, /r\.status === 409 && j\.conflict/);
   assert.match(schedule, /await load\(\)/);
+  assert.match(schedule, /const currentDateRef=useRef\(date\)/);
+  assert.match(schedule, /const mutationDate=data\?\.date\|\|date/);
+  assert.match(schedule, /currentDateRef\.current!==mutationDate/);
 });
 
 test("operation redeployment preserves and restores every source assignment", () => {
