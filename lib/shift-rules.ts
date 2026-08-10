@@ -61,13 +61,22 @@ export function assignmentOverlapsShift(
   date: string,
   shift: string,
 ) {
-  if (String(assignment.shift) === shift) return true;
   const start = Date.parse(String(assignment.starts_at || ""));
   const end = Date.parse(String(assignment.ends_at || ""));
   const window = operationalShiftWindow(date, shift);
   const windowStart = Date.parse(window.start);
   const windowEnd = Date.parse(window.end);
-  return [start, end, windowStart, windowEnd].every(Number.isFinite) && start < windowEnd && end > windowStart;
+  if ([start, end, windowStart, windowEnd].every(Number.isFinite)) {
+    if (start < windowEnd && end > windowStart) return true;
+    // Older schedules stored the 1º turno as 01:00–07:00 on the
+    // operational date instead of the following calendar date. Keep those
+    // records visible, but do not let the explicit shift force a zero-length
+    // card into an adjacent column after an hour edit.
+    return shift === "1" &&
+      String(assignment.starts_at).startsWith(`${date}T01:`) &&
+      String(assignment.ends_at).startsWith(`${date}T07:`);
+  }
+  return String(assignment.shift) === shift;
 }
 
 export function coveredOperationalShifts(

@@ -117,6 +117,12 @@ test("cross-turn assignment appears in every operational column it covers", () =
   assert.equal(assignmentOverlapsShift(assignment, "2026-08-12", "1"), false);
 });
 
+test("shortened 3rd-turn assignment is not rendered as a 13h-13h card in the 2nd turn", () => {
+  const assignment = { shift: "2", starts_at: "2026-08-12T13:00", ends_at: "2026-08-12T16:00" };
+  assert.equal(assignmentOverlapsShift(assignment, "2026-08-12", "2"), false);
+  assert.equal(assignmentOverlapsShift(assignment, "2026-08-12", "3"), true);
+});
+
 test("weekly overtime extension is also visible in the night period", () => {
   const assignment = { shift: "W", starts_at: "2026-08-12T08:00", ends_at: "2026-08-12T23:00" };
   assert.deepEqual(coveredOperationalShifts(assignment, "2026-08-12"), ["2", "3", "4"]);
