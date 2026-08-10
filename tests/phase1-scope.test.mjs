@@ -212,6 +212,19 @@ test("completed cells expose a quick available-GM picker before the advanced edi
   assert.match(usability, /\.quick-add-picker/);
 });
 
+test("holes use the same inline picker and redeploy available GMs without duplicating their pool rows", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const api = readFileSync(resolve("app/api/schedule/route.ts"), "utf8");
+  const usability = readFileSync(resolve("app/usability.css"), "utf8");
+  assert.match(schedule, /quickPicker\(true\)/);
+  assert.match(schedule, /className="quick-add-smart"/);
+  assert.match(schedule, /action: "redeploy_group"/);
+  assert.match(schedule, /poolGroup\.map\(\(assignment\) => Number\(assignment\.id\)\)/);
+  assert.match(schedule, /status: hasOtherBlock \? "overtime" : "normal"/);
+  assert.match(api, /if \(b\.action === "redeploy_group"\)/);
+  assert.match(usability, /\.quick-add-smart/);
+});
+
 test("the inline X removes only the selected schedule segment", () => {
   const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
   const api = readFileSync(resolve("app/api/schedule/route.ts"), "utf8");

@@ -575,10 +575,33 @@ export function LiveSchedule() {
       ? "guard"
       : !regularCrew.some((assignment) => String(assignment.role) === "driver")
         ? "driver"
-        : !regularCrew.some((assignment) => String(assignment.role) === "patrol")
-          ? "patrol"
-          : "third";
+          : !regularCrew.some((assignment) => String(assignment.role) === "patrol")
+            ? "patrol"
+            : "third";
     const t = fullPeriodWindow(data.date, shift);
+    const poolGroup = data.availableForRedeployment.filter((assignment) =>
+      Number(assignment.guard_id) === Number(guardId) &&
+      String(assignment.starts_at) < t.end &&
+      String(assignment.ends_at) > t.start,
+    );
+    if (poolGroup.length) {
+      await postAssignment({
+        action: "redeploy_group",
+        assignmentIds: poolGroup.map((assignment) => Number(assignment.id)),
+        expectedUpdatedAts: poolGroup.map((assignment) => ({ id: assignment.id, updatedAt: assignment.updated_at })),
+        scheduleId: data.schedule.id,
+        postId: kind === "post" ? Number(resource.id) : null,
+        vehicleId: kind === "vehicle" ? Number(resource.id) : null,
+        role,
+        reassignmentNote: "Remanejamento rápido a partir da fila à disposição",
+      });
+      return;
+    }
+    const hasOtherBlock = [...data.assignments, ...data.availableForRedeployment].some((assignment) =>
+      Number(assignment.guard_id) === Number(guardId) &&
+      String(assignment.starts_at) !== t.start &&
+      String(assignment.ends_at) !== t.end,
+    );
     await postAssignment({
       fillFullPeriod: true,
       scheduleId: data.schedule.id,
@@ -589,7 +612,7 @@ export function LiveSchedule() {
       role,
       startsAt: t.start,
       endsAt: t.end,
-      status: "normal",
+      status: hasOtherBlock ? "overtime" : "normal",
       isReassigned: 0,
       requestRef: null,
     });
@@ -1745,6 +1768,18 @@ function Row({
           const missingRoles = kind === "vehicle"
             ? ["driver", "patrol"].filter((role) => !list.some((assignment) => String(assignment.role) === role && !isOvertimeExtensionCell(assignment,date,s.id)))
             : list.length ? [] : ["guard"];
+          const toggleQuickAdd = () => { setAddShift(current => current === s.id ? null : s.id); setAddQuery(""); };
+          const quickPicker = (withSmartSuggestion = false) => addShift === s.id && <div className="quick-add-picker" role="group" aria-label={`Adicionar GM em ${String(kind === "vehicle" ? resource.prefix : resource.name)}`}>
+            <input value={addQuery} onChange={(event) => setAddQuery(event.target.value)} placeholder="Buscar nome ou matrícula..." aria-label="Buscar GM disponível" />
+            <div className="quick-add-results">
+              {quickAddCandidates.map((guard) => <button type="button" key={String(guard.id)} onClick={() => { setAddShift(null); setAddQuery(""); void onQuickAdd(Number(guard.id), kind, resource, s.id); }}>
+                <span><b>{guard.name}</b><small>{guard.registration || "Sem matrícula"} · {guard.platoon || "Disponível"}</small></span><strong>Adicionar</strong>
+              </button>)}
+              {!quickAddCandidates.length && <small>Nenhum GM livre neste horário. Use “Mais opções” para consultar a lista completa.</small>}
+            </div>
+            {withSmartSuggestion && <button type="button" className="quick-add-smart" onClick={(event) => { setAddShift(null); onHolePick(kind, resource, s.id, event); }}>Sugestão inteligente...</button>}
+            <button type="button" className="quick-add-advanced" onClick={() => { setAddShift(null); onAddToResource(kind, resource, s.id); }}>Mais opções...</button>
+          </div>;
           return (
             <td
               key={s.id}
@@ -1835,35 +1870,31 @@ function Row({
               </Fragment>)})}
               {copiedAssignment&&pasteAllowed&&<button type="button" className="cell-paste-assignment" onClick={()=>onPaste(kind,resource,s.id)}><span aria-hidden="true">▣</span> Colar aqui</button>}
               {missingRoles.length > 0 && (
-                <button
-                  className="live-hole"
-                  onClick={(e) => onHolePick(kind, resource, s.id, e)}
-                >
-                  <span>FURO</span>＋ Selecionar{" "}
-                  {kind === "vehicle"
-                    ? missingRoles[0] === "driver" ? "motorista" : "patrulheiro"
-                    : "GM"}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="live-hole"
+                    aria-expanded={addShift === s.id}
+                    onClick={toggleQuickAdd}
+                  >
+                    <span>FURO</span>＋ Selecionar{" "}
+                    {kind === "vehicle"
+                      ? missingRoles[0] === "driver" ? "motorista" : "patrulheiro"
+                      : "GM"}
+                  </button>
+                  {quickPicker(true)}
+                </>
               )}
               {missingRoles.length === 0 && (
                 <>
                 <button
                   type="button"
                   className="cell-add-member"
-                  onClick={() => { setAddShift(current => current === s.id ? null : s.id); setAddQuery(""); }}
+                  onClick={toggleQuickAdd}
                 >
                   ＋ GM
                 </button>
-                {addShift === s.id && <div className="quick-add-picker" role="group" aria-label={`Adicionar GM em ${String(kind === "vehicle" ? resource.prefix : resource.name)}`}>
-                  <input value={addQuery} onChange={(event) => setAddQuery(event.target.value)} placeholder="Buscar nome ou matrícula..." aria-label="Buscar GM disponível" />
-                  <div className="quick-add-results">
-                    {quickAddCandidates.map((guard) => <button type="button" key={String(guard.id)} onClick={() => { setAddShift(null); setAddQuery(""); void onQuickAdd(Number(guard.id), kind, resource, s.id); }}>
-                      <span><b>{guard.name}</b><small>{guard.registration || "Sem matrícula"} · {guard.platoon || "Disponível"}</small></span><strong>Adicionar</strong>
-                    </button>)}
-                    {!quickAddCandidates.length && <small>Nenhum GM livre neste horário. Use “Mais opções” para consultar a lista completa.</small>}
-                  </div>
-                  <button type="button" className="quick-add-advanced" onClick={() => { setAddShift(null); onAddToResource(kind, resource, s.id); }}>Mais opções...</button>
-                </div>}
+                {quickPicker()}
                 </>
               )}
             </td>
