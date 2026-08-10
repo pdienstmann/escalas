@@ -497,9 +497,10 @@ export function GestaoClient({
           </Form>
           <FleetAvailability
             date={date}
-            vehicles={data.vehicles}
-            outages={data.vehicleOutages}
-            onSubmit={(e) => submit(e, "vehicle_outage")}
+          vehicles={data.vehicles}
+          outages={data.vehicleOutages}
+          saving={saving}
+          onSubmit={(e) => submit(e, "vehicle_outage")}
             onDelete={(id) => {const outage=data.vehicleOutages.find(item=>Number(item.id)===Number(id));if(outage){setReturningOutage(outage);setReturnPreview(null)}}}
           />
         </div>
@@ -1094,11 +1095,21 @@ function serviceAdjustmentRange(item: Item) {
   if (!item.counterpart_service_date) return `${serviceAdjustmentLabel(String(item.subtype))} · ${first}`;
   return `${serviceAdjustmentLabel(String(item.subtype))} · ${first} ⇄ ${String(item.counterpart_service_date)} · ${String(item.counterpart_starts_at || "").slice(11,16)}–${String(item.counterpart_ends_at || "").slice(11,16)}`;
 }
-function FleetAvailability({date,vehicles,outages,onSubmit,onDelete}:{date:string;vehicles:Item[];outages:Item[];onSubmit:(e:FormEvent<HTMLFormElement>)=>void;onDelete:(id:Item["id"])=>void}){
-  const activeOutages=outages.filter(item=>String(item.starts_on)<=date&&(!item.ends_on||String(item.ends_on)>=date));
+function activeVehicleOutages(outages:Item[],date:string){
+  const byVehicle=new Map<number,Item>();
+  for(const item of outages){
+    const vehicleId=Number(item.vehicle_id);
+    if(!Number.isFinite(vehicleId)||Number(item.active??1)===0||String(item.starts_on)>date||(item.ends_on&&String(item.ends_on)<date))continue;
+    const previous=byVehicle.get(vehicleId);
+    if(!previous||String(item.starts_on)>String(previous.starts_on)||(String(item.starts_on)===String(previous.starts_on)&&Number(item.id)>Number(previous.id)))byVehicle.set(vehicleId,item);
+  }
+  return [...byVehicle.values()].sort((a,b)=>String(a.prefix||"").localeCompare(String(b.prefix||""),"pt-BR",{numeric:true}));
+}
+function FleetAvailability({date,vehicles,outages,saving,onSubmit,onDelete}:{date:string;vehicles:Item[];outages:Item[];saving:boolean;onSubmit:(e:FormEvent<HTMLFormElement>)=>void;onDelete:(id:Item["id"])=>void}){
+  const activeOutages=activeVehicleOutages(outages,date);
   const unavailableIds=new Set(activeOutages.map(item=>Number(item.vehicle_id)));
   const selectable=vehicles.filter(vehicle=>!unavailableIds.has(Number(vehicle.id)));
-  return <section className="fleet-status"><header><div><small>DISPONIBILIDADE EM TEMPO REAL</small><h3>Viaturas em funcionamento / FA</h3></div><span>{unavailableIds.size} em FA nesta data</span></header><div className="fleet-layout"><form className="data-form" onSubmit={onSubmit}><select name="vehicleId" required defaultValue=""><option value="">Selecionar viatura disponível</option>{selectable.map(v=><option key={String(v.id)} value={String(v.id)}>{String(v.prefix)} · {String(v.type)}</option>)}</select><label>Início do FA — vazio significa hoje<input name="startsOn" type="date"/></label><label>Retorno previsto — deixe vazio para indefinido<input name="endsOn" type="date"/></label><input name="reason" placeholder="Motivo / observação"/><button className="save">Registrar em FA</button></form><div className="fleet-list">{activeOutages.length?activeOutages.map(o=><article key={String(o.id)}><span className="fleet-icon">{vehicleIconLabel(String(o.type))}</span><div><b>{String(o.prefix)}</b><small>FA desde {formatDate(o.starts_on)}{o.ends_on?` até ${formatDate(o.ends_on)}`:" · prazo indeterminado"}</small>{o.reason&&<em>{String(o.reason)}</em>}</div><button onClick={()=>onDelete(o.id)}>Registrar retorno</button></article>):<p>Todas as viaturas estão disponíveis.</p>}</div></div></section>
+  return <section className="fleet-status" aria-busy={saving}><header><div><small>DISPONIBILIDADE EM TEMPO REAL</small><h3>Viaturas em funcionamento / FA</h3></div><span>{unavailableIds.size} em FA nesta data</span></header><div className="fleet-layout"><form className="data-form" onSubmit={onSubmit}><select name="vehicleId" required defaultValue="" disabled={saving}><option value="">Selecionar viatura disponível</option>{selectable.map(v=><option key={String(v.id)} value={String(v.id)}>{String(v.prefix)} · {String(v.type)}</option>)}</select><label>Início do FA — vazio significa hoje<input name="startsOn" type="date" disabled={saving}/></label><label>Retorno previsto — deixe vazio para indefinido<input name="endsOn" type="date" disabled={saving}/></label><input name="reason" placeholder="Motivo / observação" disabled={saving}/><button className="save" disabled={saving}>{saving?"Salvando…":"Registrar em FA"}</button></form><div className="fleet-list">{activeOutages.length?activeOutages.map(o=><article key={String(o.id)}><span className="fleet-icon">{vehicleIconLabel(String(o.type))}</span><div><b>{String(o.prefix)}</b><small>FA desde {formatDate(o.starts_on)}{o.ends_on?` até ${formatDate(o.ends_on)}`:" · prazo indeterminado"}</small>{o.reason&&<em>{String(o.reason)}</em>}</div><button disabled={saving} onClick={()=>onDelete(o.id)}>Registrar retorno</button></article>):<p>Todas as viaturas estão disponíveis.</p>}</div></div></section>
 }
 const vehicleIconLabel=(type:string)=>type==="moto"?"🏍️":type==="pickup"?"🛻":type==="van"?"🚐":type==="suv"?"🚙":"🚓";
 function VehicleReturnPending({items,saving,onDecision}:{items:Item[];saving:boolean;onDecision:(id:Item["id"],decision:"keep"|"show"|"restore")=>void}){
@@ -1115,12 +1126,13 @@ function VehicleReturnDialog({outage,preview,saving,onClose,onPreview,onConfirm}
 
 function FleetPanorama({date,vehicles,outages,crews,saving,onEdit,onQuickOutage,onClearOutage}:{date:string;vehicles:Item[];outages:Item[];crews:Item[];saving:boolean;onEdit:(item:Item)=>void;onQuickOutage:(item:Item)=>void;onClearOutage:(id:Item["id"])=>void}){
   const[query,setQuery]=useState(""),[filter,setFilter]=useState<"all"|"available"|"service"|"outage">("all");
+  const activeOutages=useMemo(()=>activeVehicleOutages(outages,date),[date,outages]);
   const rows=useMemo(()=>vehicles.map(vehicle=>{
-    const outage=outages.find(item=>Number(item.vehicle_id)===Number(vehicle.id)&&String(item.starts_on)<=date&&(!item.ends_on||String(item.ends_on)>=date));
+    const outage=activeOutages.find(item=>Number(item.vehicle_id)===Number(vehicle.id));
     const crew=crews.find(item=>Number(item.vehicle_id)===Number(vehicle.id));
     const status=outage?"outage":crew?"service":"available";
     return{vehicle,outage,crew,status};
-  }),[date,vehicles,outages,crews]);
+  }),[activeOutages,vehicles,crews]);
   const visible=rows.filter(row=>{
     const text=`${row.vehicle.prefix||""} ${row.vehicle.zone||""} ${row.vehicle.type||""} ${row.crew?.crew_names||""}`.toLowerCase();
     return(filter==="all"||row.status===filter)&&text.includes(query.toLowerCase().trim());

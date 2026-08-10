@@ -638,6 +638,10 @@ test("operational notices can be edited in place with an auditable API action", 
 test("fleet panorama prevents duplicate status actions while a change is saving", () => {
   const dashboard = readFileSync(resolve("app/gestao-client.tsx"), "utf8");
   const styles = readFileSync(resolve("app/simple-ux.css"), "utf8");
+  assert.match(dashboard, /function activeVehicleOutages\(outages:Item\[\],date:string\)/);
+  assert.match(dashboard, /const activeOutages=useMemo\(\(\)=>activeVehicleOutages\(outages,date\)/);
+  assert.match(dashboard, /className="fleet-status" aria-busy=\{saving\}/);
+  assert.match(dashboard, /<select name="vehicleId" required defaultValue="" disabled=\{saving\}/);
   assert.match(dashboard, /<FleetPanorama[\s\S]*saving=\{saving\}/);
   assert.match(dashboard, /function FleetPanorama\(\{date,vehicles,outages,crews,saving/);
   assert.match(dashboard, /<button disabled=\{saving\} onClick=\{\(\)=>onEdit\(vehicle\)\}>Editar<\/button>/);
