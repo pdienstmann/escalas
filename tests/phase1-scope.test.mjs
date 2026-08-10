@@ -754,3 +754,16 @@ test("dragging a GM highlights compatible and blocked schedule destinations", ()
   assert.match(styles, /\.drop-cell\.drag-drop-ready/);
   assert.match(styles, /\.drop-cell\.drag-drop-blocked/);
 });
+
+test("schedule collaboration exposes refresh time and conflict recovery", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/usability.css"), "utf8");
+  assert.match(schedule, /\[conflictNotice, setConflictNotice\] = useState/);
+  assert.match(schedule, /\[lastSyncedAt, setLastSyncedAt\] = useState/);
+  assert.match(schedule, /setInterval\(\(\) =>/);
+  assert.match(schedule, /60_000/);
+  assert.match(schedule, /className="schedule-conflict-notice"/);
+  assert.match(schedule, /className="sync-refresh"/);
+  assert.match(styles, /\.schedule-conflict-notice/);
+  assert.match(styles, /\.sync-refresh/);
+});

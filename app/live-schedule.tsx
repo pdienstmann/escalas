@@ -137,6 +137,8 @@ export function LiveSchedule() {
     [collapsed, setCollapsed] = useState<Record<string, boolean>>({}),
     [saving, setSaving] = useState(false),
     [loadError, setLoadError] = useState(""),
+    [conflictNotice, setConflictNotice] = useState(""),
+    [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null),
     [sectionJump, setSectionJump] = useState("");
   const loadSequence=useRef(0);
   const loadController=useRef<AbortController|null>(null);
@@ -162,7 +164,7 @@ export function LiveSchedule() {
       });
       if (!r.ok) throw new Error();
       const value=await r.json();
-      if(sequence===loadSequence.current){setData(value);writeScheduleCache(value)}
+      if(sequence===loadSequence.current){setData(value);writeScheduleCache(value);setLastSyncedAt(Date.now())}
     } catch (error) {
       if(error instanceof DOMException&&error.name==="AbortError")return;
       if(sequence===loadSequence.current){
@@ -176,6 +178,13 @@ export function LiveSchedule() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
+  useEffect(() => {
+    if (typeof window === "undefined" || !data) return;
+    const refresh = window.setInterval(() => {
+      if (!savingRef.current && !pick && !quickEdit && !resourceDialog && !sectionEdit) void load();
+    }, 60_000);
+    return () => window.clearInterval(refresh);
+  }, [data, load, pick, quickEdit, resourceDialog, sectionEdit]);
   useEffect(()=>{if(data)writeScheduleCache(data)},[data]);
   useEffect(()=>{writeUiSetting("query",query);writeUiSetting("view",view);writeUiSetting("group",groupFilter)},[query,view,groupFilter]);
   useEffect(()=>{
@@ -339,6 +348,13 @@ export function LiveSchedule() {
       if (!r.ok) {
         if (r.status === 409 && j.conflict) {
           await load();
+          const notice = `${j.error || "A escala foi alterada por outra pessoa."} A versão atual já foi carregada.`;
+          setConflictNotice(notice);
+          setQuickEdit(null);
+          setPick(null);
+          setContextPick(null);
+          setHolePick(null);
+          setSwapPick(null);
           setMessage(`${j.error || "A escala foi alterada por outra pessoa."} A versão atual já foi carregada.`);
         }
         return false;
@@ -1125,7 +1141,8 @@ export function LiveSchedule() {
       <section className="toolbar">
         <strong>Escala de {formatScheduleDate(data.date)}</strong>
         <span className="pattern-confirm">Padrão: {data.patternLabel}</span>
-        <span className={`sync ${saving?"saving":""}`} aria-live="polite">{saving?"◌ salvando alteração…":"● sincronizado"}</span>
+        <span className={`sync ${saving?"saving":""}`} aria-live="polite">{saving?"◌ salvando alteração…":lastSyncedAt?`● sincronizado às ${new Date(lastSyncedAt).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}`:"● sincronizado"}</span>
+        <button type="button" className="sync-refresh" disabled={saving} onClick={()=>void load()} title="Atualizar a escala sem sair da data">↻ Atualizar</button>
         <div className="seg toolbar-seg" role="group" aria-label="Atalhos da escala">
           <button type="button" className={view==="all"?"active":""} onClick={()=>setView("all")}>Tudo</button>
           <button type="button" className={view==="day"?"active":""} onClick={()=>jump("day")}>Diurno</button>
@@ -1189,6 +1206,12 @@ export function LiveSchedule() {
           {undoEvent&&<button className="toast-undo" disabled={saving} onClick={undoLast}>↶ Desfazer</button>}
           <button onClick={() => setMessage("")}>×</button>
         </div>
+      )}
+      {conflictNotice && (
+        <section className="schedule-conflict-notice" role="alert">
+          <div><b>Escala atualizada por outra pessoa</b><span>{conflictNotice}</span></div>
+          <button type="button" onClick={() => setConflictNotice("")}>Entendi</button>
+        </section>
       )}
       <div className={`workspace ${pick?"has-editor":"schedule-only"}`}>
         <section ref={scheduleWrapRef} className={`schedule-wrap ${data.date!==date?"is-switching":""}`}>
