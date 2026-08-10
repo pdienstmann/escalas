@@ -660,3 +660,12 @@ test("catalog edits and ordering share the saving guard", () => {
   assert.match(dashboard, /disabled=\{saving\}>\{saving \? "Salvando…" : "Salvar mudanças"\}/);
   assert.match(dashboard, /function Record\(\{[\s\S]*saving/);
 });
+
+test("new catalog records update the local management view without a full reload", () => {
+  const dashboard = readFileSync(resolve("app/gestao-client.tsx"), "utf8");
+  assert.match(dashboard, /const catalogKey = action === "guard" \? "guards"/);
+  assert.match(dashboard, /if \(catalogKey && j\.entity\)/);
+  assert.match(dashboard, /writeAdminCache\(date, next\)/);
+  assert.match(dashboard, /const sectionKey = `POST:\$\{String\(body\.groupName/);
+  assert.match(dashboard, /return;\n\s*}\n\s*if \(action === "movement"/);
+});

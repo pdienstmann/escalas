@@ -148,6 +148,26 @@ export function GestaoClient({
       );
       if (r.ok) {
         form.reset();
+        const catalogKey = action === "guard" ? "guards" : action === "post" ? "posts" : action === "vehicle" ? "vehicles" : null;
+        if (catalogKey && j.entity) {
+          setData((current) => {
+            const items = [...current[catalogKey], j.entity as Item];
+            items.sort((a, b) => {
+              if (catalogKey === "posts") return Number(a.sort_order || 99) - Number(b.sort_order || 99) || String(a.name || "").localeCompare(String(b.name || ""), "pt-BR");
+              return String(a[catalogKey === "vehicles" ? "prefix" : "name"] || "").localeCompare(String(b[catalogKey === "vehicles" ? "prefix" : "name"] || ""), "pt-BR");
+            });
+            const next = { ...current, [catalogKey]: items } as Data;
+            if (action === "post") {
+              const sectionKey = `POST:${String(body.groupName || "").trim()}`;
+              if (sectionKey !== "POST:" && !next.sections.some((section) => String(section.section_key) === sectionKey)) {
+                next.sections = [...next.sections, { section_key: sectionKey, label: String(body.groupName), sort_order: Number(body.sortOrder || 99) }].sort((a, b) => Number(a.sort_order || 99) - Number(b.sort_order || 99));
+              }
+            }
+            writeAdminCache(date, next);
+            return next;
+          });
+          return;
+        }
         if (action === "movement" && j.movement) {
           setData((current) => ({
             ...current,
