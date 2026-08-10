@@ -170,6 +170,15 @@ function buildIssues(posts: Row[], vehicles: Row[], assignments: Row[]): Issue[]
 }
 
 export async function POST(request: Request) {
+  try {
+    return await publishSchedule(request);
+  } catch (error) {
+    console.error("publish_validation_error", error);
+    return Response.json({ error: "Não foi possível concluir a validação da escala.", detail: String(error) }, { status: 500 });
+  }
+}
+
+async function publishSchedule(request: Request) {
   if (!permitted(request)) return Response.json({ error: "Nao autorizado" }, { status: 401 });
   const body = await request.json() as { scheduleId?: number | string };
   const scheduleId = Number(body.scheduleId || 0);
