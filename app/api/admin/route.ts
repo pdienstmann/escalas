@@ -624,10 +624,11 @@ export async function POST(request: Request) {
       await writeAudit(request,{action:"update",entityType:"guard",entityId:body.id,summary:`Alterou o cadastro de ${body.name}`,before,after:after as Record<string,unknown>,undoable:true});
     } else if (body.action === "catalog_update" && body.entity === "post") {
       const before = await env.DB.prepare("SELECT * FROM posts WHERE id=?").bind(body.id).first<Record<string,unknown>>();
+      const sortOrder = Number.isFinite(Number(body.sortOrder)) ? Number(body.sortOrder) : 99;
       await env.DB.prepare(
         "UPDATE posts SET name=?,group_name=?,sort_order=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
       )
-        .bind(body.name, body.groupName, body.sortOrder || 99, body.id)
+        .bind(body.name, body.groupName, sortOrder, body.id)
         .run();
       const after = await env.DB.prepare("SELECT * FROM posts WHERE id=?").bind(body.id).first();
       await writeAudit(request,{action:"update",entityType:"post",entityId:body.id,summary:`Alterou o posto ${body.name}`,before,after:after as Record<string,unknown>,undoable:true});

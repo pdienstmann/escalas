@@ -705,6 +705,7 @@ test("new catalog records update the local management view without a full reload
 
 test("daily scale exposes contextual post editing without a full reload", () => {
   const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const api = readFileSync(resolve("app/api/admin/route.ts"), "utf8");
   const styles = readFileSync(resolve("app/workforce.css"), "utf8");
   assert.match(schedule, /\[postEdit, setPostEdit\] = useState<Rec \| null>\(null\)/);
   assert.match(schedule, /async function savePostQuick/);
@@ -713,5 +714,6 @@ test("daily scale exposes contextual post editing without a full reload", () => 
   assert.match(schedule, /onEditPost=\{setPostEdit\}/);
   assert.match(schedule, /function PostQuickEditor/);
   assert.match(schedule, /className="resource-quick-button"/);
+  assert.match(api, /const sortOrder = Number\.isFinite\(Number\(body\.sortOrder\)\)/);
   assert.match(styles, /\.resource-quick-button/);
 });

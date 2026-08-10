@@ -891,7 +891,7 @@ export function LiveSchedule() {
           id: postEdit.id,
           name: String(body.name || "").trim(),
           groupName: String(body.groupName || "").trim(),
-          sortOrder: Number(body.sortOrder || 99),
+          sortOrder: Number.isFinite(Number(body.sortOrder)) ? Number(body.sortOrder) : 99,
         }),
       });
       const result = await response.json();
@@ -901,7 +901,7 @@ export function LiveSchedule() {
         ...postEdit,
         name: String(body.name || "").trim(),
         group_name: String(body.groupName || "").trim(),
-        sort_order: Number(body.sortOrder || 99),
+        sort_order: Number.isFinite(Number(body.sortOrder)) ? Number(body.sortOrder) : 99,
       };
       setData((current) => current ? {
         ...current,
