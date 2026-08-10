@@ -567,6 +567,33 @@ export function LiveSchedule() {
     });
     setHolePick(null);
   }
+  async function quickAddGuard(guardId: number, kind: "post" | "vehicle", resource: Rec, shift: string) {
+    if (!data) return;
+    const list = assignmentIndex.get(assignmentKey(kind, Number(resource.id), shift)) || [];
+    const regularCrew = list.filter((assignment) => !isOvertimeExtensionCell(assignment, data.date, shift));
+    const role = kind === "post"
+      ? "guard"
+      : !regularCrew.some((assignment) => String(assignment.role) === "driver")
+        ? "driver"
+        : !regularCrew.some((assignment) => String(assignment.role) === "patrol")
+          ? "patrol"
+          : "third";
+    const t = fullPeriodWindow(data.date, shift);
+    await postAssignment({
+      fillFullPeriod: true,
+      scheduleId: data.schedule.id,
+      guardId,
+      postId: kind === "post" ? Number(resource.id) : null,
+      vehicleId: kind === "vehicle" ? Number(resource.id) : null,
+      shift,
+      role,
+      startsAt: t.start,
+      endsAt: t.end,
+      status: "normal",
+      isReassigned: 0,
+      requestRef: null,
+    });
+  }
   function openCreate(kind: "guard" | "post" | "vehicle" | "section") {
     if (kind === "post" || kind === "vehicle") {
       setResourceDialog({ kind });
@@ -1032,6 +1059,8 @@ export function LiveSchedule() {
                    allScheduleAssignments={allScheduleAssignments}
                    assignmentById={assignmentById}
                    resourceChoices={resourceChoices}
+                   guards={data.guards}
+                   onQuickAdd={quickAddGuard}
                    onSectionRef={(section, element) => {
                      if (element) sectionRefs.current.set(section, element);
                      else sectionRefs.current.delete(section);
@@ -1479,6 +1508,8 @@ type RowProps = {
   allScheduleAssignments: Rec[];
   assignmentById: Map<number, Rec>;
   resourceChoices: ResourceChoice[];
+  guards: Rec[];
+  onQuickAdd: (guardId: number, kind: "post" | "vehicle", resource: Rec, shift: string) => void | Promise<void>;
   onSectionRef: (section: string, element: HTMLTableRowElement | null) => void;
   serviceAdjustments: Rec[];
   availableForRedeployment: Rec[];
@@ -1522,6 +1553,8 @@ function Row({
   allScheduleAssignments,
   assignmentById,
   resourceChoices,
+  guards,
+  onQuickAdd,
   onSectionRef,
   serviceAdjustments,
   availableForRedeployment,
@@ -1552,10 +1585,36 @@ function Row({
   const [dropTargetId, setDropTargetId] = useState<number | null>(null);
   const [moveAssignmentId, setMoveAssignmentId] = useState<number | null>(null);
   const [moveDestination, setMoveDestination] = useState("");
+  const [addShift, setAddShift] = useState<string | null>(null);
+  const [addQuery, setAddQuery] = useState("");
   const moveChoices = useMemo(
     () => resourceChoices.filter((choice) => !(choice.kind === kind && Number(choice.resource.id) === Number(resource.id))),
     [kind, resource.id, resourceChoices],
   );
+  const quickAddCandidates = useMemo(() => {
+    if (!addShift) return [];
+    const target = operationalShiftWindow(date, addShift);
+    const query = addQuery.trim().toLowerCase();
+    const availableIds = new Set(
+      availableForRedeployment
+        .filter((assignment) => String(assignment.starts_at) < target.end && String(assignment.ends_at) > target.start)
+        .map((assignment) => Number(assignment.guard_id)),
+    );
+    return guards
+      .filter((guard) => {
+        if (query && !`${guard.name || ""} ${guard.registration || ""} ${guard.platoon || ""}`.toLowerCase().includes(query)) return false;
+        return !allScheduleAssignments.some((assignment) =>
+          Number(assignment.guard_id) === Number(guard.id) &&
+          String(assignment.starts_at) < target.end &&
+          String(assignment.ends_at) > target.start,
+        );
+      })
+      .sort((left, right) => {
+        const availability = Number(availableIds.has(Number(right.id))) - Number(availableIds.has(Number(left.id)));
+        return availability || String(left.name || "").localeCompare(String(right.name || ""), "pt-BR");
+      })
+      .slice(0, 8);
+  }, [addQuery, addShift, allScheduleAssignments, availableForRedeployment, date, guards]);
   function moveDirectly(assignment: Rec, shift: string) {
     const [targetKind, targetId] = moveDestination.split(":");
     const destination = moveChoices.find((choice) => choice.kind === targetKind && Number(choice.resource.id) === Number(targetId));
@@ -1773,13 +1832,25 @@ function Row({
                 </button>
               )}
               {missingRoles.length === 0 && (
+                <>
                 <button
                   type="button"
                   className="cell-add-member"
-                  onClick={() => onAddToResource(kind, resource, s.id)}
+                  onClick={() => { setAddShift(current => current === s.id ? null : s.id); setAddQuery(""); }}
                 >
                   ＋ GM
                 </button>
+                {addShift === s.id && <div className="quick-add-picker" role="group" aria-label={`Adicionar GM em ${String(kind === "vehicle" ? resource.prefix : resource.name)}`}>
+                  <input value={addQuery} onChange={(event) => setAddQuery(event.target.value)} placeholder="Buscar nome ou matrícula..." aria-label="Buscar GM disponível" />
+                  <div className="quick-add-results">
+                    {quickAddCandidates.map((guard) => <button type="button" key={String(guard.id)} onClick={() => { setAddShift(null); setAddQuery(""); void onQuickAdd(Number(guard.id), kind, resource, s.id); }}>
+                      <span><b>{guard.name}</b><small>{guard.registration || "Sem matrícula"} · {guard.platoon || "Disponível"}</small></span><strong>Adicionar</strong>
+                    </button>)}
+                    {!quickAddCandidates.length && <small>Nenhum GM livre neste horário. Use “Mais opções” para consultar a lista completa.</small>}
+                  </div>
+                  <button type="button" className="quick-add-advanced" onClick={() => { setAddShift(null); onAddToResource(kind, resource, s.id); }}>Mais opções...</button>
+                </div>}
+                </>
               )}
             </td>
           );
@@ -1810,6 +1881,7 @@ const MemoizedRow = memo(Row, (previous, next) =>
   previous.allScheduleAssignments === next.allScheduleAssignments &&
   previous.assignmentById === next.assignmentById &&
   previous.resourceChoices === next.resourceChoices &&
+  previous.guards === next.guards &&
   previous.serviceAdjustments === next.serviceAdjustments &&
   previous.availableForRedeployment === next.availableForRedeployment &&
   previous.redeploymentGroups === next.redeploymentGroups &&

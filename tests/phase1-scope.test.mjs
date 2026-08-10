@@ -179,6 +179,16 @@ test("selected GM cards expose a direct move flow with available resources", () 
   assert.match(usability, /\.inline-move-picker/);
 });
 
+test("completed cells expose a quick available-GM picker before the advanced editor", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const usability = readFileSync(resolve("app/usability.css"), "utf8");
+  assert.match(schedule, /className="cell-add-member"/);
+  assert.match(schedule, /quickAddCandidates\.map/);
+  assert.match(schedule, /onQuickAdd\(Number\(guard\.id\), kind, resource, s\.id\)/);
+  assert.match(schedule, /className="quick-add-advanced"/);
+  assert.match(usability, /\.quick-add-picker/);
+});
+
 test("the inline X removes only the selected schedule segment", () => {
   const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
   const api = readFileSync(resolve("app/api/schedule/route.ts"), "utf8");
