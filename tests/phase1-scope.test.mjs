@@ -649,3 +649,14 @@ test("fleet panorama prevents duplicate status actions while a change is saving"
   assert.match(dashboard, /className="outage" disabled=\{saving\} onClick=\{\(\)=>onQuickOutage\(vehicle\)\}/);
   assert.match(styles, /fleet-card-actions button:disabled/);
 });
+
+test("catalog edits and ordering share the saving guard", () => {
+  const dashboard = readFileSync(resolve("app/gestao-client.tsx"), "utf8");
+  assert.match(dashboard, /if \(!editing \|\| saving\) return;/);
+  assert.match(dashboard, /action: "catalog_update"/);
+  assert.match(dashboard, /action: "catalog_deactivate"/);
+  assert.match(dashboard, /action: "post_reorder"/);
+  assert.match(dashboard, /function CatalogEditor\(\{[\s\S]*saving/);
+  assert.match(dashboard, /disabled=\{saving\}>\{saving \? "Salvando…" : "Salvar mudanças"\}/);
+  assert.match(dashboard, /function Record\(\{[\s\S]*saving/);
+});

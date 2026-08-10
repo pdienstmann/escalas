@@ -189,49 +189,72 @@ export function GestaoClient({
   }
   async function catalogSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!editing) return;
-    const body = Object.fromEntries(new FormData(e.currentTarget));
-    const r = await fetch("/api/admin", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        ...body,
-        id: editing.item.id,
-        entity: editing.kind,
-        action: "catalog_update",
-      }),
-    });
-    const j = await r.json();
-    setMessage(r.ok ? "Cadastro atualizado com sucesso." : j.error);
-    if (r.ok) {
-      setEditing(null);
-      await load();
+    if (!editing || saving) return;
+    setSaving(true); setMessage("");
+    try {
+      const body = Object.fromEntries(new FormData(e.currentTarget));
+      const r = await fetch("/api/admin", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          ...body,
+          id: editing.item.id,
+          entity: editing.kind,
+          action: "catalog_update",
+        }),
+      });
+      const j = await r.json();
+      setMessage(r.ok ? "Cadastro atualizado com sucesso." : j.error);
+      if (r.ok) {
+        setEditing(null);
+        await load();
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Não foi possível atualizar o cadastro.");
+    } finally {
+      setSaving(false);
     }
   }
   async function deactivate(kind: "guard" | "post" | "vehicle", item: Item) {
     if (!confirm(`Desativar ${String(item.name || item.prefix)}?`)) return;
-    const r = await fetch("/api/admin", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        action: "catalog_deactivate",
-        entity: kind,
-        id: item.id,
-      }),
-    });
-    const j = await r.json();
-    setMessage(r.ok ? "Cadastro desativado." : j.error);
-    if (r.ok) await load();
+    if (saving) return;
+    setSaving(true); setMessage("");
+    try {
+      const r = await fetch("/api/admin", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "catalog_deactivate",
+          entity: kind,
+          id: item.id,
+        }),
+      });
+      const j = await r.json();
+      setMessage(r.ok ? "Cadastro desativado." : j.error);
+      if (r.ok) await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Não foi possível desativar o cadastro.");
+    } finally {
+      setSaving(false);
+    }
   }
   async function reorderPost(item: Item, direction: "up" | "down") {
-    const r = await fetch("/api/admin", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "post_reorder", id: item.id, direction }),
-    });
-    const j = await r.json();
-    setMessage(r.ok ? "Ordem da escala atualizada." : j.error);
-    if (r.ok) await load();
+    if (saving) return;
+    setSaving(true); setMessage("");
+    try {
+      const r = await fetch("/api/admin", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "post_reorder", id: item.id, direction }),
+      });
+      const j = await r.json();
+      setMessage(r.ok ? "Ordem da escala atualizada." : j.error);
+      if (r.ok) await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Não foi possível atualizar a ordem.");
+    } finally {
+      setSaving(false);
+    }
   }
   async function reorderSection(sectionKey: string, direction: "up" | "down") {
     if (saving) return;
@@ -440,6 +463,7 @@ export function GestaoClient({
             items={data.guards}
             main="name"
             detail="registration"
+            saving={saving}
             onEdit={(item) => setEditing({ kind: "guard", item })}
             onDeactivate={deactivate}
           />
@@ -449,6 +473,7 @@ export function GestaoClient({
             items={data.posts}
             main="name"
             detail="group_name"
+            saving={saving}
             onEdit={(item) => setEditing({ kind: "post", item })}
             onDeactivate={deactivate}
             onReorder={reorderPost}
@@ -457,6 +482,7 @@ export function GestaoClient({
         {editing && (
           <CatalogEditor
             editing={editing}
+            saving={saving}
             onClose={() => setEditing(null)}
             onSubmit={catalogSubmit}
           />
@@ -511,12 +537,14 @@ export function GestaoClient({
           items={data.vehicles}
           main="prefix"
           detail="zone"
+          saving={saving}
           onEdit={(item) => setEditing({ kind: "vehicle", item })}
           onDeactivate={deactivate}
         />
         {editing && (
           <CatalogEditor
             editing={editing}
+            saving={saving}
             onClose={() => setEditing(null)}
             onSubmit={catalogSubmit}
           />
@@ -883,6 +911,7 @@ function Record({
   items,
   main,
   detail,
+  saving,
   onEdit,
   onDeactivate,
   onReorder,
@@ -892,6 +921,7 @@ function Record({
   items: Item[];
   main: string;
   detail: string;
+  saving: boolean;
   onEdit: (item: Item) => void;
   onDeactivate: (kind: "guard" | "post" | "vehicle", item: Item) => void;
   onReorder?: (item: Item, direction: "up" | "down") => void;
@@ -913,12 +943,14 @@ function Record({
               {kind === "post" && onReorder && (
                 <>
                   <button
+                    disabled={saving}
                     aria-label="Mover posto para cima"
                     onClick={() => onReorder(i, "up")}
                   >
                     ↑
                   </button>
                   <button
+                    disabled={saving}
                     aria-label="Mover posto para baixo"
                     onClick={() => onReorder(i, "down")}
                   >
@@ -926,9 +958,10 @@ function Record({
                   </button>
                 </>
               )}
-              <button onClick={() => onEdit(i)}>Editar</button>
+              <button disabled={saving} onClick={() => onEdit(i)}>Editar</button>
               <button
                 className="danger-link"
+                disabled={saving}
                 onClick={() => onDeactivate(kind, i)}
               >
                 Desativar
@@ -1157,23 +1190,25 @@ function FleetPanorama({date,vehicles,outages,crews,saving,onEdit,onQuickOutage,
 const vehicleTypeLabel=(type:string)=>({moto:"Moto",pickup:"Caminhonete",van:"Furgão",suv:"SUV",sedan:"Sedan"} as Record<string,string>)[type]||"Outro";
 function CatalogEditor({
   editing,
+  saving,
   onClose,
   onSubmit,
 }: {
   editing: { kind: "guard" | "post" | "vehicle"; item: Item };
+  saving: boolean;
   onClose: () => void;
   onSubmit: (e: FormEvent<HTMLFormElement>) => void;
 }) {
   const i = editing.item;
   return (
-    <div className="catalog-backdrop" role="presentation">
+    <div className="catalog-backdrop" role="presentation" aria-busy={saving}>
       <form className="catalog-editor" onSubmit={onSubmit}>
         <header>
           <div>
             <small>EDITAR CADASTRO</small>
             <h2>{String(i.name || i.prefix)}</h2>
           </div>
-          <button type="button" onClick={onClose} aria-label="Fechar">
+          <button type="button" disabled={saving} onClick={onClose} aria-label="Fechar">
             ×
           </button>
         </header>
@@ -1261,10 +1296,10 @@ function CatalogEditor({
           </>
         )}
         <footer>
-          <button type="button" onClick={onClose}>
+          <button type="button" disabled={saving} onClick={onClose}>
             Cancelar
           </button>
-          <button className="save">Salvar mudanças</button>
+          <button className="save" disabled={saving}>{saving ? "Salvando…" : "Salvar mudanças"}</button>
         </footer>
       </form>
     </div>
