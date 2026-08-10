@@ -779,3 +779,12 @@ test("schedule cells support keyboard navigation and contextual activation", () 
   assert.match(schedule, /className="keyboard-help"/);
   assert.match(styles, /\.drop-cell:focus-visible/);
 });
+
+test("schedule keeps a small queue of recent undoable changes", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  assert.match(schedule, /\[undoEvents, setUndoEvents\] = useState<UndoState\[\]>\(\[\]\)/);
+  assert.match(schedule, /function registerUndo\(event: UndoState\)/);
+  assert.match(schedule, /setUndoEvents\(\(current\) => \[event, \.\.\.current\.filter\(\(item\) => item\.id !== event\.id\)\]\.slice\(0, 5\)\)/);
+  assert.match(schedule, /undoEvents\.length>0/);
+  assert.match(schedule, /undoEvents\.length>1/);
+});

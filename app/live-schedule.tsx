@@ -125,7 +125,7 @@ export function LiveSchedule() {
     [addMenuOpen, setAddMenuOpen] = useState(false),
     [movementsExpanded, setMovementsExpanded] = useState(false),
     [redeploymentExpanded, setRedeploymentExpanded] = useState(false),
-    [undoEvent, setUndoEvent] = useState<UndoState | null>(null),
+    [undoEvents, setUndoEvents] = useState<UndoState[]>([]),
     [message, setMessage] = useState(""),
     [query, setQuery] = useState(()=>readUiSetting("query")||""),
     [view, setView] = useState<ViewFilter>(()=>{const value=readUiSetting("view");return value&&["all","day","night","holes","redeploy"].includes(value)?value as ViewFilter:"all"}),
@@ -332,6 +332,9 @@ export function LiveSchedule() {
       : [],
     [scheduleVehicles, schedulePosts, scheduleSections],
   );
+  function registerUndo(event: UndoState) {
+    setUndoEvents((current) => [event, ...current.filter((item) => item.id !== event.id)].slice(0, 5));
+  }
   async function postAssignment(body: Record<string, unknown>) {
     if (savingRef.current) return false;
     const mutationDate=data?.date||date;
@@ -361,7 +364,7 @@ export function LiveSchedule() {
         return false;
       }
       if (r.ok) {
-        if (j.auditEventId) setUndoEvent({id:Number(j.auditEventId),label:String(j.message||"Desfazer a última alteração")});
+        if (j.auditEventId) registerUndo({id:Number(j.auditEventId),label:String(j.message||"Desfazer a última alteração")});
         const changedAssignments: Rec[] = Array.isArray(j.assignments)
           ? j.assignments
           : j.assignment
@@ -473,6 +476,7 @@ export function LiveSchedule() {
     await postAssignment({id:assignment.id,expectedUpdatedAt:assignment.updated_at||null,scheduleId:data.schedule.id,guardId:assignment.guard_id,postId:assignment.post_id||null,vehicleId:assignment.vehicle_id||null,shift:assignment.shift,role:assignment.role,startsAt:assignment.starts_at,endsAt:assignment.ends_at,regularEndsAt:assignment.regular_ends_at||null,workKind:assignment.work_kind||"shift",status,requestRef:assignment.request_ref||null,isReassigned:Number(assignment.is_reassigned)===1,reassignmentNote:assignment.reassignment_note||null});
   }
   async function undoLast(){
+    const undoEvent = undoEvents[0];
     if(!undoEvent||savingRef.current)return;
     savingRef.current=true;setSaving(true);
     try{
@@ -480,7 +484,7 @@ export function LiveSchedule() {
       const result=await response.json();
       setMessage(response.ok?result.message:result.error);
       if(!response.ok)return;
-      setUndoEvent(null);
+      setUndoEvents((current) => current.filter((item) => item.id !== undoEvent.id));
       const deletedIds=new Set<number>((result.deletedAssignmentIds||[]).map(Number));
       const restored:Rec[]=result.assignments||[];
       if(result.requiresReload){await load();return;}
@@ -537,7 +541,7 @@ export function LiveSchedule() {
         if (entity) await load();
         return;
       }
-      if (assigned.auditEventId) setUndoEvent({ id: Number(assigned.auditEventId), label: "Desfazer inclusão da equipe" });
+      if (assigned.auditEventId) registerUndo({ id: Number(assigned.auditEventId), label: "Desfazer inclusão da equipe" });
       setData((current) => {
         if (!current) return current;
         const merged = mergeScheduleAssignments(current.assignments, current.availableForRedeployment, assigned.assignments || []);
@@ -1015,7 +1019,7 @@ export function LiveSchedule() {
         }
         return;
       }
-      if (result.auditEventId) setUndoEvent({ id: Number(result.auditEventId), label: "Desfazer retirada do local" });
+      if (result.auditEventId) registerUndo({ id: Number(result.auditEventId), label: "Desfazer retirada do local" });
       setData((current) => {
         if (!current) return current;
         const merged = mergeScheduleAssignments(
@@ -1204,7 +1208,7 @@ export function LiveSchedule() {
       {message && (
         <div className="schedule-toast" role="status">
           {message}
-          {undoEvent&&<button className="toast-undo" disabled={saving} onClick={undoLast}>↶ Desfazer</button>}
+          {undoEvents.length>0&&<button className="toast-undo" disabled={saving} onClick={undoLast} title={`${undoEvents.length} alteração(ões) recente(s) disponíveis`}>↶ Desfazer{undoEvents.length>1?` (${undoEvents.length})`:""}</button>}
           <button onClick={() => setMessage("")}>×</button>
         </div>
       )}
