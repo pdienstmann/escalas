@@ -151,6 +151,14 @@ test("overtime shortcut lives inside the GM card and stays distinct from add act
   assert.match(density, /border-bottom:4px solid/);
 });
 
+test("schedule rows are memoized so shell feedback does not repaint the full matrix", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  assert.match(schedule, /<MemoizedRow/);
+  assert.match(schedule, /const MemoizedRow = memo\(Row/);
+  assert.match(schedule, /previous\.assignmentIndex === next\.assignmentIndex/);
+  assert.match(schedule, /sameNumberList\(previous\.recentAssignmentIds, next\.recentAssignmentIds\)/);
+});
+
 test("the inline X removes only the selected schedule segment", () => {
   const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
   const api = readFileSync(resolve("app/api/schedule/route.ts"), "utf8");

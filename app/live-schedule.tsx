@@ -35,6 +35,7 @@ import {
   useMemo,
   useRef,
   useState,
+  memo,
 } from "react";
 type Rec = Record<string, string | number | null>;
 type State = {
@@ -973,7 +974,7 @@ export function LiveSchedule() {
                 if (isCollapsed && !first) return null;
                 return (
                 <Fragment key={`${kind}-${r.id}`}>
-                <Row
+                <MemoizedRow
                   date={data.date}
                   kind={kind}
                   resource={r}
@@ -1420,41 +1421,7 @@ function ResourceRemovalDialog({pick,saving,onClose,onConfirm}:{pick:ResourceRem
   </section></div>
 }
 
-function Row({
-  date,
-  kind,
-  resource,
-  section,
-  first,
-  collapsed,
-  onToggleSection,
-  shifts: visibleShifts,
-  assignmentIndex,
-  resourceAssignments,
-  allScheduleAssignments,
-  assignmentById,
-  serviceAdjustments,
-  availableForRedeployment,
-  redeploymentGroups,
-  selectedId,
-  recentAssignmentIds,
-  onContextPick,
-  onEdit,
-  onSwap,
-  onQuickStatus,
-  onExtend,
-  copiedAssignment,
-  onCopy,
-  onPaste,
-  onQuickDelete,
-  onMove,
-  onMoveGroup,
-  onHolePick,
-  onEditVehicle,
-  onAddToResource,
-  onAddInSection,
-  onRemoveResource,
-}: {
+type RowProps = {
   date: string;
   kind: "post" | "vehicle";
   resource: Rec;
@@ -1493,7 +1460,43 @@ function Row({
   onAddToResource: (kind: "post" | "vehicle", resource: Rec, shift: string) => void;
   onAddInSection: (kind: "post" | "vehicle", section: string) => void;
   onRemoveResource: (kind: "post" | "vehicle", resource: Rec) => void;
-}) {
+};
+
+function Row({
+  date,
+  kind,
+  resource,
+  section,
+  first,
+  collapsed,
+  onToggleSection,
+  shifts: visibleShifts,
+  assignmentIndex,
+  resourceAssignments,
+  allScheduleAssignments,
+  assignmentById,
+  serviceAdjustments,
+  availableForRedeployment,
+  redeploymentGroups,
+  selectedId,
+  recentAssignmentIds,
+  onContextPick,
+  onEdit,
+  onSwap,
+  onQuickStatus,
+  onExtend,
+  copiedAssignment,
+  onCopy,
+  onPaste,
+  onQuickDelete,
+  onMove,
+  onMoveGroup,
+  onHolePick,
+  onEditVehicle,
+  onAddToResource,
+  onAddInSection,
+  onRemoveResource,
+}: RowProps) {
   const alignedAssignmentsByShift=useMemo(()=>new Map(visibleShifts.map(shift=>[
     shift.id,
     orderAssignmentsInResourceCell(assignmentIndex.get(assignmentKey(kind,Number(resource.id),shift.id))||[],resourceAssignments,kind),
@@ -1705,6 +1708,33 @@ function Row({
     </Fragment>
   );
 }
+
+function sameNumberList(left: number[], right: number[]) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+// The parent owns the callbacks and they are intentionally recreated when a
+// schedule mutation changes. Comparing the data inputs here prevents a click
+// toast, save indicator or other shell state from repainting every row.
+const MemoizedRow = memo(Row, (previous, next) =>
+  previous.date === next.date &&
+  previous.kind === next.kind &&
+  previous.resource === next.resource &&
+  previous.section === next.section &&
+  previous.first === next.first &&
+  previous.collapsed === next.collapsed &&
+  previous.shifts === next.shifts &&
+  previous.assignmentIndex === next.assignmentIndex &&
+  previous.resourceAssignments === next.resourceAssignments &&
+  previous.allScheduleAssignments === next.allScheduleAssignments &&
+  previous.assignmentById === next.assignmentById &&
+  previous.serviceAdjustments === next.serviceAdjustments &&
+  previous.availableForRedeployment === next.availableForRedeployment &&
+  previous.redeploymentGroups === next.redeploymentGroups &&
+  previous.selectedId === next.selectedId &&
+  sameNumberList(previous.recentAssignmentIds, next.recentAssignmentIds) &&
+  previous.copiedAssignment === next.copiedAssignment,
+);
 function Editor({
   pick,
   data,
