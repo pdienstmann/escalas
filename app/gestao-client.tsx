@@ -379,7 +379,9 @@ export function GestaoClient({
       r.ok
         ? action === "leave_approve"
           ? "Folga aprovada e integrada à escala."
-          : "Solicitação cancelada."
+          : j.promotedGuardName
+            ? `Solicitação cancelada. ${j.promotedGuardName} foi promovido(a) automaticamente da lista de espera.`
+            : "Solicitação cancelada."
         : j.error,
     );
     if (r.ok) await load();
@@ -1177,6 +1179,7 @@ function LeaveRecords({
             <small>
               {formatDate(item.date)} ·{" "}
               {item.category === "weekday" ? "dia útil" : "fim de semana"}
+              {item.status === "waitlist" && item.position ? ` · posição ${item.position}` : ""}
             </small>
             <span className={`choice-status ${item.status}`}>
               {item.status === "confirmed" ? "APROVADA" : "LISTA DE ESPERA"}

@@ -201,6 +201,23 @@ async function syncConfirmedLeaves(choiceId?: number) {
     AND NOT EXISTS (SELECT 1 FROM movements m WHERE m.request_ref='FOLGA-'||c.id)`);
   await (choiceId ? statement.bind(choiceId) : statement).run();
 }
+
+async function promoteNextWaitlistedLeave(campaignId: number, date: string) {
+  const limit = await env.DB.prepare(
+    "SELECT capacity,(SELECT COUNT(*) FROM leave_choices WHERE campaign_id=? AND date=? AND status='confirmed') AS used FROM leave_day_limits WHERE campaign_id=? AND date=?",
+  ).bind(campaignId, date, campaignId, date).first<{ capacity: number; used: number }>();
+  if (!limit || Number(limit.used) >= Number(limit.capacity)) return null;
+  const next = await env.DB.prepare(
+    "SELECT c.*,g.name guard_name FROM leave_choices c JOIN guards g ON g.id=c.guard_id WHERE c.campaign_id=? AND c.date=? AND c.status='waitlist' ORDER BY COALESCE(c.position,2147483647),c.id LIMIT 1",
+  ).bind(campaignId, date).first<Record<string, unknown>>();
+  if (!next) return null;
+  const promoted = await env.DB.prepare(
+    "UPDATE leave_choices SET status='confirmed',position=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='waitlist'",
+  ).bind(next.id).run();
+  if (!Number(promoted.meta.changes || 0)) return null;
+  await syncConfirmedLeaves(Number(next.id));
+  return { ...next, status: "confirmed", position: null };
+}
 async function ensureSections(){
   const groups=(await env.DB.prepare("SELECT group_name,MIN(sort_order) sort_order FROM posts WHERE active=1 GROUP BY group_name").all<{group_name:string;sort_order:number}>()).results;
   const commands=[env.DB.prepare("INSERT OR IGNORE INTO schedule_sections (section_key,label,sort_order) VALUES ('VEHICLES','VIATURAS E ZONAS',0)")];
@@ -953,6 +970,8 @@ export async function POST(request: Request) {
       return Response.json({ ok: true });
     } else if (body.action === "leave_cancel") {
       const before = await env.DB.prepare("SELECT c.*,g.name guard_name FROM leave_choices c JOIN guards g ON g.id=c.guard_id WHERE c.id=?").bind(body.id).first<Record<string,unknown>>();
+      if (!before) return Response.json({ error: "Solicitação não encontrada." }, { status: 404 });
+      if (String(before.status) === "cancelled") return Response.json({ error: "Esta solicitação já foi cancelada." }, { status: 409 });
       await env.DB.batch([
         env.DB.prepare(
           "UPDATE leave_choices SET status='cancelled',updated_at=CURRENT_TIMESTAMP WHERE id=?",
@@ -961,9 +980,15 @@ export async function POST(request: Request) {
           `FOLGA-${body.id}`,
         ),
       ]);
+      const promoted = String(before.status) === "confirmed"
+        ? await promoteNextWaitlistedLeave(Number(before.campaign_id), String(before.date))
+        : null;
       const after = await env.DB.prepare("SELECT * FROM leave_choices WHERE id=?").bind(body.id).first();
       await writeAudit(request,{action:"cancel",entityType:"leave_choice",entityId:body.id,summary:`Cancelou a folga de ${before?.guard_name}`,before,after:after as Record<string,unknown>});
-      return Response.json({ ok: true });
+      if (promoted) {
+        await writeAudit(request,{action:"approve",entityType:"leave_choice",entityId:promoted.id,summary:`Promoveu ${promoted.guard_name} da lista de espera após cancelamento`,before:{...promoted,status:"waitlist"},after:promoted as Record<string,unknown>});
+      }
+      return Response.json({ ok: true, promotedGuardName: promoted?.guard_name || null, promotedChoiceId: promoted?.id || null });
     } else return Response.json({ error: "Ação inválida" }, { status: 400 });
     return Response.json({ ok: true });
   } catch (error) {

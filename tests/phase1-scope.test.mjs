@@ -840,3 +840,14 @@ test("publication validation respects FA resources and reports actionable critic
   assert.match(styles, /validation-severity-summary/);
   assert.match(styles, /validation-issue\.warning/);
 });
+
+test("cancelling a confirmed leave promotes the next waitlisted GM and syncs the scale", () => {
+  const api = readFileSync(resolve("app/api/admin/route.ts"), "utf8");
+  const dashboard = readFileSync(resolve("app/gestao-client.tsx"), "utf8");
+  assert.match(api, /promoteNextWaitlistedLeave/);
+  assert.match(api, /status='waitlist'/);
+  assert.match(api, /promotedGuardName/);
+  assert.match(api, /syncConfirmedLeaves\(Number\(next\.id\)\)/);
+  assert.match(dashboard, /foi promovido\(a\) automaticamente da lista de espera/);
+  assert.match(dashboard, /posição \$\{item\.position\}/);
+});
