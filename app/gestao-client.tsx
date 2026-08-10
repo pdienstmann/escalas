@@ -386,6 +386,24 @@ export function GestaoClient({
     );
     if (r.ok) await load();
   }
+  async function campaignAction(action: "leave_campaign_close" | "leave_campaign_publish" | "leave_campaign_reopen") {
+    const campaignId = data.campaign?.id;
+    if (!campaignId || saving) return;
+    if (action === "leave_campaign_close" && !window.confirm("Fechar a campanha? Depois disso novos lançamentos e cancelamentos ficarão bloqueados.")) return;
+    if (action === "leave_campaign_publish" && !window.confirm("Publicar a campanha? O quadro será tratado como fechado e integrado às escalas futuras.")) return;
+    const reason = action === "leave_campaign_reopen" ? window.prompt("Informe a justificativa para reabrir a campanha:", "Correção de folgas")?.trim() || "" : "";
+    if (action === "leave_campaign_reopen" && reason.length < 5) {
+      setMessage("Informe uma justificativa com pelo menos 5 caracteres.");
+      return;
+    }
+    setSaving(true); setMessage("");
+    try {
+      const r = await fetch("/api/admin", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, campaignId, reason }) });
+      const j = await r.json();
+      setMessage(r.ok ? j.message : j.error);
+      if (r.ok) await load();
+    } finally { setSaving(false); }
+  }
   async function previewVehicleReturn(returnOn:string){
     if(!returningOutage)return;setSaving(true);setMessage("");
     try{const r=await fetch("/api/admin",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"vehicle_outage_return_preview",id:returningOutage.id,returnOn})});const j=await r.json();if(r.ok)setReturnPreview(j);else setMessage(j.error)}finally{setSaving(false)}
@@ -724,6 +742,8 @@ export function GestaoClient({
       </Module>
     );
   const campaign = data.campaign;
+  const campaignStatus = campaign ? String(campaign.status || "open") : "none";
+  const campaignLocked = !campaign || campaignStatus !== "open";
   const leaveDaysByDate = [...new Map(data.days.map((day) => [String(day.date), day])).keys()].map((dateKey) => data.days.find((day) => String(day.date) === dateKey && !String(day.platoon || "").trim()) || data.days.find((day) => String(day.date) === dateKey)!).filter(Boolean);
   const leavePlatoons = [...new Set(data.guards.map((guard) => String(guard.platoon || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR"));
   return (
@@ -734,12 +754,21 @@ export function GestaoClient({
       busy={saving}
       busyArea={modeLabel[mode]}
     >
+      <section className={`leave-campaign-status ${campaignStatus}`}>
+        <div><small>ESTADO DA CAMPANHA</small><h3>{campaignStatus === "open" ? "Campanha aberta" : campaignStatus === "closed" ? "Campanha fechada" : campaignStatus === "published" ? "Campanha publicada" : "Nenhuma campanha aberta"}</h3><p>{campaignStatus === "open" ? "Lançamentos, cancelamentos e ajustes estão liberados." : campaignStatus === "closed" ? "Confira os dados e publique quando estiver tudo correto." : campaignStatus === "published" ? "A campanha está bloqueada para edição e já pode ser usada pelas escalas futuras." : "Importe um novo mês para abrir uma campanha."}</p></div>
+        <div className="leave-campaign-actions">
+          {campaignStatus === "open" && <button type="button" disabled={saving} onClick={() => void campaignAction("leave_campaign_close")}>Fechar campanha</button>}
+          {campaignStatus === "closed" && <button type="button" className="save" disabled={saving} onClick={() => void campaignAction("leave_campaign_publish")}>Publicar campanha</button>}
+          {(campaignStatus === "closed" || campaignStatus === "published") && <button type="button" disabled={saving} onClick={() => void campaignAction("leave_campaign_reopen")}>Reabrir com justificativa</button>}
+        </div>
+      </section>
       <LeaveMonthOverview overview={data.leaveOverview} />
       <LeaveImport
         guards={data.guards}
         choices={data.choices}
         defaultMonth={String(campaign?.month||date.slice(0,7))}
         saving={saving}
+        locked={campaignLocked}
         onImport={importLeaves}
       />
       <section className="leave-limit-panel">
@@ -748,25 +777,25 @@ export function GestaoClient({
         </header>
         <form onSubmit={(event) => void submit(event, "leave_limit_set")}>
           <input type="hidden" name="campaignId" value={String(campaign?.id || "")} />
-          <label>Dia<select name="date" required defaultValue={String(leaveDaysByDate[0]?.date || "")}>
+          <label>Dia<select name="date" required disabled={campaignLocked} defaultValue={String(leaveDaysByDate[0]?.date || "")}>
             <option value="">Selecione uma data</option>
             {leaveDaysByDate.map((day) => <option key={String(day.date)} value={String(day.date)}>{formatDate(day.date)}</option>)}
           </select></label>
-          <label>Escopo<select name="platoon" defaultValue="">
+          <label>Escopo<select name="platoon" disabled={campaignLocked} defaultValue="">
             <option value="">Limite geral do dia</option>
             {leavePlatoons.map((platoon) => <option key={platoon} value={platoon}>Equipe / pelotão {platoon}</option>)}
           </select></label>
-          <label>Turno<select name="shift" defaultValue="">
+          <label>Turno<select name="shift" disabled={campaignLocked} defaultValue="">
             <option value="">Todos os turnos</option>
             <option value="day">Diurno (2º + 3º)</option>
             <option value="night">Noturno (4º + 1º)</option>
           </select></label>
-          <label>Máximo de folgas<input name="capacity" type="number" min="0" max="500" step="1" defaultValue="3" required /></label>
-          <button className="save" disabled={saving}>Salvar limite</button>
+          <label>Máximo de folgas<input name="capacity" type="number" min="0" max="500" step="1" defaultValue="3" disabled={campaignLocked} required /></label>
+          <button className="save" disabled={saving||campaignLocked}>Salvar limite</button>
         </form>
       </section>
       <div className="leave-layout">
-        <Form title="Registrar escolha" onSubmit={(e) => submit(e, "leave")}>
+        <Form title="Registrar escolha" disabled={campaignLocked} onSubmit={(e) => submit(e, "leave")}>
           <input
             type="hidden"
             name="campaignId"
@@ -936,7 +965,7 @@ function parseLeaveImport(raw:string,guards:Item[],month:string):ParsedLeave[]{
     return {line,shift,guardId:guard?Number(guard.id):null,guardName:String(guard?.name||prefix||"GM não identificado"),dates,problems};
   });
 }
-function LeaveImport({guards,choices,defaultMonth,saving,onImport}:{guards:Item[];choices:Item[];defaultMonth:string;saving:boolean;onImport:(month:string,rows:Array<{guardId?:number;guardName?:string;date:string}>,newGuards:Array<{name:string;registration:string;platoon?:string;baseShift?:string}>)=>Promise<boolean|undefined>}){
+function LeaveImport({guards,choices,defaultMonth,saving,locked=false,onImport}:{guards:Item[];choices:Item[];defaultMonth:string;saving:boolean;locked?:boolean;onImport:(month:string,rows:Array<{guardId?:number;guardName?:string;date:string}>,newGuards:Array<{name:string;registration:string;platoon?:string;baseShift?:string}>)=>Promise<boolean|undefined>}){
   const [raw,setRaw]=useState(""),[month,setMonth]=useState(defaultMonth),[reviewing,setReviewing]=useState(false),[newRegistrations,setNewRegistrations]=useState<Record<string,string>>({});
   const parsed=useMemo(()=>parseLeaveImport(raw,guards,month),[raw,guards,month]);
   const existing=new Set(choices.map(choice=>`${Number(choice.guard_id)}:${String(choice.date)}`));
@@ -947,13 +976,13 @@ function LeaveImport({guards,choices,defaultMonth,saving,onImport}:{guards:Item[
   const validRows=parsed.flatMap(row=>row.dates.filter(date=>row.guardId? !existing.has(`${row.guardId}:${date}`):Boolean(newRegistrations[normalizeLeaveName(row.guardName)]?.trim())).map(date=>row.guardId?{guardId:Number(row.guardId),date}:{guardName:row.guardName,date}));
   const problems=unresolvedProblems+missingRegistrations,recognized=parsed.reduce((total,row)=>total+row.dates.length,0);
   function rowHasProblem(row:ParsedLeave){return row.problems.some(problem=>!problem.startsWith("GM não encontrado"))||(!row.guardId&&!newRegistrations[normalizeLeaveName(row.guardName)]?.trim())}
-  async function confirmImport(){if(!validRows.length||problems||saving)return;const ok=await onImport(month,validRows,newGuards.filter(guard=>guard.registration));if(ok){setRaw("");setReviewing(false);setNewRegistrations({})}}
-  return <section className="leave-import">
-    <header><div><small>IMPORTAÇÃO DO COMPILADO MENSAL</small><h2>Colar tabela de folgas</h2><p>Cole as colunas DIA/NOITE, GM e todas as datas. Nada é salvo antes da confirmação geral.</p></div><label>Mês<input type="month" value={month} onChange={event=>{setMonth(event.target.value);setReviewing(false)}}/></label></header>
-    <textarea value={raw} onChange={event=>{setRaw(event.target.value);setReviewing(false)}} rows={6} placeholder={"DIA\tALENCAR\t22/08 (SÁBADO)\t06/08 (QUINTA-FEIRA)\nNOITE\tALEXANDRE\t12/08\t14/08"}/>
-    <div className="leave-import-actions"><span><b>{parsed.length}</b> GMs · <b>{recognized}</b> folgas reconhecidas{unknownNames.length?` · ${unknownNames.length} novo(s) aguardando matrícula`:""}{problems?` · ${problems} pendência(s)`:""}</span><button type="button" disabled={!parsed.length} onClick={()=>setReviewing(true)}>Revisar antes de incluir</button></div>
+  async function confirmImport(){if(locked||!validRows.length||problems||saving)return;const ok=await onImport(month,validRows,newGuards.filter(guard=>guard.registration));if(ok){setRaw("");setReviewing(false);setNewRegistrations({})}}
+  return <section className="leave-import"><fieldset disabled={locked}>
+    <header><div><small>IMPORTAÇÃO DO COMPILADO MENSAL</small><h2>Colar tabela de folgas</h2><p>{locked?"Campanha fechada: reabra-a para importar ou corrigir folgas.":"Cole as colunas DIA/NOITE, GM e todas as datas. Nada é salvo antes da confirmação geral."}</p></div><label>Mês<input type="month" value={month} disabled={locked} onChange={event=>{setMonth(event.target.value);setReviewing(false)}}/></label></header>
+    <textarea value={raw} disabled={locked} onChange={event=>{setRaw(event.target.value);setReviewing(false)}} rows={6} placeholder={"DIA\tALENCAR\t22/08 (SÁBADO)\t06/08 (QUINTA-FEIRA)\nNOITE\tALEXANDRE\t12/08\t14/08"}/>
+    <div className="leave-import-actions"><span><b>{parsed.length}</b> GMs · <b>{recognized}</b> folgas reconhecidas{unknownNames.length?` · ${unknownNames.length} novo(s) aguardando matrícula`:""}{problems?` · ${problems} pendência(s)`:""}</span><button type="button" disabled={locked||!parsed.length} onClick={()=>setReviewing(true)}>Revisar antes de incluir</button></div>
     {reviewing&&<div className="leave-import-review"><header><div><small>CONFIRMAÇÃO - NENHUM DADO SALVO AINDA</small><h3>Folgas de {month.split("-").reverse().join("/")}</h3><p>{unknownNames.length?`${unknownNames.length} GM(s) não cadastrado(s): informe a matrícula abaixo para criar e importar junto.`:"Todos os nomes foram encontrados no cadastro."}</p></div><strong className={problems?"warning":"ready"}>{problems?"Completar cadastro":`${validRows.length} novas folgas`}</strong></header><div className="leave-import-list">{parsed.map(row=><article key={`${row.line}-${row.guardName}`} className={rowHasProblem(row)?"invalid":""}><span className={`leave-shift ${row.shift.toLowerCase()}`}>{row.shift||"-"}</span><div><b>{row.guardName}</b><small>Linha {row.line}</small>{!row.guardId&&<label className="leave-new-guard"><span>GM novo · matrícula</span><input value={newRegistrations[normalizeLeaveName(row.guardName)]||""} onChange={event=>setNewRegistrations(current=>({...current,[normalizeLeaveName(row.guardName)]:event.target.value}))} placeholder="Informe a matrícula"/></label>}</div><div className="leave-date-tags">{row.dates.map(date=><span key={date} className={row.guardId&&existing.has(`${row.guardId}:${date}`)?"existing":""}>{formatDate(date)}{row.guardId&&existing.has(`${row.guardId}:${date}`)?" · já incluída":""}</span>)}{row.problems.filter(problem=>!problem.startsWith("GM não encontrado")).map(problem=><em key={problem}>{problem}</em>)}{!row.guardId&&<em className="new-guard-note">Será cadastrado após informar a matrícula</em>}</div></article>)}</div><footer><button type="button" onClick={()=>setReviewing(false)}>Voltar e corrigir</button><button type="button" className="save" disabled={!validRows.length||Boolean(problems)||saving} onClick={()=>void confirmImport()}>{saving?"Importando…":`Confirmar importação geral (${validRows.length})`}</button></footer></div>}
-  </section>
+  </fieldset></section>
 }
 function LeaveMonthOverview({overview}:{overview:LeaveOverview|null}) {
   if(!overview)return <section className="leave-overview empty"><b>Panorama mensal</b><p>Abra uma campanha de folgas para visualizar os dias críticos.</p></section>;
@@ -1044,18 +1073,22 @@ function Module({
 }
 function Form({
   title,
+  disabled = false,
   onSubmit,
   children,
 }: {
   title: string;
+  disabled?: boolean;
   onSubmit: (e: FormEvent<HTMLFormElement>) => void;
   children: React.ReactNode;
 }) {
   return (
     <form className="data-form" onSubmit={onSubmit}>
-      <h3>{title}</h3>
-      {children}
-      <button className="save">Salvar</button>
+      <fieldset disabled={disabled}>
+        <h3>{title}</h3>
+        {children}
+        <button className="save">Salvar</button>
+      </fieldset>
     </form>
   );
 }

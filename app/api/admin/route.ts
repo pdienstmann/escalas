@@ -457,7 +457,7 @@ export async function GET(request: Request) {
         "SELECT m.*, g.name AS guard_name FROM movements m JOIN guards g ON g.id=m.guard_id ORDER BY m.starts_at DESC LIMIT 30",
       ).all(),
       env.DB.prepare(
-        "SELECT * FROM leave_campaigns WHERE status='open' ORDER BY month DESC LIMIT 1",
+        "SELECT * FROM leave_campaigns WHERE status IN ('open','closed','published') ORDER BY month DESC LIMIT 1",
       ).first(),
       env.DB.prepare(
         `SELECT l.*,
@@ -467,11 +467,11 @@ export async function GET(request: Request) {
              AND (l.platoon IS NULL OR TRIM(l.platoon)='' OR g.platoon=l.platoon)
              AND (l.shift IS NULL OR TRIM(l.shift)='' OR CASE WHEN lower(COALESCE(g.base_shift,'')) LIKE '%noite%' THEN 'night' ELSE 'day' END=l.shift)) AS used
          FROM leave_day_limits l
-         WHERE l.campaign_id=(SELECT id FROM leave_campaigns WHERE status='open' ORDER BY month DESC LIMIT 1)
+         WHERE l.campaign_id=(SELECT id FROM leave_campaigns WHERE status IN ('open','closed','published') ORDER BY month DESC LIMIT 1)
          ORDER BY l.date,CASE WHEN l.platoon IS NULL OR TRIM(l.platoon)='' THEN 0 ELSE 1 END,CASE WHEN l.shift IS NULL OR TRIM(l.shift)='' THEN 0 ELSE 1 END,l.platoon,l.shift`,
       ).all(),
       env.DB.prepare(
-        "SELECT c.*,g.name AS guard_name,g.registration,g.platoon,g.base_shift FROM leave_choices c JOIN guards g ON g.id=c.guard_id WHERE c.status!='cancelled' AND c.campaign_id=(SELECT id FROM leave_campaigns WHERE status='open' ORDER BY month DESC LIMIT 1) ORDER BY c.date,g.name",
+        "SELECT c.*,g.name AS guard_name,g.registration,g.platoon,g.base_shift FROM leave_choices c JOIN guards g ON g.id=c.guard_id WHERE c.status!='cancelled' AND c.campaign_id=(SELECT id FROM leave_campaigns WHERE status IN ('open','closed','published') ORDER BY month DESC LIMIT 1) ORDER BY c.date,g.name",
       ).all(),
       env.DB.prepare("SELECT o.*,v.prefix,v.type FROM vehicle_outages o JOIN vehicles v ON v.id=o.vehicle_id WHERE o.active=1 ORDER BY o.starts_on DESC").all(),
       env.DB.prepare("SELECT section_key,label,sort_order FROM schedule_sections ORDER BY sort_order,label").all(),
@@ -901,6 +901,34 @@ export async function POST(request: Request) {
       await env.DB.prepare("DELETE FROM movements WHERE id=?").bind(body.id).run();
       await writeAudit(request,{action:"delete",entityType:"movement",entityId:body.id,summary:`Removeu ${before.type} de ${before.guard_name}`,before,undoable:true});
       return Response.json({ok:true});
+    } else if (["leave_campaign_close", "leave_campaign_publish", "leave_campaign_reopen"].includes(String(body.action))) {
+      const action = String(body.action);
+      const campaignId = Number(body.campaignId);
+      const campaign = await env.DB.prepare("SELECT * FROM leave_campaigns WHERE id=?").bind(campaignId).first<Record<string, unknown>>();
+      if (!campaign) return Response.json({ error: "Campanha de folgas não encontrada." }, { status: 404 });
+      const waitlisted = await env.DB.prepare("SELECT COUNT(*) total FROM leave_choices WHERE campaign_id=? AND status='waitlist'").bind(campaignId).first<{ total: number }>();
+      const pending = Number(waitlisted?.total || 0);
+      if (action === "leave_campaign_close") {
+        if (campaign.status !== "open") return Response.json({ error: "Somente uma campanha aberta pode ser fechada." }, { status: 409 });
+        if (pending) return Response.json({ error: `Resolva as ${pending} solicitações da lista de espera antes de fechar a campanha.` }, { status: 409 });
+        await env.DB.prepare("UPDATE leave_campaigns SET status='closed',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='open'").bind(campaignId).run();
+        await writeAudit(request, { action: "close", entityType: "leave_campaign", entityId: campaignId, summary: `Fechou a campanha de folgas ${campaign.month}`, before: campaign, after: { ...campaign, status: "closed" }, undoable: true });
+        return Response.json({ ok: true, status: "closed", message: "Campanha fechada. Novos lançamentos estão bloqueados." });
+      }
+      if (action === "leave_campaign_publish") {
+        if (campaign.status !== "closed") return Response.json({ error: "Feche e confira a campanha antes de publicar." }, { status: 409 });
+        if (pending) return Response.json({ error: `Ainda existem ${pending} solicitações na lista de espera.` }, { status: 409 });
+        await syncConfirmedLeaves();
+        await env.DB.prepare("UPDATE leave_campaigns SET status='published',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='closed'").bind(campaignId).run();
+        await writeAudit(request, { action: "publish", entityType: "leave_campaign", entityId: campaignId, summary: `Publicou a campanha de folgas ${campaign.month}`, before: campaign, after: { ...campaign, status: "published" }, undoable: false });
+        return Response.json({ ok: true, status: "published", message: "Campanha publicada e integrada às escalas futuras." });
+      }
+      const reason = String(body.reason || "").trim();
+      if (reason.length < 5) return Response.json({ error: "Informe uma justificativa para reabrir a campanha." }, { status: 400 });
+      if (!["closed", "published"].includes(String(campaign.status))) return Response.json({ error: "A campanha já está aberta." }, { status: 409 });
+      await env.DB.prepare("UPDATE leave_campaigns SET status='open',updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(campaignId).run();
+      await writeAudit(request, { action: "reopen", entityType: "leave_campaign", entityId: campaignId, summary: `Reabriu a campanha de folgas ${campaign.month}`, before: campaign, after: { ...campaign, status: "open" }, reason, undoable: false });
+      return Response.json({ ok: true, status: "open", message: "Campanha reaberta. As alterações voltaram a ser permitidas." });
     } else if (body.action === "leave_limit_set") {
       const campaignId = Number(body.campaignId);
       const date = String(body.date || "").trim();
@@ -1013,8 +1041,9 @@ export async function POST(request: Request) {
       const monthLabel = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(year, monthNumber - 1, 1)));
       await env.DB.prepare("INSERT OR IGNORE INTO leave_campaigns (month,title,status,access_code) VALUES (?,?,?,?)")
         .bind(month, `Folgas de ${monthLabel}`, "open", `IMPORT-${month}`).run();
-      const campaign = await env.DB.prepare("SELECT id FROM leave_campaigns WHERE month=?").bind(month).first<{ id: number }>();
+      const campaign = await env.DB.prepare("SELECT id,status FROM leave_campaigns WHERE month=?").bind(month).first<{ id: number; status: string }>();
       if (!campaign) return Response.json({ error: "Não foi possível abrir a campanha mensal." }, { status: 500 });
+      if (campaign.status !== "open") return Response.json({ error: "Esta campanha está fechada. Reabra-a antes de importar novas folgas." }, { status: 409 });
       const results = await env.DB.batch(uniqueRows.map((row) => {
         const weekday = new Date(`${row.date}T12:00:00Z`).getUTCDay();
         const category = weekday === 0 || weekday === 6 ? "weekend" : "weekday";
@@ -1036,6 +1065,9 @@ export async function POST(request: Request) {
           { error: "A data não corresponde à categoria escolhida." },
           { status: 400 },
         );
+      const leaveCampaign = await env.DB.prepare("SELECT status FROM leave_campaigns WHERE id=?").bind(campaignId).first<{ status: string }>();
+      if (!leaveCampaign || leaveCampaign.status !== "open")
+        return Response.json({ error: "A campanha de folgas está fechada. Reabra-a antes de lançar alterações." }, { status: 409 });
       const guard = await env.DB.prepare("SELECT id,name,platoon,base_shift FROM guards WHERE id=? AND active=1").bind(guardId).first<{ id: number; name: string; platoon: string | null; base_shift: string | null }>();
       if (!guard)
         return Response.json({ error: "GM não encontrado ou inativo." }, { status: 404 });
@@ -1086,6 +1118,9 @@ export async function POST(request: Request) {
           { error: "Solicitação não encontrada." },
           { status: 404 },
         );
+      const approvalCampaign = await env.DB.prepare("SELECT status FROM leave_campaigns WHERE id=?").bind(choice.campaign_id).first<{ status: string }>();
+      if (!approvalCampaign || approvalCampaign.status !== "open")
+        return Response.json({ error: "A campanha de folgas está fechada. Reabra-a antes de aprovar." }, { status: 409 });
       const limit = await resolveLeaveCapacity(choice.campaign_id, choice.date, choice.platoon, guardLeavePeriod(choice.base_shift));
       if (!limit || Number(limit.used) >= Number(limit.capacity))
         return Response.json(
@@ -1106,6 +1141,9 @@ export async function POST(request: Request) {
       const before = await env.DB.prepare("SELECT c.*,g.name guard_name,g.platoon,g.base_shift FROM leave_choices c JOIN guards g ON g.id=c.guard_id WHERE c.id=?").bind(body.id).first<Record<string,unknown>>();
       if (!before) return Response.json({ error: "Solicitação não encontrada." }, { status: 404 });
       if (String(before.status) === "cancelled") return Response.json({ error: "Esta solicitação já foi cancelada." }, { status: 409 });
+      const cancellationCampaign = await env.DB.prepare("SELECT status FROM leave_campaigns WHERE id=?").bind(before.campaign_id).first<{ status: string }>();
+      if (!cancellationCampaign || cancellationCampaign.status !== "open")
+        return Response.json({ error: "A campanha de folgas está fechada. Reabra-a antes de cancelar." }, { status: 409 });
       await env.DB.batch([
         env.DB.prepare(
           "UPDATE leave_choices SET status='cancelled',updated_at=CURRENT_TIMESTAMP WHERE id=?",

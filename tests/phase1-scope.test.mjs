@@ -874,3 +874,21 @@ test("monthly leave capacity supports platoon overrides with a general fallback"
   assert.match(migration, /ADD COLUMN `shift`/);
   assert.match(migration, /campaign_date_platoon_shift/);
 });
+
+test("monthly leave campaigns have a guarded close, publish and reopen lifecycle", () => {
+  const api = readFileSync(resolve("app/api/admin/route.ts"), "utf8");
+  const dashboard = readFileSync(resolve("app/gestao-client.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/management.css"), "utf8");
+  assert.match(api, /leave_campaign_close/);
+  assert.match(api, /leave_campaign_publish/);
+  assert.match(api, /leave_campaign_reopen/);
+  assert.match(api, /Resolva as .*lista de espera/);
+  assert.match(api, /status='published'/);
+  assert.match(api, /justificativa/);
+  assert.match(dashboard, /campaignAction/);
+  assert.match(dashboard, /Fechar campanha/);
+  assert.match(dashboard, /Publicar campanha/);
+  assert.match(dashboard, /Reabrir com justificativa/);
+  assert.match(dashboard, /campaignLocked/);
+  assert.match(styles, /leave-campaign-status/);
+});
