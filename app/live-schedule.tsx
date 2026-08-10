@@ -97,6 +97,9 @@ function addLocalHours(value:string,hours:number){const date=new Date(value);dat
 function assignmentKey(kind: "post" | "vehicle", resourceId: string | number, shift: string) {
   return `${kind}:${resourceId}:${shift}`;
 }
+function resourceAssignmentKey(kind: "post" | "vehicle", resourceId: string | number) {
+  return `${kind}:${resourceId}`;
+}
 export function LiveSchedule() {
   const { date, setDate, hrefFor } = useScheduleDate();
   const [data, setData] = useState<State | null>(()=>readScheduleCache(date)),
@@ -169,12 +172,14 @@ export function LiveSchedule() {
     window.addEventListener("scroll",remember,{passive:true});
     return()=>{window.cancelAnimationFrame(restore);remember();window.removeEventListener("scroll",remember)};
   },[data?.date,date]);
+  const scheduleAssignments = data?.assignments;
+  const scheduleDate = data?.date;
   const assignmentIndex = useMemo(() => {
     const map = new Map<string, Rec[]>();
-    if (!data) return map;
-    for (const a of data.assignments) {
+    if (!scheduleAssignments || !scheduleDate) return map;
+    for (const a of scheduleAssignments) {
       for (const s of shifts) {
-        if (!assignmentOverlapsShift(a, data.date, s.id)) continue;
+        if (!assignmentOverlapsShift(a, scheduleDate, s.id)) continue;
         if (a.post_id != null) {
           const key = assignmentKey("post", Number(a.post_id), s.id);
           const list = map.get(key) || [];
@@ -190,7 +195,36 @@ export function LiveSchedule() {
       }
     }
     return map;
-  }, [data]);
+  }, [scheduleAssignments, scheduleDate]);
+  // These indexes are shared by every rendered row. Keeping them at the
+  // schedule level avoids each post/VTR scanning the full assignment list
+  // again, which is noticeable with a 200+ GM scale.
+  const allScheduleAssignments = useMemo(() => {
+    if (!scheduleAssignments) return [];
+    return [...new Map(scheduleAssignments.map((assignment) => [Number(assignment.id), assignment])).values()];
+  }, [scheduleAssignments]);
+  const assignmentById = useMemo(
+    () => new Map(allScheduleAssignments.map((assignment) => [Number(assignment.id), assignment])),
+    [allScheduleAssignments],
+  );
+  const resourceAssignmentIndex = useMemo(() => {
+    const map = new Map<string, Rec[]>();
+    for (const assignment of allScheduleAssignments) {
+      if (assignment.post_id != null) {
+        const key = resourceAssignmentKey("post", Number(assignment.post_id));
+        const list = map.get(key) || [];
+        list.push(assignment);
+        map.set(key, list);
+      }
+      if (assignment.vehicle_id != null) {
+        const key = resourceAssignmentKey("vehicle", Number(assignment.vehicle_id));
+        const list = map.get(key) || [];
+        list.push(assignment);
+        map.set(key, list);
+      }
+    }
+    return map;
+  }, [allScheduleAssignments]);
   const redeploymentGroups = useMemo(
     () => groupRedeploymentAssignments(data?.availableForRedeployment || []),
     [data?.availableForRedeployment],
@@ -954,6 +988,9 @@ export function LiveSchedule() {
                   }
                   shifts={visibleShifts}
                    assignmentIndex={assignmentIndex}
+                   resourceAssignments={resourceAssignmentIndex.get(resourceAssignmentKey(kind, Number(r.id))) || []}
+                   allScheduleAssignments={allScheduleAssignments}
+                   assignmentById={assignmentById}
                    serviceAdjustments={data.serviceAdjustments || []}
                    availableForRedeployment={data.availableForRedeployment}
                   redeploymentGroups={redeploymentGroups}
@@ -1393,6 +1430,9 @@ function Row({
   onToggleSection,
   shifts: visibleShifts,
   assignmentIndex,
+  resourceAssignments,
+  allScheduleAssignments,
+  assignmentById,
   serviceAdjustments,
   availableForRedeployment,
   redeploymentGroups,
@@ -1424,6 +1464,9 @@ function Row({
   onToggleSection: () => void;
   shifts: typeof SHIFT_DEFS;
   assignmentIndex: Map<string, Rec[]>;
+  resourceAssignments: Rec[];
+  allScheduleAssignments: Rec[];
+  assignmentById: Map<number, Rec>;
   serviceAdjustments: Rec[];
   availableForRedeployment: Rec[];
   redeploymentGroups: RedeploymentGroup[];
@@ -1451,8 +1494,6 @@ function Row({
   onAddInSection: (kind: "post" | "vehicle", section: string) => void;
   onRemoveResource: (kind: "post" | "vehicle", resource: Rec) => void;
 }) {
-  const knownAssignments=useMemo(()=>[...new Map([...assignmentIndex.values()].flat().map(item=>[Number(item.id),item])).values()],[assignmentIndex]);
-  const resourceAssignments=useMemo(()=>knownAssignments.filter(item=>kind==="post"?Number(item.post_id)===Number(resource.id):Number(item.vehicle_id)===Number(resource.id)),[kind,knownAssignments,resource.id]);
   const alignedAssignmentsByShift=useMemo(()=>new Map(visibleShifts.map(shift=>[
     shift.id,
     orderAssignmentsInResourceCell(assignmentIndex.get(assignmentKey(kind,Number(resource.id),shift.id))||[],resourceAssignments,kind),
@@ -1463,7 +1504,7 @@ function Row({
     if(String(assignment.work_kind)==="overtime_extension")return false;
     if(String(assignment.status)==="overtime"&&assignment.regular_ends_at&&String(assignment.ends_at)>String(assignment.regular_ends_at))return false;
     const period=isDayShift(shift)?"day":"night";
-    const related=knownAssignments.filter(item=>Number(item.guard_id)===Number(assignment.guard_id)&&String(item.work_kind)!=="overtime_extension"&&coveredOperationalShifts(item,date).some(id=>(isDayShift(id)?"day":"night")===period));
+    const related=allScheduleAssignments.filter(item=>Number(item.guard_id)===Number(assignment.guard_id)&&String(item.work_kind)!=="overtime_extension"&&coveredOperationalShifts(item,date).some(id=>(isDayShift(id)?"day":"night")===period));
     const latest=related.reduce((value,item)=>{const end=String(item.regular_ends_at||item.ends_at);return end>value?end:value},String(assignment.regular_ends_at||assignment.ends_at));
     const window=operationalShiftWindow(date,shift);
     return window.start<latest&&window.end>=latest;
@@ -1475,7 +1516,7 @@ function Row({
   function canPasteInShift(shift:string){
     if(!copiedAssignment)return false;
     const target=operationalShiftWindow(date,shift);
-    return ![...knownAssignments,...availableForRedeployment].some(item=>Number(item.guard_id)===Number(copiedAssignment.guard_id)&&String(item.starts_at)<target.end&&String(item.ends_at)>target.start);
+    return ![...allScheduleAssignments,...availableForRedeployment].some(item=>Number(item.guard_id)===Number(copiedAssignment.guard_id)&&String(item.starts_at)<target.end&&String(item.ends_at)>target.start);
   }
   function drop(e: DragEvent, shift: string, targetAssignmentId?: number) {
     e.preventDefault();
@@ -1498,12 +1539,10 @@ function Row({
     }
     const id = Number(e.dataTransfer.getData("text/assignment"));
     const sourceShift = e.dataTransfer.getData("text/assignment-source-shift") || undefined;
-    for (const list of assignmentIndex.values()) {
-      const assignment = list.find((a) => Number(a.id) === id);
-      if (assignment) {
-         void onMove(assignment, kind, resource, shift, sourceShift, targetAssignmentId);
-        return;
-      }
+    const assignment = assignmentById.get(id);
+    if (assignment) {
+      void onMove(assignment, kind, resource, shift, sourceShift, targetAssignmentId);
+      return;
     }
     const available = availableForRedeployment.find((a) => Number(a.id) === id);
      if (available) void onMove(available, kind, resource, shift, sourceShift, targetAssignmentId);
