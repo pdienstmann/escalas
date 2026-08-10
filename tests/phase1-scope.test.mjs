@@ -702,3 +702,16 @@ test("new catalog records update the local management view without a full reload
   assert.match(dashboard, /const sectionKey = `POST:\$\{String\(body\.groupName/);
   assert.match(dashboard, /return;\n\s*}\n\s*if \(action === "movement"/);
 });
+
+test("daily scale exposes contextual post editing without a full reload", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/workforce.css"), "utf8");
+  assert.match(schedule, /\[postEdit, setPostEdit\] = useState<Rec \| null>\(null\)/);
+  assert.match(schedule, /async function savePostQuick/);
+  assert.match(schedule, /action: "catalog_update"/);
+  assert.match(schedule, /entity: "post"/);
+  assert.match(schedule, /onEditPost=\{setPostEdit\}/);
+  assert.match(schedule, /function PostQuickEditor/);
+  assert.match(schedule, /className="resource-quick-button"/);
+  assert.match(styles, /\.resource-quick-button/);
+});

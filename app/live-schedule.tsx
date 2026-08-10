@@ -114,6 +114,7 @@ export function LiveSchedule() {
     [extensionPick, setExtensionPick] = useState<ExtensionPick | null>(null),
     [contextPick, setContextPick] = useState<Pick | null>(null),
     [vehicleEdit, setVehicleEdit] = useState<Rec | null>(null),
+    [postEdit, setPostEdit] = useState<Rec | null>(null),
     [resourceRemoval, setResourceRemoval] = useState<ResourceRemovalPick | null>(null),
     [createOpen, setCreateOpen] = useState(false),
     [createKind, setCreateKind] = useState<"guard" | "post" | "vehicle" | "section">("guard"),
@@ -874,6 +875,46 @@ export function LiveSchedule() {
       setSaving(false);
     }
   }
+  async function savePostQuick(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!data || !postEdit || savingRef.current) return;
+    const body = Object.fromEntries(new FormData(e.currentTarget));
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      const response = await fetch("/api/admin", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "catalog_update",
+          entity: "post",
+          id: postEdit.id,
+          name: String(body.name || "").trim(),
+          groupName: String(body.groupName || "").trim(),
+          sortOrder: Number(body.sortOrder || 99),
+        }),
+      });
+      const result = await response.json();
+      setMessage(response.ok ? "Posto atualizado na escala." : result.error);
+      if (!response.ok) return;
+      const updated = {
+        ...postEdit,
+        name: String(body.name || "").trim(),
+        group_name: String(body.groupName || "").trim(),
+        sort_order: Number(body.sortOrder || 99),
+      };
+      setData((current) => current ? {
+        ...current,
+        posts: current.posts.map((post) => Number(post.id) === Number(updated.id) ? updated : post),
+      } : current);
+      setPostEdit(null);
+    } catch {
+      setMessage("Nao foi possivel atualizar o posto. A escala exibida foi preservada.");
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  }
   async function removeResourceFromDay() {
     if (!data || !resourceRemoval || savingRef.current) return;
     savingRef.current=true;setSaving(true);
@@ -1183,6 +1224,7 @@ export function LiveSchedule() {
                   onMoveGroup={moveGroup}
                   onHolePick={openHoleSuggest}
                   onEditVehicle={setVehicleEdit}
+                  onEditPost={setPostEdit}
                   onAddToResource={(kind,resource,shift)=>setResourceDialog({
                     kind,
                     initialResourceId:Number(resource.id),
@@ -1349,6 +1391,14 @@ export function LiveSchedule() {
           saving={saving}
           onClose={() => setVehicleEdit(null)}
           onSave={saveVehicleQuick}
+        />
+      )}
+      {postEdit && (
+        <PostQuickEditor
+          post={postEdit}
+          saving={saving}
+          onClose={() => setPostEdit(null)}
+          onSave={savePostQuick}
         />
       )}
       {redeployPick && (
@@ -1582,6 +1632,16 @@ function VehicleQuickEditor({data,vehicle,saving,onClose,onSave}:{data:State;veh
     <footer><button type="button" onClick={onClose}>Cancelar</button><button className="save" disabled={saving}>{saving?"Salvando…":selectedId===String(vehicle.id)?"Salvar zona":"Trocar VTR e mover equipe"}</button></footer>
   </form></div>
 }
+function PostQuickEditor({post,saving,onClose,onSave}:{post:Rec;saving:boolean;onClose:()=>void;onSave:(e:FormEvent<HTMLFormElement>)=>void}) {
+  return <div className="vehicle-quick-backdrop"><form className="vehicle-quick-editor" role="dialog" aria-modal="true" aria-labelledby="post-quick-title" onSubmit={onSave}>
+    <header><div><small>EDIÇÃO NA PRÓPRIA ESCALA</small><h2 id="post-quick-title">{String(post.name)}</h2><p>Atualize o posto sem sair do dia aberto.</p></div><button type="button" onClick={onClose} aria-label="Fechar editor de posto">×</button></header>
+    <label>Nome do posto<input name="name" defaultValue={String(post.name || "")} required /></label>
+    <label>Seção da escala<input name="groupName" defaultValue={String(post.group_name || "")} required placeholder="Ex.: Postos fixos" /></label>
+    <label>Ordem de exibição<input name="sortOrder" type="number" min="0" defaultValue={String(post.sort_order ?? 99)} /></label>
+    <p className="vehicle-quick-help">A alteração mantém os GMs e os horários deste posto. A seção e a ordem também serão usadas no PDF.</p>
+    <footer><button type="button" onClick={onClose}>Cancelar</button><button className="save" disabled={saving}>{saving ? "Salvando…" : "Salvar posto"}</button></footer>
+  </form></div>
+}
 function ResourceRemovalDialog({pick,saving,onClose,onConfirm}:{pick:ResourceRemovalPick;saving:boolean;onClose:()=>void;onConfirm:()=>void}){
   const label=String(pick.kind==="vehicle"?pick.resource.prefix:pick.resource.name);
   const guards=[...new Map(pick.assignments.map((assignment)=>[Number(assignment.guard_id),String(assignment.guard_name)])).values()];
@@ -1640,6 +1700,7 @@ type RowProps = {
     event: ReactMouseEvent<HTMLButtonElement>,
   ) => void;
   onEditVehicle: (vehicle: Rec) => void;
+  onEditPost: (post: Rec) => void;
   onAddToResource: (kind: "post" | "vehicle", resource: Rec, shift: string) => void;
   onAddInSection: (kind: "post" | "vehicle", section: string) => void;
   onRemoveResource: (kind: "post" | "vehicle", resource: Rec) => void;
@@ -1686,6 +1747,7 @@ function Row({
   onMoveGroup,
   onHolePick,
   onEditVehicle,
+  onEditPost,
   onAddToResource,
   onAddInSection,
   onRemoveResource,
@@ -1850,6 +1912,16 @@ function Row({
               className="vehicle-quick-button"
               aria-label={`Editar ${String(resource.prefix)} e zona`}
               onClick={() => onEditVehicle(resource)}
+            >
+              Editar
+            </button>
+          )}
+          {kind === "post" && (
+            <button
+              type="button"
+              className="resource-quick-button"
+              aria-label={`Editar ${String(resource.name)}`}
+              onClick={() => onEditPost(resource)}
             >
               Editar
             </button>
