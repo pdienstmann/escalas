@@ -7,6 +7,9 @@ CREATE TABLE IF NOT EXISTS `service_adjustments` (
   `service_date` text NOT NULL,
   `starts_at` text NOT NULL,
   `ends_at` text NOT NULL,
+  `counterpart_service_date` text,
+  `counterpart_starts_at` text,
+  `counterpart_ends_at` text,
   `request_ref` text,
   `notes` text,
   `status` text DEFAULT 'active' NOT NULL,
@@ -16,3 +19,4 @@ CREATE TABLE IF NOT EXISTS `service_adjustments` (
 );
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS `idx_service_adjustments_date` ON `service_adjustments` (`service_date`,`status`);
+CREATE INDEX IF NOT EXISTS `idx_service_adjustments_counterpart_date` ON `service_adjustments` (`counterpart_service_date`,`status`);

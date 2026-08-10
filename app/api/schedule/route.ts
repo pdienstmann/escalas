@@ -370,6 +370,9 @@ async function ensureServiceAdjustmentsTable() {
     service_date TEXT NOT NULL,
     starts_at TEXT NOT NULL,
     ends_at TEXT NOT NULL,
+    counterpart_service_date TEXT,
+    counterpart_starts_at TEXT,
+    counterpart_ends_at TEXT,
     request_ref TEXT,
     notes TEXT,
     status TEXT NOT NULL DEFAULT 'active',
@@ -377,8 +380,17 @@ async function ensureServiceAdjustmentsTable() {
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`).run();
+  const columns = new Set(
+    (await env.DB.prepare("PRAGMA table_info(service_adjustments)").all<{ name: string }>()).results.map((column) => column.name),
+  );
+  for (const [name, definition] of [["counterpart_service_date", "TEXT"], ["counterpart_starts_at", "TEXT"], ["counterpart_ends_at", "TEXT"]] as const) {
+    if (!columns.has(name)) await env.DB.prepare(`ALTER TABLE service_adjustments ADD COLUMN ${name} ${definition}`).run();
+  }
   await env.DB.prepare(
     "CREATE INDEX IF NOT EXISTS idx_service_adjustments_date ON service_adjustments(service_date,status)",
+  ).run();
+  await env.DB.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_service_adjustments_counterpart_date ON service_adjustments(counterpart_service_date,status)",
   ).run();
 }
 
@@ -433,8 +445,8 @@ export async function GET(request: Request) {
       env.DB.prepare(`SELECT sa.*,g.name guard_name,c.name counterpart_guard_name
         FROM service_adjustments sa JOIN guards g ON g.id=sa.guard_id
         LEFT JOIN guards c ON c.id=sa.counterpart_guard_id
-        WHERE sa.service_date=? AND sa.status='active'
-        ORDER BY sa.starts_at,sa.id`).bind(date).all(),
+        WHERE sa.status='active' AND (sa.service_date=? OR sa.counterpart_service_date=?)
+        ORDER BY CASE WHEN sa.service_date=? THEN sa.starts_at ELSE sa.counterpart_starts_at END,sa.id`).bind(date,date,date).all(),
     ]);
   const operationAssignments=(await env.DB.prepare(`SELECT os.guard_id,o.starts_at,o.ends_at FROM operation_slots os JOIN operations o ON o.id=os.operation_id WHERE o.schedule_id=? AND o.status!='cancelled' AND os.guard_id IS NOT NULL`).bind(schedule?.id).all<{guard_id:number;starts_at:string;ends_at:string}>()).results;
   const blocked = new Set([
@@ -723,23 +735,32 @@ export async function POST(request: Request) {
     await ensureServiceAdjustmentsTable();
     const subtype = String(b.subtype || "");
     const serviceDate = String(b.serviceDate || "");
+    const counterpartServiceDate = subtype === "swap" ? String(b.counterpartServiceDate || "") : null;
     const guardId = Number(b.guardId || 0);
     const counterpartGuardId = Number(b.counterpartGuardId || 0) || null;
     const requestRef = String(b.requestRef || "").trim() || null;
     const notes = String(b.notes || "").trim() || null;
-    if (!isScheduleDate(serviceDate) || !["negative_early", "negative_full", "positive", "swap"].includes(subtype) || !guardId)
+    if (!isScheduleDate(serviceDate) || !["negative_early", "negative_late", "negative_full", "positive", "swap"].includes(subtype) || !guardId)
       return Response.json({ error: "Informe o GM, a data e o tipo do lançamento." }, { status: 400 });
     const guard = await env.DB.prepare("SELECT id,name FROM guards WHERE id=? AND active=1").bind(guardId).first<{id:number;name:string}>();
     if (!guard) return Response.json({ error: "GM não encontrado ou inativo." }, { status: 404 });
     if (subtype === "swap" && (!counterpartGuardId || counterpartGuardId === guardId))
       return Response.json({ error: "Selecione dois GMs diferentes para a troca." }, { status: 400 });
+    if (subtype === "swap" && (!counterpartServiceDate || !isScheduleDate(counterpartServiceDate) || counterpartServiceDate === serviceDate))
+      return Response.json({ error: "Informe dois dias diferentes para a troca de serviço." }, { status: 400 });
     if (counterpartGuardId) {
       const counterpart = await env.DB.prepare("SELECT id FROM guards WHERE id=? AND active=1").bind(counterpartGuardId).first();
       if (!counterpart) return Response.json({ error: "O segundo GM não foi encontrado ou está inativo." }, { status: 404 });
     }
     await ensureBase(serviceDate);
+    if (counterpartServiceDate) await ensureBase(counterpartServiceDate);
     const schedule = await env.DB.prepare("SELECT id FROM schedules WHERE date=?").bind(serviceDate).first<{id:number}>();
     if (!schedule) return Response.json({ error: "Não foi possível abrir a escala da data." }, { status: 500 });
+    const counterpartSchedule = counterpartServiceDate
+      ? await env.DB.prepare("SELECT id FROM schedules WHERE date=?").bind(counterpartServiceDate).first<{id:number}>()
+      : null;
+    if (subtype === "swap" && !counterpartSchedule)
+      return Response.json({ error: "Não foi possível abrir a escala do segundo dia." }, { status: 500 });
     const tomorrow = new Date(`${serviceDate}T12:00:00Z`);
     tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
     const dayStart = `${serviceDate}T00:00`;
@@ -750,26 +771,43 @@ export async function POST(request: Request) {
     const dayEnd = `${tomorrowDate}T07:00`;
     const startsAt = subtype === "negative_full" ? dayStart : String(b.startsAt || "");
     const endsAt = subtype === "negative_full" ? dayEnd : String(b.endsAt || "");
+    const counterpartStartsAt = subtype === "swap" ? String(b.counterpartStartsAt || "") : null;
+    const counterpartEndsAt = subtype === "swap" ? String(b.counterpartEndsAt || "") : null;
     const startMs = Date.parse(startsAt), endMs = Date.parse(endsAt);
     if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs)
       return Response.json({ error: "Informe um intervalo válido para o lançamento." }, { status: 400 });
-    const loadGuardAssignments = async (id:number) => (await env.DB.prepare(
+    const counterpartStartMs = counterpartStartsAt ? Date.parse(counterpartStartsAt) : NaN;
+    const counterpartEndMs = counterpartEndsAt ? Date.parse(counterpartEndsAt) : NaN;
+    if (subtype === "swap" && (!Number.isFinite(counterpartStartMs) || !Number.isFinite(counterpartEndMs) || counterpartEndMs <= counterpartStartMs))
+      return Response.json({ error: "Informe um intervalo válido para o segundo dia da troca." }, { status: 400 });
+    if (subtype === "swap" && (!startsAt.startsWith(`${serviceDate}T`) || !counterpartStartsAt?.startsWith(`${counterpartServiceDate}T`)))
+      return Response.json({ error: "As datas dos horários precisam corresponder aos respectivos dias da troca." }, { status: 400 });
+    const loadGuardAssignments = async (scheduleId:number, id:number, rangeStart:string, rangeEnd:string) => (await env.DB.prepare(
       "SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.schedule_id=? AND a.guard_id=? AND a.starts_at<? AND a.ends_at>? ORDER BY a.starts_at,a.id",
-    ).bind(schedule.id,id,endsAt,startsAt).all<Record<string,unknown>>()).results;
+    ).bind(scheduleId,id,rangeEnd,rangeStart).all<Record<string,unknown>>()).results;
     const base = {
       kind: subtype === "swap" ? "swap" : "time_bank",
-      subtype, guardId, counterpartGuardId, serviceDate, startsAt, endsAt, requestRef, notes,
+      subtype, guardId, counterpartGuardId, serviceDate, startsAt, endsAt,
+      counterpartServiceDate, counterpartStartsAt, counterpartEndsAt, requestRef, notes,
     };
-    const existingAdjustment = await env.DB.prepare(`SELECT id FROM service_adjustments
-      WHERE status='active' AND service_date=?
-        AND (guard_id=? OR counterpart_guard_id=? OR guard_id=? OR counterpart_guard_id=?)
-        AND starts_at<? AND ends_at>? LIMIT 1`)
-      .bind(serviceDate, guardId, guardId, counterpartGuardId || -1, counterpartGuardId || -1, endsAt, startsAt)
-      .first();
+    const existingAdjustment = subtype === "swap"
+      ? await env.DB.prepare(`SELECT id FROM service_adjustments
+          WHERE status='active'
+            AND (guard_id=? OR counterpart_guard_id=? OR guard_id=? OR counterpart_guard_id=?)
+            AND ((service_date=? AND starts_at<? AND ends_at>?) OR
+                 (counterpart_service_date=? AND counterpart_starts_at<? AND counterpart_ends_at>?)) LIMIT 1`)
+        .bind(guardId, guardId, counterpartGuardId || -1, counterpartGuardId || -1, serviceDate, endsAt, startsAt, counterpartServiceDate, counterpartEndsAt, counterpartStartsAt)
+        .first()
+      : await env.DB.prepare(`SELECT id FROM service_adjustments
+          WHERE status='active' AND service_date=?
+            AND (guard_id=? OR counterpart_guard_id=?)
+            AND starts_at<? AND ends_at>? LIMIT 1`)
+        .bind(serviceDate, guardId, guardId, endsAt, startsAt)
+        .first();
     if (existingAdjustment)
       return Response.json({ error: "Já existe um banco ou troca ativa para este GM nesse intervalo." }, { status: 409 });
     if (subtype === "positive") {
-      const existing = await loadGuardAssignments(guardId);
+      const existing = await loadGuardAssignments(schedule.id, guardId, startsAt, endsAt);
       if (existing.length) return Response.json({ error: `${guard.name} já possui uma designação neste intervalo.` }, { status: 409 });
       const conflictingMovement = await env.DB.prepare("SELECT type FROM movements WHERE guard_id=? AND status='approved' AND starts_at<? AND ends_at>? LIMIT 1").bind(guardId,endsAt,startsAt).first<{type:string}>();
       if (conflictingMovement) return Response.json({ error: `${guard.name} possui uma movimentação neste intervalo.` }, { status: 409 });
@@ -786,42 +824,64 @@ export async function POST(request: Request) {
       return Response.json({ok:true,adjustment,auditEventId,message:`BH+ de ${guard.name} criado e colocado à disposição para ${serviceDate}.`});
     }
     if (subtype === "swap") {
-      const left = await loadGuardAssignments(guardId);
-      const right = await loadGuardAssignments(counterpartGuardId!);
-      if (!left.length || !right.length || left.length !== right.length || left.some((item,index)=>String(item.starts_at)!==String(right[index].starts_at)||String(item.ends_at)!==String(right[index].ends_at)))
-        return Response.json({ error: "A troca precisa encontrar os dois GMs escalados nos mesmos horários." }, { status: 409 });
-      const snapshot = JSON.stringify({assignments:[...left,...right]});
-      const updates = left.map((item,index) => {
-        const other = right[index];
-        return env.DB.prepare("UPDATE assignments SET post_id=?,vehicle_id=?,shift=?,role=?,status='swap',request_ref=?,is_reassigned=1,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(other.post_id||null,other.vehicle_id||null,other.shift,other.role,requestRef,`Troca de serviço com ${other.guard_name}`,item.id);
-      }).concat(right.map((item,index) => {
-        const other = left[index];
-        return env.DB.prepare("UPDATE assignments SET post_id=?,vehicle_id=?,shift=?,role=?,status='swap',request_ref=?,is_reassigned=1,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(other.post_id||null,other.vehicle_id||null,other.shift,other.role,requestRef,`Troca de serviço com ${other.guard_name}`,item.id);
-      }));
+      const firstService = await loadGuardAssignments(schedule.id, counterpartGuardId!, startsAt, endsAt);
+      const secondService = await loadGuardAssignments(counterpartSchedule!.id, guardId, counterpartStartsAt!, counterpartEndsAt!);
+      if (!firstService.length || !secondService.length)
+        return Response.json({ error: "A troca precisa encontrar o GM correspondente escalado nos dois dias e horários informados." }, { status: 409 });
+      for (const item of firstService) {
+        const conflict = await assertAssignable(schedule.id, guardId, String(item.starts_at), String(item.ends_at), 0);
+        if (conflict) return Response.json({ error: `Não foi possível colocar ${guard.name} no primeiro dia: ${conflict.error}` }, { status: conflict.status });
+      }
+      for (const item of secondService) {
+        const conflict = await assertAssignable(counterpartSchedule!.id, counterpartGuardId!, String(item.starts_at), String(item.ends_at), 0);
+        if (conflict) return Response.json({ error: `Não foi possível colocar o segundo GM no segundo dia: ${conflict.error}` }, { status: conflict.status });
+      }
+      const snapshot = JSON.stringify({assignments:[...firstService,...secondService]});
+      const updates = firstService.map((item) =>
+        env.DB.prepare("UPDATE assignments SET guard_id=?,status='swap',request_ref=?,is_reassigned=1,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+          .bind(guardId,requestRef,`Troca de serviço com ${guard.name} · dia ${serviceDate}`,item.id),
+      ).concat(secondService.map((item) =>
+        env.DB.prepare("UPDATE assignments SET guard_id=?,status='swap',request_ref=?,is_reassigned=1,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+          .bind(counterpartGuardId,requestRef,`Troca de serviço com ${guard.name} · dia ${counterpartServiceDate}`,item.id),
+      ));
       const results = await env.DB.batch([
-        env.DB.prepare("INSERT INTO service_adjustments (kind,subtype,guard_id,counterpart_guard_id,service_date,starts_at,ends_at,request_ref,notes,status,snapshot_json) VALUES (?,?,?,?,?,?,?,?,?,'active',?)").bind(base.kind,subtype,guardId,counterpartGuardId,serviceDate,startsAt,endsAt,requestRef,notes,snapshot),
+        env.DB.prepare("INSERT INTO service_adjustments (kind,subtype,guard_id,counterpart_guard_id,service_date,starts_at,ends_at,counterpart_service_date,counterpart_starts_at,counterpart_ends_at,request_ref,notes,status,snapshot_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'active',?)").bind(base.kind,subtype,guardId,counterpartGuardId,serviceDate,startsAt,endsAt,counterpartServiceDate,counterpartStartsAt,counterpartEndsAt,requestRef,notes,snapshot),
         ...updates,
       ]);
       const adjustmentId = Number(results[0].meta.last_row_id);
       const adjustment = await env.DB.prepare("SELECT sa.*,g.name guard_name,c.name counterpart_guard_name FROM service_adjustments sa JOIN guards g ON g.id=sa.guard_id LEFT JOIN guards c ON c.id=sa.counterpart_guard_id WHERE sa.id=?").bind(adjustmentId).first();
       const auditEventId = await writeAudit(request,{action:"create",entityType:"service_adjustment",entityId:adjustmentId,summary:`Registrou troca entre ${guard.name} e ${adjustment?.counterpart_guard_name}`,after:adjustment as Record<string,unknown>,undoable:false});
-      return Response.json({ok:true,adjustment,auditEventId,message:`Troca aplicada entre ${guard.name} e ${adjustment?.counterpart_guard_name}.`});
+      return Response.json({ok:true,adjustment,auditEventId,message:`Troca aplicada: ${guard.name} assume ${serviceDate} e ${adjustment?.counterpart_guard_name} assume ${counterpartServiceDate}.`});
     }
-    const assignments = await loadGuardAssignments(guardId);
+    const assignments = await loadGuardAssignments(schedule.id, guardId, startsAt, endsAt);
     const affectedAssignments = subtype === "negative_full"
       ? assignments
       : assignments.filter((item) => Date.parse(String(item.ends_at)) > endMs);
+    if (!affectedAssignments.length)
+      return Response.json({ error: `${guard.name} não possui uma designação compatível com o intervalo informado.` }, { status: 409 });
+    if (subtype === "negative_late" || subtype === "negative_early") {
+      for (const item of affectedAssignments) {
+        const itemStart = Date.parse(String(item.starts_at));
+        const itemEnd = Date.parse(String(item.ends_at));
+        if (subtype === "negative_late" && (endMs <= itemStart || endMs >= itemEnd))
+          return Response.json({ error: "Para BH- de entrada tardia, o novo início deve ficar entre o início e o fim do horário original." }, { status: 400 });
+        if (subtype === "negative_early" && (endMs <= itemStart || endMs >= itemEnd))
+          return Response.json({ error: "Para BH- de saída antecipada, o novo fim deve ficar entre o início e o fim do horário original." }, { status: 400 });
+      }
+    }
     const snapshot = JSON.stringify({assignments: affectedAssignments});
     const updates = affectedAssignments.map((item) => subtype === "negative_full"
       ? env.DB.prepare("UPDATE assignments SET post_id=NULL,vehicle_id=NULL,status='time_bank',request_ref=?,is_reassigned=1,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(requestRef,notes||`BH- de ${guard.name}`,item.id)
-      : env.DB.prepare("UPDATE assignments SET ends_at=?,regular_ends_at=CASE WHEN regular_ends_at IS NOT NULL AND regular_ends_at>? THEN ? ELSE regular_ends_at END,status='time_bank',request_ref=?,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(endsAt,endsAt,endsAt,requestRef,notes||`BH- de ${guard.name}`,item.id));
+      : subtype === "negative_late"
+        ? env.DB.prepare("UPDATE assignments SET starts_at=?,status='time_bank',request_ref=?,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(endsAt,requestRef,notes||`BH- de ${guard.name}`,item.id)
+        : env.DB.prepare("UPDATE assignments SET ends_at=?,regular_ends_at=CASE WHEN regular_ends_at IS NOT NULL AND regular_ends_at>? THEN ? ELSE regular_ends_at END,status='time_bank',request_ref=?,reassignment_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(endsAt,endsAt,endsAt,requestRef,notes||`BH- de ${guard.name}`,item.id));
     const results = await env.DB.batch([
       env.DB.prepare("INSERT INTO service_adjustments (kind,subtype,guard_id,service_date,starts_at,ends_at,request_ref,notes,status,snapshot_json) VALUES (?,?,?,?,?,?,?,?,'active',?)").bind(base.kind,subtype,guardId,serviceDate,startsAt,endsAt,requestRef,notes,snapshot),
       ...updates,
     ]);
     const adjustmentId = Number(results[0].meta.last_row_id);
     const adjustment = await env.DB.prepare("SELECT sa.*,g.name guard_name FROM service_adjustments sa JOIN guards g ON g.id=sa.guard_id WHERE sa.id=?").bind(adjustmentId).first();
-    const auditEventId = await writeAudit(request,{action:"create",entityType:"service_adjustment",entityId:adjustmentId,summary:`Registrou ${subtype==='negative_full'?'BH- integral':'BH- com saída antecipada'} de ${guard.name}`,after:adjustment as Record<string,unknown>,undoable:false});
+    const auditEventId = await writeAudit(request,{action:"create",entityType:"service_adjustment",entityId:adjustmentId,summary:`Registrou ${subtype==='negative_full'?'BH- integral':subtype==='negative_late'?'BH- com entrada tardia':'BH- com saída antecipada'} de ${guard.name}`,after:adjustment as Record<string,unknown>,undoable:false});
     return Response.json({ok:true,adjustment,auditEventId,message:`Banco de horas negativo aplicado para ${guard.name} em ${serviceDate}.`});
   }
   if (b.action === "cancel_service_adjustment") {

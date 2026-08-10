@@ -470,9 +470,13 @@ test("general service adjustments expose BH-, BH+ and service swaps in schedule 
   assert.match(api, /create_service_adjustment/);
   assert.match(api, /cancel_service_adjustment/);
   assert.match(api, /time_bank_positive/);
+  assert.match(api, /negative_late/);
+  assert.match(api, /counterpartServiceDate/);
+  assert.match(api, /counterpart_service_date/);
   assert.match(api, /subtype === "swap"/);
   assert.match(api, /serviceAdjustments/);
   assert.match(admin, /service_adjustments/);
+  assert.match(admin, /Trocas entre dias devem ser registradas/);
   assert.match(dashboard, /Banco de horas e trocas/);
   assert.match(dashboard, /BH\+ · pagar banco em dia extra/);
   assert.match(schedule, /service-adjustment-bottom/);

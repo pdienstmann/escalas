@@ -204,7 +204,7 @@ function PrintPage({
                 <p key={String(item.id)} className={`print-adjustment-${String(item.subtype)}`}>
                   <span className="print-adjustment-kind">{printServiceAdjustmentCode(String(item.subtype))}</span>
                   <b>{String(item.guard_name)}{item.counterpart_guard_name ? ` ⇄ ${String(item.counterpart_guard_name)}` : ""}</b>
-                  <small>{printServiceAdjustmentLabel(String(item.subtype))} · {String(item.starts_at).slice(11, 16)}–{String(item.ends_at).slice(11, 16)} · {item.request_ref ? `Req. ${String(item.request_ref)}` : "Sem requerimento"}</small>
+                  <small>{printServiceAdjustmentRange(item, data.date)}{item.request_ref ? ` · Req. ${String(item.request_ref)}` : " · Sem requerimento"}</small>
                 </p>
               ))}
             </section>
@@ -246,8 +246,16 @@ function movementDetail(m: Rec) {
     return date(start);
   return `${date(start)} ${time(start)}–${time(end)}`;
 }
-function printServiceAdjustmentLabel(subtype:string){return ({negative_early:"BH- · saída antecipada",negative_full:"BH- · retirada integral",positive:"BH+ · dia extra",swap:"Troca de serviço"} as Record<string,string>)[subtype]||subtype}
-function printServiceAdjustmentCode(subtype:string){return ({negative_early:"BH-",negative_full:"BH-",positive:"BH+",swap:"TROCA"} as Record<string,string>)[subtype]||"AJUSTE"}
+function printServiceAdjustmentLabel(subtype:string){return ({negative_early:"BH- · saída antecipada",negative_late:"BH- · entrada tardia",negative_full:"BH- · retirada integral",positive:"BH+ · dia extra",swap:"Troca de serviço"} as Record<string,string>)[subtype]||subtype}
+function printServiceAdjustmentCode(subtype:string){return ({negative_early:"BH-",negative_late:"BH-",negative_full:"BH-",positive:"BH+",swap:"TROCA"} as Record<string,string>)[subtype]||"AJUSTE"}
+function printServiceAdjustmentRange(item:Rec,date:string){
+  const isSecond=String(item.service_date)!==date&&String(item.counterpart_service_date||"")===date;
+  const start=String(isSecond?item.counterpart_starts_at:item.starts_at||"").slice(11,16),end=String(isSecond?item.counterpart_ends_at:item.ends_at||"").slice(11,16);
+  const label=printServiceAdjustmentLabel(String(item.subtype));
+  if(String(item.subtype)!=="swap")return `${label} · ${start}–${end}`;
+  const otherDate=isSecond?String(item.service_date):String(item.counterpart_service_date||"");
+  return `${label} · ${start}–${end} · troca com ${otherDate}`;
+}
 const status = (s: string) =>
   s === "overtime" ? "HE" : s === "time_bank" ? "BH" : "TROCA";
 const vehicleIcon=(type:string)=>type==="moto"?"🏍️":type==="pickup"?"🛻":type==="van"?"🚐":type==="suv"?"🚙":"🚓";

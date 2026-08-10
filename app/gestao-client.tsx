@@ -510,7 +510,6 @@ export function GestaoClient({
             <option value="medical_leave">Atestado / licença</option>
             <option value="technical_reserve">Reserva técnica</option>
             <option value="time_bank">Banco de horas</option>
-            <option value="swap">Troca de serviço</option>
           </select>
           <input name="startsAt" type="datetime-local" required />
           <input name="endsAt" type="datetime-local" required />
@@ -542,30 +541,41 @@ export function GestaoClient({
           <Form title="Novo banco ou troca" onSubmit={(e) => void saveServiceAdjustment(e)}>
             <select name="subtype" required defaultValue="negative_early">
               <option value="negative_early">BH- · sair mais cedo</option>
+              <option value="negative_late">BH- · iniciar mais tarde</option>
               <option value="negative_full">BH- · retirar o dia inteiro</option>
               <option value="positive">BH+ · pagar banco em dia extra</option>
               <option value="swap">Troca de serviço · dois GMs</option>
             </select>
-            <GuardSelect guards={data.guards} />
-            <select name="counterpartGuardId" defaultValue="">
-              <option value="">Segundo GM (somente troca)</option>
-              {data.guards.map((guard) => <option key={guard.id} value={String(guard.id)}>{guard.name}</option>)}
-            </select>
-            <label className="field-caption">Data da escala<input name="serviceDate" type="date" defaultValue={date} required /></label>
+            <div className="field-caption"><span>GM que assume o primeiro serviço</span><GuardSelect guards={data.guards} /></div>
+            <label className="field-caption">GM que assume o segundo serviço (somente troca)
+              <select name="counterpartGuardId" defaultValue="">
+                <option value="">Selecione o segundo GM</option>
+                {data.guards.map((guard) => <option key={guard.id} value={String(guard.id)}>{guard.name}</option>)}
+              </select>
+            </label>
             <div className="two">
-              <label className="field-caption">Início<input name="startsAt" type="datetime-local" defaultValue={`${date}T07:00`} required /></label>
-              <label className="field-caption">Fim / saída<input name="endsAt" type="datetime-local" defaultValue={`${date}T19:00`} required /></label>
+              <label className="field-caption">Dia do primeiro serviço<input name="serviceDate" type="date" defaultValue={date} required /></label>
+              <label className="field-caption">Dia do segundo serviço (troca)<input name="counterpartServiceDate" type="date" defaultValue={date} /></label>
+            </div>
+            <div className="two">
+              <label className="field-caption">Início do primeiro serviço<input name="startsAt" type="datetime-local" defaultValue={`${date}T07:00`} required /></label>
+              <label className="field-caption">Fim do primeiro serviço<input name="endsAt" type="datetime-local" defaultValue={`${date}T19:00`} required /></label>
+            </div>
+            <div className="two">
+              <label className="field-caption">Início do segundo serviço<input name="counterpartStartsAt" type="datetime-local" defaultValue={`${date}T07:00`} /></label>
+              <label className="field-caption">Fim do segundo serviço<input name="counterpartEndsAt" type="datetime-local" defaultValue={`${date}T19:00`} /></label>
             </div>
             <input name="requestRef" placeholder="Nº do requerimento" required />
             <input name="notes" placeholder="Observação ou motivo" />
-            <small className="service-adjustment-help">BH- integral retira o GM e deixa o registro no rodapé. BH+ cria um GM à disposição para ser remanejado.</small>
+            <small className="service-adjustment-help">Na troca, o primeiro dia é o serviço originalmente do segundo GM; o segundo dia é o serviço originalmente do primeiro GM. BH- de entrada tardia usa o intervalo entre o início previsto e o horário em que o GM realmente começa.</small>
           </Form>
           <section className="service-adjustment-guide">
             <h3>Como cada opção funciona</h3>
             <p><b>BH- parcial:</b> encurta o horário e destaca o quadradinho.</p>
+            <p><b>BH- entrada tardia:</b> desloca o início do card para o horário informado.</p>
             <p><b>BH- integral:</b> remove o GM do dia, sem apagar o cadastro.</p>
             <p><b>BH+:</b> coloca o GM à disposição; ao escalar, o requerimento acompanha o card.</p>
-            <p><b>Troca:</b> troca os postos dos dois GMs nos mesmos horários e sinaliza ambos.</p>
+            <p><b>Troca:</b> use dois dias: o GM selecionado assume o serviço do segundo GM no primeiro dia, e o segundo GM assume o serviço do selecionado no segundo dia.</p>
           </section>
         </div>
         {message && <p className="notice" role="status">{message}</p>}
@@ -573,7 +583,7 @@ export function GestaoClient({
           <header><div><small>LANÇAMENTOS ATIVOS DO MÊS</small><h3>Banco de horas e trocas aplicados</h3></div><span>{data.serviceAdjustments.length}</span></header>
           {data.serviceAdjustments.length ? data.serviceAdjustments.map((item) => (
             <article key={String(item.id)} className={`service-adjustment-card ${String(item.subtype)}`}>
-              <div><b>{String(item.guard_name)}</b>{item.counterpart_guard_name && <span> ⇄ {String(item.counterpart_guard_name)}</span>}<small>{serviceAdjustmentLabel(String(item.subtype))} · {String(item.service_date)} · {String(item.starts_at).slice(11,16)}–{String(item.ends_at).slice(11,16)}</small></div>
+              <div><b>{String(item.guard_name)}</b>{item.counterpart_guard_name && <span> ⇄ {String(item.counterpart_guard_name)}</span>}<small>{serviceAdjustmentRange(item)}</small></div>
               <div><strong>{item.request_ref ? `Req. ${item.request_ref}` : "Sem requerimento"}</strong>{item.notes && <small>{String(item.notes)}</small>}</div>
               <button type="button" className="danger-link" onClick={() => void cancelServiceAdjustment(item)}>Cancelar e restaurar</button>
             </article>
@@ -922,7 +932,7 @@ function MovementEditor({item,guards,onClose,onSubmit}:{item:Item;guards:Item[];
   return <div className="catalog-backdrop" role="presentation"><form className="catalog-editor" onSubmit={send}>
     <header><div><small>EDITAR MOVIMENTAÇÃO</small><h2>{String(item.guard_name)}</h2></div><button type="button" onClick={onClose} aria-label="Fechar">×</button></header>
     <label>GM<select name="guardId" defaultValue={String(item.guard_id)} required>{guards.map(g=><option key={String(g.id)} value={String(g.id)}>{String(g.name)}</option>)}</select></label>
-    <label>Tipo<select name="type" defaultValue={String(item.type)}><option value="day_off">Folga</option><option value="vacation">Férias</option><option value="course">Curso</option><option value="medical_leave">Atestado / licença</option><option value="technical_reserve">Reserva técnica</option><option value="time_bank">Banco de horas</option><option value="swap">Troca de serviço</option></select></label>
+    <label>Tipo<select name="type" defaultValue={String(item.type)}><option value="day_off">Folga</option><option value="vacation">Férias</option><option value="course">Curso</option><option value="medical_leave">Atestado / licença</option><option value="technical_reserve">Reserva técnica</option><option value="time_bank">Banco de horas</option>{String(item.type)==="swap"&&<option value="swap">Troca legada — use Banco de horas e trocas</option>}</select></label>
     <label>Início<input name="startsAt" type="datetime-local" defaultValue={toLocalInput(item.starts_at)} required/></label>
     <label>Fim<input name="endsAt" type="datetime-local" defaultValue={toLocalInput(item.ends_at)} required/></label>
     <label>Nº do requerimento<input name="requestRef" defaultValue={String(item.request_ref||"")}/></label>
@@ -1000,10 +1010,16 @@ function movementPeriod(item: Item) {
 function serviceAdjustmentLabel(subtype: string) {
   return ({
     negative_early: "BH- · saída antecipada",
+    negative_late: "BH- · entrada tardia",
     negative_full: "BH- · retirada integral",
     positive: "BH+ · dia extra",
     swap: "Troca de serviço",
   } as Record<string,string>)[subtype] || subtype;
+}
+function serviceAdjustmentRange(item: Item) {
+  const first = `${String(item.service_date)} · ${String(item.starts_at).slice(11,16)}–${String(item.ends_at).slice(11,16)}`;
+  if (!item.counterpart_service_date) return `${serviceAdjustmentLabel(String(item.subtype))} · ${first}`;
+  return `${serviceAdjustmentLabel(String(item.subtype))} · ${first} ⇄ ${String(item.counterpart_service_date)} · ${String(item.counterpart_starts_at || "").slice(11,16)}–${String(item.counterpart_ends_at || "").slice(11,16)}`;
 }
 function FleetAvailability({date,vehicles,outages,onSubmit,onDelete}:{date:string;vehicles:Item[];outages:Item[];onSubmit:(e:FormEvent<HTMLFormElement>)=>void;onDelete:(id:Item["id"])=>void}){
   const activeOutages=outages.filter(item=>String(item.starts_on)<=date&&(!item.ends_on||String(item.ends_on)>=date));

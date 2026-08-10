@@ -1034,7 +1034,7 @@ export function LiveSchedule() {
                       <span className="service-adjustment-kind">{liveServiceAdjustmentCode(String(item.subtype))}</span>
                       <div>
                         <b>{String(item.guard_name)}{item.counterpart_guard_name ? ` ⇄ ${String(item.counterpart_guard_name)}` : ""}</b>
-                        <small>{liveServiceAdjustmentLabel(String(item.subtype))} · {String(item.starts_at).slice(11, 16)}–{String(item.ends_at).slice(11, 16)}</small>
+                        <small>{liveServiceAdjustmentRange(item, data.date)}</small>
                       </div>
                     </div>
                     <div className="service-adjustment-entry-ref">
@@ -1284,8 +1284,16 @@ function movementDetail(m: Rec) {
     return `Dia ${date(start)}`;
   return `${date(start)} · ${time(start)}–${time(end)}`;
 }
-function liveServiceAdjustmentLabel(subtype:string){return ({negative_early:"BH- · saída antecipada",negative_full:"BH- · retirada integral",positive:"BH+ · dia extra",swap:"Troca de serviço"} as Record<string,string>)[subtype]||subtype}
-function liveServiceAdjustmentCode(subtype:string){return ({negative_early:"BH-",negative_full:"BH-",positive:"BH+",swap:"TROCA"} as Record<string,string>)[subtype]||"AJUSTE"}
+function liveServiceAdjustmentLabel(subtype:string){return ({negative_early:"BH- · saída antecipada",negative_late:"BH- · entrada tardia",negative_full:"BH- · retirada integral",positive:"BH+ · dia extra",swap:"Troca de serviço"} as Record<string,string>)[subtype]||subtype}
+function liveServiceAdjustmentCode(subtype:string){return ({negative_early:"BH-",negative_late:"BH-",negative_full:"BH-",positive:"BH+",swap:"TROCA"} as Record<string,string>)[subtype]||"AJUSTE"}
+function liveServiceAdjustmentRange(item:Rec,date:string){
+  const isSecond=String(item.service_date)!==date&&String(item.counterpart_service_date||"")===date;
+  const start=String(isSecond?item.counterpart_starts_at:item.starts_at||"").slice(11,16),end=String(isSecond?item.counterpart_ends_at:item.ends_at||"").slice(11,16);
+  const label=liveServiceAdjustmentLabel(String(item.subtype));
+  if(String(item.subtype)!=="swap")return `${label} · ${start}–${end}${item.request_ref?` · Req. ${String(item.request_ref)}`:""}`;
+  const otherDate=isSecond?String(item.service_date):String(item.counterpart_service_date||"");
+  return `${label} · ${start}–${end} · troca com ${otherDate}${item.request_ref?` · Req. ${String(item.request_ref)}`:""}`;
+}
 function VehicleQuickEditor({data,vehicle,saving,onClose,onSave}:{data:State;vehicle:Rec;saving:boolean;onClose:()=>void;onSave:(e:FormEvent<HTMLFormElement>)=>void}) {
   const[selectedId,setSelectedId]=useState(String(vehicle.id));
   const[zone,setZone]=useState(String(vehicle.zone||""));

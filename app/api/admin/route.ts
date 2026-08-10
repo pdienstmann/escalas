@@ -249,6 +249,9 @@ async function ensureServiceAdjustmentsTable(){
     service_date TEXT NOT NULL,
     starts_at TEXT NOT NULL,
     ends_at TEXT NOT NULL,
+    counterpart_service_date TEXT,
+    counterpart_starts_at TEXT,
+    counterpart_ends_at TEXT,
     request_ref TEXT,
     notes TEXT,
     status TEXT NOT NULL DEFAULT 'active',
@@ -256,7 +259,14 @@ async function ensureServiceAdjustmentsTable(){
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`).run();
+  const columns = new Set(
+    (await env.DB.prepare("PRAGMA table_info(service_adjustments)").all<{name:string}>()).results.map((column) => column.name),
+  );
+  for (const [name, definition] of [["counterpart_service_date", "TEXT"], ["counterpart_starts_at", "TEXT"], ["counterpart_ends_at", "TEXT"]] as const) {
+    if (!columns.has(name)) await env.DB.prepare(`ALTER TABLE service_adjustments ADD COLUMN ${name} ${definition}`).run();
+  }
   await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_service_adjustments_date ON service_adjustments(service_date,status)").run();
+  await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_service_adjustments_counterpart_date ON service_adjustments(counterpart_service_date,status)").run();
 }
 
 function assignmentTimes(date:string,shift:string){
@@ -351,8 +361,8 @@ export async function GET(request: Request) {
       env.DB.prepare(`SELECT sa.*,g.name guard_name,c.name counterpart_guard_name
         FROM service_adjustments sa JOIN guards g ON g.id=sa.guard_id
         LEFT JOIN guards c ON c.id=sa.counterpart_guard_id
-        WHERE sa.service_date>=? AND sa.service_date<? AND sa.status='active'
-        ORDER BY sa.service_date,sa.starts_at,sa.id`).bind(monthStart,monthEnd).all(),
+        WHERE sa.status='active' AND ((sa.service_date>=? AND sa.service_date<?) OR (sa.counterpart_service_date>=? AND sa.counterpart_service_date<?))
+        ORDER BY sa.service_date,sa.starts_at,sa.id`).bind(monthStart,monthEnd,monthStart,monthEnd).all(),
     ]);
   return Response.json({
     guards: guards.results,
@@ -659,6 +669,8 @@ export async function POST(request: Request) {
             : "Cadastro desativado.",
       });
     } else if (body.action === "movement") {
+      if (String(body.type || "") === "swap")
+        return Response.json({ error: "Trocas entre dias devem ser registradas em Banco de horas e trocas, informando os dois dias e os dois GMs." }, { status: 400 });
       const created = await env.DB.prepare(
         "INSERT INTO movements (guard_id,type,starts_at,ends_at,request_ref,notes) VALUES (?,?,?,?,?,?)",
       )
@@ -677,6 +689,8 @@ export async function POST(request: Request) {
       await writeAudit(request,{action:"create",entityType:"movement",entityId:Number(created.meta.last_row_id),summary:`Registrou ${body.type} para ${movement?.guard_name}`,after:movement as Record<string,unknown>,undoable:true});
       return Response.json({ ok: true, movement });
     } else if (body.action === "movement_update") {
+      if (String(body.type || "") === "swap")
+        return Response.json({ error: "Trocas entre dias devem ser registradas em Banco de horas e trocas, informando os dois dias e os dois GMs." }, { status: 400 });
       const before = await env.DB.prepare("SELECT m.*,g.name guard_name FROM movements m JOIN guards g ON g.id=m.guard_id WHERE m.id=?").bind(body.id).first<Record<string,unknown>>();
       if (!before) return Response.json({error:"Movimentação não encontrada."},{status:404});
       await env.DB.prepare("UPDATE movements SET guard_id=?,type=?,starts_at=?,ends_at=?,request_ref=?,notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
