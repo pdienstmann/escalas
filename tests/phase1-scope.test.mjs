@@ -179,6 +179,17 @@ test("selected GM cards expose a direct move flow with available resources", () 
   assert.match(usability, /\.inline-move-picker/);
 });
 
+test("selected regular GM cards expose an explicit lane-position picker", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const usability = readFileSync(resolve("app/usability.css"), "utf8");
+  assert.match(schedule, /className="quick-position-trigger"/);
+  assert.match(schedule, /inline-position-picker/);
+  assert.match(schedule, /void onMove\(a,kind,resource,s\.id,s\.id,Number\(target\.id\)\)/);
+  assert.match(schedule, /const sameShift = sourceShift \? sourceShift === shift/);
+  assert.match(schedule, /Colocar no final/);
+  assert.match(usability, /\.inline-position-picker/);
+});
+
 test("completed cells expose a quick available-GM picker before the advanced editor", () => {
   const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
   const usability = readFileSync(resolve("app/usability.css"), "utf8");

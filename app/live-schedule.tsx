@@ -643,7 +643,10 @@ export function LiveSchedule() {
     const sameResource = kind === "post"
       ? Number(assignment.post_id) === Number(resource.id)
       : Number(assignment.vehicle_id) === Number(resource.id);
-    const sameShift = String(assignment.shift) === shift && (!sourceShift || sourceShift === shift);
+    // A cross-turn assignment can be rendered in both columns. When the user
+    // is only changing its lane in the visible cell, the drag source is the
+    // reliable cell identity; do not rewrite the assignment's real shift.
+    const sameShift = sourceShift ? sourceShift === shift : String(assignment.shift) === shift;
     const reorder = (expectedUpdatedAt?: unknown) => postAssignment({
       action: "reorder_resource_assignments",
       scheduleId: data.schedule.id,
@@ -1585,6 +1588,7 @@ function Row({
   const [dropTargetId, setDropTargetId] = useState<number | null>(null);
   const [moveAssignmentId, setMoveAssignmentId] = useState<number | null>(null);
   const [moveDestination, setMoveDestination] = useState("");
+  const [positionAssignmentId, setPositionAssignmentId] = useState<number | null>(null);
   const [addShift, setAddShift] = useState<string | null>(null);
   const [addQuery, setAddQuery] = useState("");
   const moveChoices = useMemo(
@@ -1817,6 +1821,16 @@ function Row({
                     </label>
                     <div><button type="button" disabled={!moveDestination} onClick={()=>moveDirectly(a,s.id)}>Confirmar</button><button type="button" onClick={()=>{setMoveAssignmentId(null);setMoveDestination("")}}>Cancelar</button></div>
                   </div>}
+                  {String(a.work_kind)!=="overtime_extension"&&list.filter(item=>String(item.work_kind)!=="overtime_extension"&&Number(item.id)!==Number(a.id)).length>0&&<>
+                    <button type="button" className="quick-position-trigger" onClick={()=>setPositionAssignmentId(current=>current===Number(a.id)?null:Number(a.id))}>
+                      ↕ Ajustar posição
+                    </button>
+                    {positionAssignmentId===Number(a.id)&&<div className="inline-position-picker" role="group" aria-label={`Escolher posição de ${String(a.guard_name)}`}>
+                      <small>Este GM ficará antes de:</small>
+                      {list.filter(item=>String(item.work_kind)!=="overtime_extension"&&Number(item.id)!==Number(a.id)).map(target=><button key={String(target.id)} type="button" onClick={()=>{setPositionAssignmentId(null);void onMove(a,kind,resource,s.id,s.id,Number(target.id))}}>↕ {String(target.guard_name)}</button>)}
+                      <button type="button" className="position-last" onClick={()=>{setPositionAssignmentId(null);void onMove(a,kind,resource,s.id,s.id)}}>Colocar no final</button>
+                    </div>}
+                  </>}
                 </div>}
               </Fragment>)})}
               {copiedAssignment&&pasteAllowed&&<button type="button" className="cell-paste-assignment" onClick={()=>onPaste(kind,resource,s.id)}><span aria-hidden="true">▣</span> Colar aqui</button>}

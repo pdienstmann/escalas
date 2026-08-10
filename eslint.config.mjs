@@ -14,6 +14,12 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Wrangler/Vinext place generated bundles and temporary chunks outside the
+    // source tree. They are deployment artifacts, not files we lint.
+    ".wrangler/**",
+    "work/**",
+    "tmp/**",
+    ".vinext/**",
   ]),
   eslint.configs.recommended,
   ...tseslint.configs.recommended,

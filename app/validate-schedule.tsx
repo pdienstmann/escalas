@@ -22,7 +22,6 @@ export function ValidateSchedule() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    setData(null);
     fetch(`/api/schedule?date=${date}&_=${Date.now()}`, { cache: "no-store" })
       .then((r) => r.json())
       .then(setData)
@@ -46,7 +45,12 @@ export function ValidateSchedule() {
     }
   }
 
-  if (!data) {
+  // Keep the previous response in memory while switching dates, but never
+  // render it for the newly selected date. This avoids a stale flash without
+  // forcing a synchronous state update from the effect.
+  const currentData = data?.date === date ? data : null;
+
+  if (!currentData) {
     return (
       <ModuleLoading
         area="validação operacional"
@@ -55,8 +59,8 @@ export function ValidateSchedule() {
     );
   }
 
-  const expected = (data.posts.length + data.vehicles.length * 2) * 4;
-  const filled = data.assignments.length;
+  const expected = (currentData.posts.length + currentData.vehicles.length * 2) * 4;
+  const filled = currentData.assignments.length;
 
   return (
     <main className="validation-page">
@@ -64,7 +68,7 @@ export function ValidateSchedule() {
       <header>
         <span>VALIDAÇÃO OPERACIONAL</span>
         <h1>Conferência antes da publicação</h1>
-        <p>{formatScheduleDate(data.date)}</p>
+        <p>{formatScheduleDate(currentData.date)}</p>
       </header>
       <div className="validation-stats">
         <article>
