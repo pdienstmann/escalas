@@ -216,7 +216,19 @@ async function promoteNextWaitlistedLeave(campaignId: number, date: string) {
   ).bind(next.id).run();
   if (!Number(promoted.meta.changes || 0)) return null;
   await syncConfirmedLeaves(Number(next.id));
+  await normalizeWaitlistPositions(campaignId, date);
   return { ...next, status: "confirmed", position: null };
+}
+
+async function normalizeWaitlistPositions(campaignId: number, date: string) {
+  const waiting = (await env.DB.prepare(
+    "SELECT id FROM leave_choices WHERE campaign_id=? AND date=? AND status='waitlist' ORDER BY COALESCE(position,2147483647),id",
+  ).bind(campaignId, date).all<{ id: number }>()).results;
+  if (waiting.length) {
+    await env.DB.batch(waiting.map((item, index) => env.DB.prepare(
+      "UPDATE leave_choices SET position=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='waitlist'",
+    ).bind(index + 1, item.id)));
+  }
 }
 async function ensureSections(){
   const groups=(await env.DB.prepare("SELECT group_name,MIN(sort_order) sort_order FROM posts WHERE active=1 GROUP BY group_name").all<{group_name:string;sort_order:number}>()).results;
@@ -983,6 +995,7 @@ export async function POST(request: Request) {
       const promoted = String(before.status) === "confirmed"
         ? await promoteNextWaitlistedLeave(Number(before.campaign_id), String(before.date))
         : null;
+      if (!promoted) await normalizeWaitlistPositions(Number(before.campaign_id), String(before.date));
       const after = await env.DB.prepare("SELECT * FROM leave_choices WHERE id=?").bind(body.id).first();
       await writeAudit(request,{action:"cancel",entityType:"leave_choice",entityId:body.id,summary:`Cancelou a folga de ${before?.guard_name}`,before,after:after as Record<string,unknown>});
       if (promoted) {

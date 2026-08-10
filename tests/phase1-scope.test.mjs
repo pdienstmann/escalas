@@ -845,6 +845,7 @@ test("cancelling a confirmed leave promotes the next waitlisted GM and syncs the
   const api = readFileSync(resolve("app/api/admin/route.ts"), "utf8");
   const dashboard = readFileSync(resolve("app/gestao-client.tsx"), "utf8");
   assert.match(api, /promoteNextWaitlistedLeave/);
+  assert.match(api, /normalizeWaitlistPositions/);
   assert.match(api, /status='waitlist'/);
   assert.match(api, /promotedGuardName/);
   assert.match(api, /syncConfirmedLeaves\(Number\(next\.id\)\)/);
