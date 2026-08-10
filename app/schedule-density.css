@@ -7,3 +7,29 @@
 .live-person-card .inline-he-extension{position:absolute;z-index:2;top:4px;right:4px;display:flex;align-items:center;justify-content:center;gap:2px;min-width:36px;margin:0;padding:3px 5px;border:1px solid #075f34;border-radius:5px;background:#087b43;color:#fff;font-size:8px;font-weight:900;line-height:1.1;box-shadow:0 1px 2px #083c242b}.live-person-card .inline-he-extension span{font-size:10px}.live-person-card .inline-he-extension:hover,.live-person-card .inline-he-extension:focus-visible{border-color:#064a29;background:#056a38;outline:2px solid #8bd0a5}.live-person-card .inline-he-extension.early{border-color:#872732;background:#a92e39;color:#fff}.live-person-card .inline-he-extension.early:hover{background:#8e2530}
 @media(max-width:900px){.schedule tbody tr.post-row>td,.schedule tbody tr.vehicle-row>td{min-height:56px;padding-top:5px!important;padding-bottom:5px!important;border-bottom-width:4px}.drop-cell{padding:5px!important}.resource{min-height:39px}}
 @media print{.schedule tbody tr.post-row>td,.schedule tbody tr.vehicle-row>td{min-height:0;padding:2px 4px!important;border-top:0;border-bottom:1px solid #aeb9c3}.schedule tbody tr.post-row>td:first-child,.schedule tbody tr.vehicle-row>td:first-child{padding:2px 4px;border-left:0;border-right:1px solid #aeb9c3}.live-person-card .live-person,.live-person-card.has-he-action .live-person{min-height:0;padding:1px}.live-person-card .inline-he-extension{display:none!important}}
+/* Compactação operacional: preserva botões, horários e ações, reduzindo apenas o espaço estrutural da matriz. */
+.app.compact .schedule{min-width:1040px}
+.app.compact .schedule th{padding:4px 5px;font-size:10px}
+.app.compact .schedule th:first-child{width:210px}
+.app.compact .schedule tbody tr.post-row>td,.app.compact .schedule tbody tr.vehicle-row>td{min-height:48px;padding-top:4px!important;padding-bottom:4px!important;border-bottom-width:3px}
+.app.compact .schedule tbody tr.post-row>td:first-child,.app.compact .schedule tbody tr.vehicle-row>td:first-child{padding:5px 7px}
+.app.compact .resource{min-height:35px;gap:5px}
+.app.compact .resource>div{padding:0}
+.app.compact .resource>div>b{font-size:10px;line-height:1.1}
+.app.compact .resource>div>small{font-size:9px;line-height:1.1}
+.app.compact .drop-cell{padding:4px!important}
+.app.compact .live-person-card+.live-person-card{margin-top:2px}
+.app.compact .live-person-card .live-person{min-height:27px;padding:3px 4px;font-size:11px}
+.app.compact .live-person-card .live-person small{font-size:9px;line-height:1}
+.app.compact .live-hole{min-height:30px;padding:4px;font-size:9px}
+.app.compact .cell-add-member{margin-top:3px;padding:3px;font-size:8px}
+.operational-group-heading td{height:24px!important;padding:4px 9px!important;border-top:2px solid #91afc5!important;border-bottom:1px solid #c6d8e5!important;background:#eaf3f9!important;color:#184c73;text-align:left}
+.operational-group-heading td:before{content:"";display:inline-block;width:5px;height:18px;margin-right:7px;border-radius:3px;background:#0d679d;vertical-align:middle}
+.operational-group-title{font-size:10px;font-weight:900;letter-spacing:.06em}
+.operational-group-heading small{margin-left:7px;color:#607d92;font-size:9px;font-weight:600}
+.resource-unit-tags{display:flex;flex-wrap:wrap;gap:3px;margin-top:2px}
+.resource-unit-tags em{display:inline-block;padding:1px 4px;border-radius:7px;font-size:8px;font-style:normal;font-weight:900;line-height:1.1;white-space:nowrap}
+.resource-group-chip{background:#e5f1fa;color:#145b88}
+.resource-team-chip{background:#f0eafa;color:#5b3f90}
+@media(max-width:700px){.app.compact .schedule{min-width:900px}.app.compact .schedule th:first-child{width:190px}.operational-group-heading td{padding:4px 7px!important}.operational-group-heading small{display:none}}
+@media print{.operational-group-heading td{height:auto!important;padding:2px 4px!important;border-top:1px solid #9eaeba!important}.operational-group-heading td:before{width:3px;height:10px;margin-right:4px}.resource-unit-tags{gap:2px}.resource-unit-tags em{padding:0 3px;font-size:6px}}

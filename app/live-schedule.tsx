@@ -5,6 +5,7 @@ import { ScheduleNav } from "./schedule-nav";
 import { useScheduleDate } from "./use-schedule-date";
 import { formatScheduleDate } from "../lib/schedule-date";
 import { orderScheduleResources } from "../lib/schedule-sections";
+import { operationalGroupLabel, operationalGroupOrder, operationalTeamLabel, operationalTeamOrder } from "../lib/operational-groups";
 import {
   groupRedeploymentAssignments,
   mergeScheduleAssignments,
@@ -242,7 +243,7 @@ export function LiveSchedule() {
   const resources = useMemo(() => {
     if (!data) return [];
     const q = deferredQuery.toLowerCase().trim();
-    return orderScheduleResources(data.vehicles, data.posts, data.sections).filter((x) => {
+    const filtered = orderScheduleResources(data.vehicles, data.posts, data.sections).filter((x) => {
       const text = `${x.r.name || ""} ${x.r.prefix || ""} ${x.r.zone || ""} ${x.r.group_name || ""} ${x.section}`
         .toLowerCase();
       if (q && !text.includes(q)) {
@@ -261,6 +262,13 @@ export function LiveSchedule() {
       }
       return true;
     });
+    return filtered.sort((left, right) =>
+      left.order - right.order ||
+      left.section.localeCompare(right.section, "pt-BR") ||
+      operationalGroupOrder(left.r) - operationalGroupOrder(right.r) ||
+      operationalTeamOrder(left.r) - operationalTeamOrder(right.r) ||
+      String(left.r.prefix || left.r.name || "").localeCompare(String(right.r.prefix || right.r.name || ""), "pt-BR"),
+    );
   }, [assignmentIndex, data, deferredQuery, view]);
   const sectionOptions = useMemo(
     () => [...new Set(resources.map((item) => item.section))],
@@ -1066,6 +1074,13 @@ export function LiveSchedule() {
               {resources.map(({ kind, r, section }, index) => {
                 const first = index === 0 || resources[index - 1].section !== section;
                 const last = index === resources.length - 1 || resources[index + 1].section !== section;
+                const operationalGroup = operationalGroupLabel(r);
+                const operationalTeam = operationalTeamLabel(r);
+                const previousResource = resources[index - 1]?.r;
+                const groupFirst = Boolean(operationalGroup && (
+                  first ||
+                  operationalGroupLabel(previousResource || {}) !== operationalGroup
+                ));
                 const isCollapsed = Boolean(collapsed[section]);
                 if (isCollapsed && !first) return null;
                 return (
@@ -1073,10 +1088,13 @@ export function LiveSchedule() {
                 <MemoizedRow
                   date={data.date}
                   kind={kind}
-                  resource={r}
-                  section={section}
-                  first={first}
-                  collapsed={isCollapsed}
+                   resource={r}
+                   section={section}
+                   first={first}
+                   groupFirst={groupFirst}
+                   operationalGroup={operationalGroup}
+                   operationalTeam={operationalTeam}
+                   collapsed={isCollapsed}
                   onToggleSection={() =>
                     setCollapsed((current) => ({
                       ...current,
@@ -1531,6 +1549,9 @@ type RowProps = {
   resource: Rec;
   section: string;
   first: boolean;
+  groupFirst: boolean;
+  operationalGroup: string | null;
+  operationalTeam: string | null;
   collapsed: boolean;
   onToggleSection: () => void;
   shifts: typeof SHIFT_DEFS;
@@ -1577,6 +1598,9 @@ function Row({
   resource,
   section,
   first,
+  groupFirst,
+  operationalGroup,
+  operationalTeam,
   collapsed,
   onToggleSection,
   shifts: visibleShifts,
@@ -1737,6 +1761,14 @@ function Row({
           </td>
         </tr>
       )}
+      {!collapsed && groupFirst && operationalGroup && (
+        <tr className="operational-group-heading">
+          <td colSpan={1 + visibleShifts.length}>
+            <span className="operational-group-title">{operationalGroup}</span>
+            <small>Grupamento operacional</small>
+          </td>
+        </tr>
+      )}
       {!collapsed && (
       <tr className={kind === "vehicle" ? "vehicle-row" : "post-row"}>
         <td className="resource">
@@ -1750,6 +1782,12 @@ function Row({
                 ? `⌖ ${resource.zone || "Zona não definida"}`
                 : resource.group_name}
             </small>
+            {(operationalGroup || operationalTeam) && (
+              <span className="resource-unit-tags" aria-label="Classificação operacional">
+                {operationalGroup && <em className="resource-group-chip">{operationalGroup}</em>}
+                {operationalTeam && <em className="resource-team-chip">Equipe {operationalTeam}</em>}
+              </span>
+            )}
           </div>
           {kind === "vehicle" && (
             <button
@@ -1937,6 +1975,9 @@ const MemoizedRow = memo(Row, (previous, next) =>
   previous.resource === next.resource &&
   previous.section === next.section &&
   previous.first === next.first &&
+  previous.groupFirst === next.groupFirst &&
+  previous.operationalGroup === next.operationalGroup &&
+  previous.operationalTeam === next.operationalTeam &&
   previous.collapsed === next.collapsed &&
   previous.shifts === next.shifts &&
   previous.assignmentIndex === next.assignmentIndex &&

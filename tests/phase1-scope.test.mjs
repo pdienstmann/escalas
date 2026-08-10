@@ -17,6 +17,7 @@ import { orderAssignmentsInResourceCell, orderedResourceGuardIds } from "../lib/
 import { suggestionPosition } from "../lib/suggestion-position.ts";
 import { compactRequestReference } from "../lib/request-reference.ts";
 import { copiedBlockStatus } from "../lib/copy-rules.ts";
+import { operationalGroupLabel, operationalGroupOrder, operationalTeamLabel } from "../lib/operational-groups.ts";
 
 test("request references stay compact and visible in the schedule and PDF", () => {
   const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
@@ -74,6 +75,19 @@ test("orderScheduleResources uses shared section order for schedule and PDF", ()
       "post:10:SEDE DA GM",
     ],
   );
+});
+
+test("operational groups stay compact and recognizable in the schedule", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const density = readFileSync(resolve("app/schedule-density.css"), "utf8");
+  assert.equal(operationalGroupLabel({ name: "Base GESCOM", group_name: "POSTOS DIVERSOS" }), "GESCOM");
+  assert.equal(operationalGroupLabel({ name: "Canil Municipal" }), "CANIL");
+  assert.equal(operationalTeamLabel({ name: "Motos Alfa" }), "ALFA");
+  assert.equal(operationalGroupOrder({ name: "ROMU" }) < operationalGroupOrder({ name: "Outro" }), true);
+  assert.match(schedule, /className="operational-group-heading"/);
+  assert.match(schedule, /resource-unit-tags/);
+  assert.match(density, /\.app\.compact \.schedule tbody tr\.post-row/);
+  assert.match(density, /\.operational-group-heading/);
 });
 
 test("redeployment visibility rule keeps crew when vehicle leaves active set", () => {
