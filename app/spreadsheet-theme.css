@@ -402,6 +402,39 @@
     color: #1b5078;
   }
 
+  .schedule tbody tr.operational-team-heading td {
+    height: 21px !important;
+    padding: 3px 12px 3px 22px !important;
+    border-top: 1px solid #c6d8e5 !important;
+    border-bottom: 1px dashed #d6e1ea !important;
+    background: #f7fafc !important;
+    color: #3b5972;
+    font-size: 9px;
+    font-weight: 900;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+
+  .schedule tbody tr.operational-team-heading td::before {
+    content: "";
+    display: inline-block;
+    width: 4px;
+    height: 13px;
+    margin-right: 6px;
+    border-radius: 2px;
+    background: #8ca8bd;
+    vertical-align: -2px;
+  }
+
+  .schedule tbody tr.operational-team-heading small {
+    margin-left: 7px;
+    color: #71879a;
+    font-size: 8px;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
   .schedule tbody tr.post-row > td,
   .schedule tbody tr.vehicle-row > td {
     min-height: 52px;
@@ -670,6 +703,14 @@
     }
 
     .schedule tbody tr.group .section-heading-summary {
+      display: none;
+    }
+
+    .schedule tbody tr.operational-team-heading td {
+      padding-left: 16px !important;
+    }
+
+    .schedule tbody tr.operational-team-heading small {
       display: none;
     }
 

@@ -1290,9 +1290,15 @@ export function LiveSchedule() {
                 const previousResource = resources[index - 1]?.r;
                 const previousKind = resources[index - 1]?.kind;
                 const previousOperationalGroup = previousResource ? resourceOperationalMeta(previousKind || kind, previousResource).group : null;
+                const previousOperationalTeam = previousResource ? resourceOperationalMeta(previousKind || kind, previousResource).team : null;
                 const groupFirst = Boolean(operationalGroup && (
                   first ||
                   previousOperationalGroup !== operationalGroup
+                ));
+                const teamFirst = Boolean(operationalGroup && operationalTeam && (
+                  first ||
+                  previousOperationalGroup !== operationalGroup ||
+                  previousOperationalTeam !== operationalTeam
                 ));
                 const isCollapsed = Boolean(collapsed[section]);
                 if (isCollapsed && !first) return null;
@@ -1310,6 +1316,7 @@ export function LiveSchedule() {
                    onDragEnd={() => setDraggingAssignmentId(null)}
                    first={first}
                    groupFirst={groupFirst}
+                   teamFirst={teamFirst}
                    operationalGroup={operationalGroup}
                    operationalTeam={operationalTeam}
                    operationalGroupColor={operationalGroupColor}
@@ -1878,6 +1885,7 @@ type RowProps = {
   onDragEnd: () => void;
   first: boolean;
   groupFirst: boolean;
+  teamFirst: boolean;
   operationalGroup: string | null;
   operationalTeam: string | null;
   operationalGroupColor: string | null;
@@ -1937,6 +1945,7 @@ function Row({
   onDragEnd,
   first,
   groupFirst,
+  teamFirst,
   operationalGroup,
   operationalTeam,
   operationalGroupColor,
@@ -2163,6 +2172,14 @@ function Row({
           <td colSpan={1 + visibleShifts.length} style={operationalGroupColor ? { borderTopColor: operationalGroupColor } : undefined}>
             <span className="operational-group-title" style={operationalGroupColor ? { color: operationalGroupColor } : undefined}>{operationalGroup}</span>
             <small>Grupamento operacional</small>
+          </td>
+        </tr>
+      )}
+      {!collapsed && teamFirst && operationalTeam && (
+        <tr className="operational-team-heading">
+          <td colSpan={1 + visibleShifts.length}>
+            <span>Equipe {operationalTeam}</span>
+            <small>composição operacional</small>
           </td>
         </tr>
       )}
@@ -2395,6 +2412,7 @@ const MemoizedRow = memo(Row, (previous, next) =>
   previous.draggingAssignmentId === next.draggingAssignmentId &&
   previous.first === next.first &&
   previous.groupFirst === next.groupFirst &&
+  previous.teamFirst === next.teamFirst &&
   previous.operationalGroup === next.operationalGroup &&
   previous.operationalTeam === next.operationalTeam &&
   previous.operationalGroupColor === next.operationalGroupColor &&

@@ -80,6 +80,7 @@ test("orderScheduleResources uses shared section order for schedule and PDF", ()
 test("operational groups stay compact and recognizable in the schedule", () => {
   const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
   const density = readFileSync(resolve("app/schedule-density.css"), "utf8");
+  const theme = readFileSync(resolve("app/spreadsheet-theme.css"), "utf8");
   assert.equal(operationalGroupLabel({ name: "Base GESCOM", group_name: "POSTOS DIVERSOS" }), "GESCOM");
   assert.equal(operationalGroupLabel({ name: "Canil Municipal" }), "CANIL");
   assert.equal(operationalTeamLabel({ name: "Motos Alfa" }), "ALFA");
@@ -88,6 +89,9 @@ test("operational groups stay compact and recognizable in the schedule", () => {
   assert.match(schedule, /resource-unit-tags/);
   assert.match(density, /\.app\.compact \.schedule tbody tr\.post-row/);
   assert.match(density, /\.operational-group-heading/);
+  assert.match(schedule, /className="operational-team-heading"/);
+  assert.match(schedule, /previousOperationalTeam !== operationalTeam/);
+  assert.match(theme, /\.operational-team-heading/);
 });
 
 test("operational groups are editable and can classify existing resources", () => {
