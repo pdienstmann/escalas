@@ -137,6 +137,7 @@ export function LiveSchedule() {
     [recentAssignmentIds,setRecentAssignmentIds]=useState<number[]>([]),
     [collapsed, setCollapsed] = useState<Record<string, boolean>>({}),
     [saving, setSaving] = useState(false),
+    [syncing, setSyncing] = useState(false),
     [loadError, setLoadError] = useState(""),
     [conflictNotice, setConflictNotice] = useState(""),
     [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null),
@@ -149,15 +150,15 @@ export function LiveSchedule() {
   const tableRef = useRef<HTMLTableElement | null>(null);
   const scheduleWrapRef = useRef<HTMLElement | null>(null);
   const sectionRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
-  const load = useCallback(async () => {
+  const load = useCallback(async (background = true) => {
     const sequence=++loadSequence.current;
     loadController.current?.abort();
     const controller=new AbortController();
     loadController.current=controller;
     try {
-      const cached=readScheduleCache(date);if(cached)setData(cached);
-      setPick(null);
-      setContextPick(null);
+      const cached=readScheduleCache(date);if(cached&&!background)setData(cached);
+      if(!background){setPick(null);setContextPick(null)}
+      if(background)setSyncing(true);else setSyncing(false);
       setLoadError("");
       const r = await fetch(`/api/schedule?date=${date}&_=${Date.now()}`, {
         cache: "no-store",
@@ -172,17 +173,19 @@ export function LiveSchedule() {
         setLoadError("Não foi possível consultar a escala. Recarregue a página para tentar novamente.");
         setMessage("Não foi possível consultar a escala. Recarregue a página para tentar novamente.");
       }
+    } finally {
+      if(sequence===loadSequence.current&&background)setSyncing(false);
     }
   }, [date]);
   useEffect(()=>()=>loadController.current?.abort(),[]);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load();
+    void load(false);
   }, [load]);
   useEffect(() => {
     if (typeof window === "undefined" || !data) return;
     const refresh = window.setInterval(() => {
-      if (!savingRef.current && !pick && !quickEdit && !resourceDialog && !sectionEdit) void load();
+      if (!savingRef.current && !pick && !quickEdit && !resourceDialog && !sectionEdit) void load(true);
     }, 60_000);
     return () => window.clearInterval(refresh);
   }, [data, load, pick, quickEdit, resourceDialog, sectionEdit]);
@@ -1117,7 +1120,7 @@ export function LiveSchedule() {
   const showTable = view !== "redeploy";
 
   return (
-    <main className={`app compact ${saving?"is-saving":""}`} aria-busy={saving}>
+    <main className={`app compact ${saving?"is-saving":""}`} aria-busy={saving||syncing}>
       <header className="topbar">
         <div className="brand">
           <span className="crest">GM</span>
@@ -1150,6 +1153,7 @@ export function LiveSchedule() {
         </Link>
       </header>
       <ScheduleNav date={date} active="/" />
+      {syncing&&<div className="schedule-sync-banner" role="status">Atualizando a escala sem fechar a visualização atual…</div>}
       <section className="toolbar">
         <strong>Escala de {formatScheduleDate(data.date)}</strong>
         <span className="pattern-confirm">Padrão: {data.patternLabel}</span>

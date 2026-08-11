@@ -791,6 +791,17 @@ test("schedule collaboration exposes refresh time and conflict recovery", () => 
   assert.match(styles, /\.sync-refresh/);
 });
 
+test("schedule refresh keeps the visible grid while synchronizing in the background", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/live-schedule.css"), "utf8");
+  assert.match(schedule, /\[syncing, setSyncing\] = useState\(false\)/);
+  assert.match(schedule, /const load = useCallback\(async \(background = true\)/);
+  assert.match(schedule, /readScheduleCache\(date\);if\(cached&&!background\)setData\(cached\)/);
+  assert.match(schedule, /void load\(true\)/);
+  assert.match(schedule, /schedule-sync-banner/);
+  assert.match(styles, /\.schedule-sync-banner/);
+});
+
 test("schedule cells support keyboard navigation and contextual activation", () => {
   const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
   const styles = readFileSync(resolve("app/drag-edit.css"), "utf8");
