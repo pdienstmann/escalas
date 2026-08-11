@@ -893,6 +893,18 @@ test("schedule cells support keyboard navigation and contextual activation", () 
   assert.match(styles, /\.drop-cell:focus-visible/);
 });
 
+test("spreadsheet grid keeps the resource header above the turn headers and aligns row separators", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/spreadsheet-theme.css"), "utf8");
+  assert.match(schedule, /<td className="resource-cell">\s*<div className="resource">/);
+  assert.match(styles, /\.schedule thead tr:first-child > th:first-child/);
+  assert.match(styles, /\.schedule thead tr:nth-child\(2\) > th\s*\{\s*top: 34px/);
+  assert.match(styles, /\.schedule thead tr:nth-child\(2\) > th:first-child/);
+  assert.match(styles, /border-collapse: separate/);
+  assert.match(styles, /border-bottom: 4px solid #dbe5ee/);
+  assert.match(styles, /vertical-align: top/);
+});
+
 test("schedule keeps a small queue of recent undoable changes", () => {
   const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
   assert.match(schedule, /\[undoEvents, setUndoEvents\] = useState<UndoState\[\]>\(\[\]\)/);

@@ -2185,11 +2185,12 @@ function Row({
       )}
       {!collapsed && (
       <tr className={kind === "vehicle" ? "vehicle-row" : "post-row"}>
-        <td className="resource">
-          <span className="vehicle">
+        <td className="resource-cell">
+          <div className="resource">
+            <span className="vehicle">
             {kind === "vehicle" ? vehicleIcon(String(resource.type)) : ""}
-          </span>
-          <div>
+            </span>
+            <div>
             <b>{kind === "vehicle" ? resource.prefix : resource.name}</b>
             <small>
               {kind === "vehicle"
@@ -2202,8 +2203,8 @@ function Row({
                 {operationalTeam && <em className="resource-team-chip">Equipe {operationalTeam}</em>}
               </span>
             )}
-          </div>
-          {kind === "vehicle" && (
+            </div>
+            {kind === "vehicle" && (
             <button
               type="button"
               className="vehicle-quick-button"
@@ -2213,7 +2214,7 @@ function Row({
               Editar
             </button>
           )}
-          {kind === "post" && (
+            {kind === "post" && (
             <button
               type="button"
               className="resource-quick-button"
@@ -2223,7 +2224,7 @@ function Row({
               Editar
             </button>
           )}
-          <button
+            <button
             type="button"
             className="resource-add-person"
             aria-label={`Adicionar GM em ${String(kind === "vehicle" ? resource.prefix : resource.name)}`}
@@ -2232,7 +2233,7 @@ function Row({
           >
             ＋ GM
           </button>
-          <button
+            <button
             type="button"
             className="resource-remove-button"
             aria-label={`Retirar ${String(kind === "vehicle" ? resource.prefix : resource.name)} desta escala`}
@@ -2241,6 +2242,7 @@ function Row({
           >
             <span aria-hidden="true">×</span>
           </button>
+          </div>
         </td>
         {visibleShifts.map((s) => {
           const list = alignedAssignmentsByShift.get(s.id) || [];

@@ -253,7 +253,14 @@
 
   .schedule {
     min-width: 1180px;
-    border-collapse: collapse;
+    /*
+     * Keep each body cell at the same height as its row.  With collapsed
+     * borders, the sticky resource cell can stop at the height of its own
+     * content while the turn cells continue below the separator (especially
+     * when a "+ GM" action is present).  Separate borders let the row height
+     * include the complete drop cell and keep the separator continuous.
+     */
+    border-collapse: separate;
     border-spacing: 0;
     table-layout: fixed;
   }
@@ -440,17 +447,44 @@
     min-height: 52px;
     height: auto;
     padding: 4px 6px !important;
-    border: 1px solid var(--sheet-line);
-    border-top: 0;
+    border: 0;
+    border-top: 1px solid var(--sheet-line);
+    border-right: 1px solid var(--sheet-line);
+    border-bottom: 4px solid #dbe5ee;
     background: #fff;
-    vertical-align: middle;
+    vertical-align: top;
   }
 
   .schedule tbody tr.post-row > td:first-child,
   .schedule tbody tr.vehicle-row > td:first-child {
     padding: 5px 8px !important;
+    /* Sticky table cells otherwise keep only their intrinsic height in
+       Chromium.  Stretch the resource cell to the full row so its bottom
+       separator lines up with the drop cells (including "+ GM"). */
+    height: 100% !important;
+    border-left: 1px solid var(--sheet-line);
     border-right: 2px solid #31485d;
     background: #fff;
+  }
+
+  /* Header rows have different grid roles.  A broad :first-child rule also
+     matches the first turn header and makes it sticky over POSTO / RECURSO on
+     narrow screens.  Scope the sticky resource header to the row-spanned
+     header and explicitly release the first turn header. */
+  .schedule thead tr:first-child > th:first-child {
+    left: 0 !important;
+    z-index: 8 !important;
+    width: 250px !important;
+  }
+
+  .schedule thead tr:nth-child(2) > th {
+    top: 34px !important;
+  }
+
+  .schedule thead tr:nth-child(2) > th:first-child {
+    left: auto !important;
+    z-index: 5 !important;
+    width: auto !important;
   }
 
   .schedule tbody tr.post-row > td.period-day,
@@ -696,6 +730,14 @@
 
     .app.compact .schedule th:first-child {
       width: 225px;
+    }
+
+    .schedule thead tr:first-child > th:first-child {
+      width: 225px !important;
+    }
+
+    .schedule thead tr:nth-child(2) > th:first-child {
+      width: auto !important;
     }
 
     .schedule th.period-group {
