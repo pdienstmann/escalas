@@ -694,6 +694,7 @@ test("spreadsheet visual theme preserves the live grid controls while restyling 
   assert.match(theme, /\.schedule tbody tr\.group td/);
   assert.match(theme, /\.schedule th\.period-day-head/);
   assert.match(theme, /\.schedule th\.period-night-head/);
+  assert.match(theme, /\.app\.compact \.schedule th:first-child/);
   assert.match(theme, /\.live-person-card \.live-person/);
   assert.match(theme, /@media screen/);
   assert.match(schedule, /className="schedule-add-trigger"/);

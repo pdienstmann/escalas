@@ -277,6 +277,12 @@
     text-align: left;
   }
 
+  /* O modo compacto existente tem uma regra mais específica; mantenha
+     a coluna de recurso larga o bastante para os nomes da planilha. */
+  .app.compact .schedule th:first-child {
+    width: 250px;
+  }
+
   .schedule th.period-group {
     height: 34px;
     font-size: 12px;
@@ -607,6 +613,10 @@
     }
 
     .schedule th:first-child {
+      width: 225px;
+    }
+
+    .app.compact .schedule th:first-child {
       width: 225px;
     }
 
