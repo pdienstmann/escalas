@@ -646,8 +646,12 @@ test("general service adjustments expose BH-, BH+ and service swaps in schedule 
   });
 
 test("manual overtime dashboard exposes actionable alerts, safe refresh state and an hours-band filter", () => {
+  const api = readFileSync(resolve("app/api/overtime/route.ts"), "utf8");
   const dashboard = readFileSync(resolve("app/overtime-dashboard.tsx"), "utf8");
   const styles = readFileSync(resolve("app/overtime-enhancements.css"), "utf8");
+  assert.match(api, /pattern_codes/);
+  assert.match(dashboard, /function guardPatternCodes/);
+  assert.match(dashboard, /he-pattern-summary/);
   assert.match(dashboard, /const pendingCount = data\.suggestions\.length/);
   assert.match(dashboard, /className="he-alerts"/);
   assert.match(dashboard, /missingRequestCount/);

@@ -64,7 +64,9 @@ export async function GET(request: Request) {
   const period = bounds(month);
   const [guards, entries, closure, suggestions] = await Promise.all([
     env.DB.prepare(
-      "SELECT id,name,registration,platoon,overtime_eligible,overtime_note FROM guards WHERE active=1 ORDER BY name",
+      `SELECT g.id,g.name,g.registration,g.platoon,g.work_regime,g.overtime_eligible,g.overtime_note,
+        COALESCE((SELECT group_concat(p.code) FROM pattern_slots ps JOIN shift_patterns p ON p.id=ps.pattern_id AND p.active=1 WHERE ps.guard_id=g.id),'') pattern_codes
+       FROM guards g WHERE g.active=1 ORDER BY g.name`,
     ).all<Row>(),
     env.DB.prepare(
       `SELECT e.*,g.name guard_name,g.registration,g.platoon

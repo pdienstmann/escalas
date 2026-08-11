@@ -28,6 +28,15 @@ function writeOvertimeCache(data: Data) {
     // Cache is optional; the database remains the source of truth.
   }
 }
+function guardPatternCodes(guard: Rec) {
+  const codes = String(guard.pattern_codes || "")
+    .split(",")
+    .map((code) => code.trim().toUpperCase())
+    .filter((code) => ["D1", "D2", "N1", "N2"].includes(code));
+  if (codes.length) return [...new Set(codes)];
+  const fallback = String(guard.platoon || "").trim().toUpperCase();
+  return ["D1", "D2", "N1", "N2"].includes(fallback) ? [fallback] : [];
+}
 
 export function OvertimeDashboard() {
   const { date } = useScheduleDate();
@@ -83,14 +92,14 @@ export function OvertimeDashboard() {
       const enabled = Number(guard.overtime_eligible) !== 0;
       if (eligibility === "eligible" && !enabled) return false;
       if (eligibility === "blocked" && enabled) return false;
-      const team=String(guard.platoon||"").toUpperCase();
-      if(teamFilter!=="all"&&teamFilter!=="other"&&team!==teamFilter)return false;
-      if(teamFilter==="other"&&["D1","D2","N1","N2"].includes(team))return false;
+      const patterns=guardPatternCodes(guard);
+      if(teamFilter!=="all"&&teamFilter!=="other"&&!patterns.includes(teamFilter))return false;
+      if(teamFilter==="other"&&patterns.length)return false;
       const hours = Number(guard.currentHours || 0);
       if (hoursBand === "zero" && hours !== 0) return false;
       if (hoursBand === "under12" && (hours === 0 || hours >= 12)) return false;
       if (hoursBand === "over12" && hours < 12) return false;
-      return !value || `${guard.name} ${guard.registration} ${guard.platoon || ""} ${guard.overtime_note || ""}`.toLowerCase().includes(value);
+      return !value || `${guard.name} ${guard.registration} ${guard.platoon || ""} ${guard.pattern_codes || ""} ${guard.overtime_note || ""}`.toLowerCase().includes(value);
     });
     const dateValue=(guard:Rec)=>guard.lastOvertime?new Date(String(guard.lastOvertime).replace(" ","T")).getTime():0;
     if(rankingSort==="hours_desc")rows.sort((a,b)=>Number(b.currentHours)-Number(a.currentHours)||String(a.name).localeCompare(String(b.name),"pt-BR"));
@@ -119,6 +128,8 @@ export function OvertimeDashboard() {
   const adjustmentCount = entries.filter((entry) => entry.source === "adjustment").length;
   const unusualDurationCount = entries.filter((entry) => Math.abs(Number(entry.confirmed_minutes || 0)) > 12 * 60).length;
   const blockedCount = data.ranking.filter((guard) => Number(guard.overtime_eligible) === 0).length;
+  const patternCounts = (["D1", "D2", "N1", "N2"] as const).map((code) => ({ code, count: data.ranking.filter((guard) => guardPatternCodes(guard).includes(code)).length }));
+  const otherPatternCount = data.ranking.filter((guard) => guardPatternCodes(guard).length === 0).length;
   const isRefreshing = loading || syncing || !monthMatches;
 
   async function postAction(body: Record<string, unknown>) {
@@ -193,6 +204,7 @@ export function OvertimeDashboard() {
     {message&&<p className="he-message" role="status">{message}</p>}
     {monthClosed&&<section className="he-closed-banner" role="status"><b>Livro mensal fechado</b><span>Os totais estão protegidos contra alterações. Reabra com justificativa se precisar corrigir.</span>{data.closure.closed_at&&<small>Fechado em {new Date(String(data.closure.closed_at).replace(" ","T")+"Z").toLocaleString("pt-BR")}{data.closure.closure_note?` · ${data.closure.closure_note}`:""}</small>}</section>}
     {(pendingCount||missingRequestCount||unusualDurationCount||adjustmentCount)&&<section className="he-alerts" aria-label="Atenção operacional"><div className="he-alert-head"><div><b>Atenção operacional</b><span>Confira os itens antes de fechar o livro mensal.</span></div><strong>{pendingCount+missingRequestCount+unusualDurationCount+adjustmentCount}</strong></div><div className="he-alert-grid">{pendingCount>0&&<button type="button" className="he-alert-card pending" onClick={()=>document.getElementById("he-suggestions")?.scrollIntoView({behavior:"smooth",block:"start"})}><strong>{pendingCount}</strong><span>previsões da escala aguardando conferência</span></button>}{missingRequestCount>0&&<button type="button" className="he-alert-card request" onClick={()=>document.getElementById("he-history")?.scrollIntoView({behavior:"smooth",block:"start"})}><strong>{missingRequestCount}</strong><span>lançamentos sem requerimento</span></button>}{unusualDurationCount>0&&<button type="button" className="he-alert-card duration" onClick={()=>document.getElementById("he-history")?.scrollIntoView({behavior:"smooth",block:"start"})}><strong>{unusualDurationCount}</strong><span>lançamentos acima de 12h para verificar</span></button>}{adjustmentCount>0&&<button type="button" className="he-alert-card adjustment" onClick={()=>document.getElementById("he-history")?.scrollIntoView({behavior:"smooth",block:"start"})}><strong>{adjustmentCount}</strong><span>ajustes manuais auditáveis</span></button>}</div></section>}
+    <section className="he-pattern-summary" aria-label="Resumo por padrão 12x36"><div><b>Padrão cadastrado</b><span>Os filtros usam os padrões D1, D2, N1 e N2 do cadastro 12x36.</span></div><div className="he-pattern-buttons">{patternCounts.map((item)=><button type="button" key={item.code} className={teamFilter===item.code?"active":""} onClick={()=>setTeamFilter(teamFilter===item.code?"all":item.code)}><b>{item.code}</b><span>{item.count} GMs</span></button>)}<button type="button" className={teamFilter==="other"?"active":""} onClick={()=>setTeamFilter(teamFilter==="other"?"all":"other")}><b>OUTROS</b><span>{otherPatternCount} GMs</span></button></div></section>
     <section className="he-stats"><article><b>{formatHoursDuration(total)}</b><span>Total lançado no mês</span></article><article><b>{entries.length}</b><span>Lançamentos registrados</span></article><article><b>{formatHoursDuration(average)}</b><span>Média por GM elegível</span></article><article><b>{formatHoursDuration(maximum-minimum)}</b><span>Diferença maior/menor</span></article><article><b>{blockedCount}</b><span>GMs sem participação</span></article></section>
     {data.suggestions.length>0&&<section id="he-suggestions" className="he-panel he-suggestions"><div className="he-head"><div><h2>Sugestões encontradas na escala</h2><p>Não alteram o saldo. Use “Lançar” somente quando souber que a HE foi realizada.</p></div><span>{data.suggestions.length}</span></div><div>{data.suggestions.slice(0,12).map(item=><article key={String(item.assignment_id)}><div><b>{item.guard_name}</b><small>{new Date(`${item.service_date}T12:00:00`).toLocaleDateString("pt-BR")} · {item.location}</small></div><strong>{formatHoursDuration(Number(item.planned_minutes)/60)}</strong><button type="button" disabled={monthClosed||isRefreshing} onClick={()=>setManualOpen(item)}>Lançar</button></article>)}</div></section>}
     <section className="he-panel he-spreadsheet"><div className="he-head"><div><h2>Distribuição por GM</h2><p>Use os botões da própria linha para lançar horas ou corrigir o total mensal.</p></div></div><div className="he-sheet-filters"><label>Equipe<select value={teamFilter} onChange={(event)=>setTeamFilter(event.target.value as typeof teamFilter)}><option value="all">Todas as equipes</option><option value="D1">Dia 1 · D1</option><option value="D2">Dia 2 · D2</option><option value="N1">Noite 1 · N1</option><option value="N2">Noite 2 · N2</option><option value="other">Semanal / outros</option></select></label><label>Ordenar por<select value={rankingSort} onChange={(event)=>setRankingSort(event.target.value as typeof rankingSort)}><option value="priority">Prioridade para próxima HE</option><option value="hours_desc">Mais horas primeiro</option><option value="hours_asc">Menos horas primeiro</option><option value="last_recent">HE mais recente</option><option value="last_oldest">Há mais tempo sem HE</option><option value="name">Nome do GM</option></select></label><label>Participação<select value={eligibility} onChange={(event)=>setEligibility(event.target.value as typeof eligibility)} aria-label="Filtrar elegibilidade"><option value="all">Todos</option><option value="eligible">Realizam HE</option><option value="blocked">Não realizam HE</option></select></label><label>Faixa de horas<select value={hoursBand} onChange={(event)=>setHoursBand(event.target.value as typeof hoursBand)}><option value="all">Qualquer total</option><option value="zero">Sem HE no mês</option><option value="under12">Até 12h</option><option value="over12">Acima de 12h</option></select></label><label className="he-sheet-search">Buscar<input value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="GM, matrícula ou aviso…"/></label></div>
