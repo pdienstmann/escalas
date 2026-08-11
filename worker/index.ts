@@ -40,7 +40,21 @@ const worker = {
       }, allowedWidths);
     }
 
-    return handler.fetch(request, env, ctx);
+    const response = await handler.fetch(request, env, ctx);
+    // O HTML das telas é dinâmico: ele aponta para os assets versionados do
+    // build atual. Evite que o CDN mantenha uma página antiga depois de um
+    // deploy e misture-a com um bundle novo no navegador.
+    if (request.method === "GET" && response.headers.get("content-type")?.includes("text/html")) {
+      const headers = new Headers(response.headers);
+      headers.set("cache-control", "no-store, max-age=0");
+      headers.set("cdn-cache-control", "no-store");
+      return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+      });
+    }
+    return response;
   },
 };
 

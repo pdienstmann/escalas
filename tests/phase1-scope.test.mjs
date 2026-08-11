@@ -113,6 +113,13 @@ test("section headers expose resource counts without removing their inline actio
   assert.match(theme, /\.section-heading-summary/);
 });
 
+test("worker marks dynamic HTML as uncached so deploys cannot mix old pages with new assets", () => {
+  const worker = readFileSync(resolve("worker/index.ts"), "utf8");
+  assert.match(worker, /content-type.*text\/html/);
+  assert.match(worker, /headers\.set\("cache-control", "no-store, max-age=0"\)/);
+  assert.match(worker, /headers\.set\("cdn-cache-control", "no-store"\)/);
+});
+
 test("redeployment visibility rule keeps crew when vehicle leaves active set", () => {
   const blocked = new Set([99]);
   const visibleVehicleIds = new Set([1]);
