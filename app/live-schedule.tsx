@@ -335,6 +335,13 @@ export function LiveSchedule() {
     () => [...new Set(resources.map((item) => item.section))],
     [resources],
   );
+  const sectionResourceCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of resources) {
+      counts.set(item.section, (counts.get(item.section) || 0) + 1);
+    }
+    return counts;
+  }, [resources]);
   const resourceChoices = useMemo<ResourceChoice[]>(
     () => scheduleVehicles && schedulePosts && scheduleSections
       ? orderScheduleResources(scheduleVehicles, schedulePosts, scheduleSections).map(({ kind, r, section }) => ({ kind, resource: r, section }))
@@ -1297,6 +1304,7 @@ export function LiveSchedule() {
                    resource={r}
                    section={section}
                    sectionKey={kind === "vehicle" ? "VEHICLES" : `POST:${r.group_name || "POSTOS"}`}
+                   sectionResourceCount={sectionResourceCounts.get(section) || 0}
                    draggingAssignmentId={draggingAssignmentId}
                    onDragStart={(assignment) => setDraggingAssignmentId(Number(assignment.id))}
                    onDragEnd={() => setDraggingAssignmentId(null)}
@@ -1864,6 +1872,7 @@ type RowProps = {
   resource: Rec;
   section: string;
   sectionKey: string;
+  sectionResourceCount: number;
   draggingAssignmentId: number | null;
   onDragStart: (assignment: Rec) => void;
   onDragEnd: () => void;
@@ -1922,6 +1931,7 @@ function Row({
   resource,
   section,
   sectionKey,
+  sectionResourceCount,
   draggingAssignmentId,
   onDragStart,
   onDragEnd,
@@ -2132,8 +2142,13 @@ function Row({
         >
           <td colSpan={1 + visibleShifts.length}>
             <div className="section-heading-actions">
-              <button type="button" className="section-toggle" onClick={onToggleSection}>
-                {collapsed ? "▸" : "▾"} {kind === "vehicle" ? "🚓" : "◆"} {section}
+              <button type="button" className="section-toggle" aria-expanded={!collapsed} onClick={onToggleSection}>
+                <span className="section-toggle-label">
+                  <span aria-hidden="true">{collapsed ? "▸" : "▾"}</span>
+                  <span aria-hidden="true">{kind === "vehicle" ? "🚓" : "◆"}</span>
+                  <b>{section}</b>
+                  <small className="section-heading-summary">{sectionResourceCount} {sectionResourceCount === 1 ? "recurso" : "recursos"}</small>
+                </span>
               </button>
               <button type="button" className="section-inline-add" onClick={()=>onAddInSection(kind,section)}>
                 ＋ {kind==="vehicle"?"Viatura":"Posto"}
@@ -2376,6 +2391,7 @@ const MemoizedRow = memo(Row, (previous, next) =>
   previous.resource === next.resource &&
   previous.section === next.section &&
   previous.sectionKey === next.sectionKey &&
+  previous.sectionResourceCount === next.sectionResourceCount &&
   previous.draggingAssignmentId === next.draggingAssignmentId &&
   previous.first === next.first &&
   previous.groupFirst === next.groupFirst &&

@@ -102,6 +102,17 @@ test("operational groups are editable and can classify existing resources", () =
   assert.match(readFileSync(resolve("app/live-schedule.tsx"), "utf8"), /Filtrar por grupamento operacional/);
 });
 
+test("section headers expose resource counts without removing their inline actions", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const theme = readFileSync(resolve("app/spreadsheet-theme.css"), "utf8");
+  assert.match(schedule, /const sectionResourceCounts = useMemo/);
+  assert.match(schedule, /sectionResourceCount=\{sectionResourceCounts\.get\(section\) \|\| 0\}/);
+  assert.match(schedule, /className="section-heading-summary"/);
+  assert.match(schedule, /aria-expanded=\{!collapsed\}/);
+  assert.match(theme, /\.section-toggle-label/);
+  assert.match(theme, /\.section-heading-summary/);
+});
+
 test("redeployment visibility rule keeps crew when vehicle leaves active set", () => {
   const blocked = new Set([99]);
   const visibleVehicleIds = new Set([1]);

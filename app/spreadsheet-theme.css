@@ -342,9 +342,54 @@
     text-transform: uppercase;
   }
 
+  /* A faixa de seção funciona como o cabeçalho da planilha: nome à esquerda,
+     quantidade de recursos ao lado e ações preservadas à direita. */
+  .schedule tbody tr.group .section-heading-actions {
+    min-width: 0;
+  }
+
+  .schedule tbody tr.group .section-toggle {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    gap: 0;
+    color: #123e6b;
+  }
+
+  .schedule tbody tr.group .section-toggle-label {
+    display: inline-flex;
+    align-items: center;
+    min-width: 0;
+    gap: 6px;
+  }
+
+  .schedule tbody tr.group .section-toggle-label b {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .schedule tbody tr.group .section-heading-summary {
+    flex: 0 0 auto;
+    padding: 2px 6px;
+    border: 1px solid #a6c2d8;
+    border-radius: 10px;
+    background: #edf5fb;
+    color: #4b6c84;
+    font-size: 8px;
+    font-weight: 800;
+    letter-spacing: 0;
+    text-transform: none;
+    white-space: nowrap;
+  }
+
   .schedule tbody tr.group.headquarters td {
     background: #d4ece4;
     border-color: #75a999;
+    color: #155545;
+  }
+
+  .schedule tbody tr.group.headquarters .section-toggle {
     color: #155545;
   }
 
@@ -622,6 +667,10 @@
 
     .schedule th.period-group {
       font-size: 10px;
+    }
+
+    .schedule tbody tr.group .section-heading-summary {
+      display: none;
     }
 
     .schedule thead tr:nth-child(2) th {
