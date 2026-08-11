@@ -1,0 +1,662 @@
+/*
+ * Visual de grade operacional inspirado na planilha da Guarda.
+ *
+ * Este arquivo só atua na tela (não no PDF) e fica no fim da cadeia de CSS.
+ * Assim, os botões, ícones e fluxos existentes continuam no mesmo lugar,
+ * enquanto a matriz fica mais parecida com uma escala impressa.
+ */
+@media screen {
+  :root {
+    --sheet-ink: #14283f;
+    --sheet-navy: #062e5c;
+    --sheet-blue: #dcecfb;
+    --sheet-blue-strong: #a9cef0;
+    --sheet-line: #65788b;
+    --sheet-day: #fffefa;
+    --sheet-night: #f7faff;
+  }
+
+  body {
+    background: #f1f4f7;
+    color: var(--sheet-ink);
+  }
+
+  /* Cabeçalho escuro e navegação contínua, sem trocar os links atuais. */
+  .topbar {
+    min-height: 64px;
+    height: auto;
+    padding: 8px 20px;
+    gap: 16px;
+    background: linear-gradient(110deg, #06294e 0%, #063b73 58%, #082b52 100%);
+    border-bottom: 0;
+    box-shadow: 0 2px 8px #082d5528;
+  }
+
+  .brand {
+    min-width: 258px;
+    gap: 9px;
+  }
+
+  .brand .crest {
+    width: 40px;
+    height: 40px;
+    border: 1px solid #8db9e0;
+    border-radius: 9px;
+    background: #1264a7;
+    color: #fff;
+    box-shadow: inset 0 0 0 2px #ffffff22;
+  }
+
+  .brand b {
+    font-size: 16px;
+    letter-spacing: .01em;
+  }
+
+  .brand small {
+    color: #c5dbef;
+    opacity: 1;
+  }
+
+  .topbar .date {
+    border-color: #47759e;
+    background: #05264a;
+    border-radius: 6px;
+  }
+
+  .topbar .date input {
+    min-height: 30px;
+    color: #fff;
+  }
+
+  .stats {
+    height: 38px;
+  }
+
+  .stats span {
+    min-width: 70px;
+    padding: 4px 10px;
+    border-left-color: #3e668b;
+  }
+
+  .stats b {
+    font-size: 15px;
+  }
+
+  .tabs {
+    height: 42px;
+    align-items: stretch;
+    gap: 26px;
+    padding: 0 22px;
+    overflow-x: auto;
+    background: #052b53;
+    border-bottom: 1px solid #275477;
+  }
+
+  .tabs > a,
+  .tabs > b,
+  .nav-more summary {
+    display: flex;
+    align-items: center;
+    min-height: 42px;
+    padding: 0 2px;
+    color: #d9e8f7;
+    font-size: 12px;
+    font-weight: 800;
+    text-decoration: none;
+  }
+
+  .tabs > a:hover,
+  .tabs > a:focus-visible {
+    color: #fff;
+  }
+
+  .tabs > b {
+    color: #fff;
+    border-bottom: 3px solid #fff;
+  }
+
+  .nav-more summary {
+    color: #d9e8f7;
+  }
+
+  .nav-more summary:after {
+    color: #a8cbe8;
+  }
+
+  /* Barra branca de data, padrão e ações, equivalente ao cabeçalho da planilha. */
+  .toolbar {
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 7px;
+    padding: 11px 18px;
+    background: #fff;
+    border-bottom: 1px solid #c6d2de;
+    box-shadow: 0 1px 4px #183b5a12;
+  }
+
+  .toolbar > strong {
+    margin-right: 3px;
+    color: #172d4a;
+    font-size: 16px;
+    letter-spacing: .01em;
+  }
+
+  .toolbar .pattern-confirm {
+    padding: 6px 9px;
+    border: 1px solid #c5d8e9;
+    border-radius: 6px;
+    background: #f1f7fc;
+    color: #154f7d;
+    font-size: 11px;
+    font-weight: 900;
+  }
+
+  .toolbar .sync {
+    padding: 4px 7px;
+    border-radius: 10px;
+    background: #ecf8ef;
+    color: #26714a;
+  }
+
+  .toolbar button,
+  .toolbar .toolbar-link,
+  .toolbar .toolbar-operation-link,
+  .toolbar .sync-refresh {
+    min-height: 32px;
+    padding: 7px 10px;
+    border: 1px solid #8fa5b9;
+    border-radius: 5px;
+    background: #fff;
+    color: #193d60;
+    font-size: 11px;
+    font-weight: 900;
+    text-decoration: none;
+  }
+
+  .toolbar .toolbar-link {
+    margin-left: auto;
+  }
+
+  .toolbar button:hover,
+  .toolbar button:focus-visible,
+  .toolbar .toolbar-link:hover,
+  .toolbar .toolbar-link:focus-visible,
+  .toolbar .toolbar-operation-link:hover,
+  .toolbar .toolbar-operation-link:focus-visible {
+    border-color: #1669a7;
+    background: #eef6fd;
+  }
+
+  .toolbar .schedule-add-trigger {
+    border-color: #1669a7;
+    background: #fff;
+    color: #075cac;
+  }
+
+  .toolbar .toolbar-seg {
+    border: 1px solid #bccbd8;
+    border-radius: 5px;
+    overflow: hidden;
+  }
+
+  .toolbar .toolbar-seg button {
+    min-height: 30px;
+    border: 0;
+    border-radius: 0;
+    font-size: 10px;
+  }
+
+  .toolbar .toolbar-seg button.active {
+    background: #0d4f86;
+    color: #fff;
+  }
+
+  .toolbar .section-jump {
+    gap: 3px;
+  }
+
+  .toolbar .section-jump span {
+    color: #60778c;
+    font-size: 9px;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  .toolbar .section-jump select,
+  .toolbar > input {
+    min-height: 32px;
+    border-color: #b5c6d5;
+    border-radius: 5px;
+    color: #17334f;
+  }
+
+  /* A grade usa linhas contínuas e separadores como a planilha original. */
+  .workspace.schedule-only {
+    padding: 0 14px 18px;
+  }
+
+  .schedule-wrap {
+    max-height: calc(100vh - 190px);
+    border: 1px solid #233847;
+    border-radius: 5px;
+    background: #fff;
+    box-shadow: 0 3px 12px #18354d1c;
+  }
+
+  .drag-help {
+    padding: 7px 11px;
+    background: #fff8df;
+    border-bottom: 1px solid #e5ca79;
+    color: #74550b;
+    font-size: 10px;
+  }
+
+  .schedule {
+    min-width: 1180px;
+    border-collapse: collapse;
+    border-spacing: 0;
+    table-layout: fixed;
+  }
+
+  .schedule th {
+    padding: 7px 6px;
+    border: 1px solid #31485d;
+    background: #fff;
+    color: #10243b;
+    font-size: 10px;
+    font-weight: 900;
+    text-align: center;
+  }
+
+  .schedule th:first-child {
+    width: 250px;
+    background: var(--sheet-navy);
+    color: #fff;
+    font-size: 11px;
+    letter-spacing: .04em;
+    text-align: left;
+  }
+
+  .schedule th.period-group {
+    height: 34px;
+    font-size: 12px;
+    letter-spacing: .05em;
+  }
+
+  .schedule th.period-day-head {
+    background: #d8eafa;
+    color: #102b48;
+  }
+
+  .schedule th.period-night-head {
+    background: #c9dcec;
+    color: #142d4a;
+  }
+
+  .schedule th.period-day-head::before {
+    content: "☀";
+    margin-right: 6px;
+    color: #bd7900;
+  }
+
+  .schedule th.period-night-head::before {
+    content: "☾";
+    margin-right: 6px;
+    color: #315b8c;
+  }
+
+  .schedule thead tr:nth-child(2) th {
+    height: 38px;
+    background: #fff;
+    color: #162c47;
+    font-size: 10px;
+  }
+
+  .schedule thead tr:nth-child(2) th.period-day {
+    background: #fbfdff;
+  }
+
+  .schedule thead tr:nth-child(2) th.period-night {
+    background: #f4f8fc;
+  }
+
+  .schedule .period-night-start {
+    border-left: 3px solid #66849f !important;
+  }
+
+  .schedule tbody tr.group td {
+    height: 31px;
+    padding: 5px 12px;
+    border: 1px solid #5e83a5;
+    background: var(--sheet-blue);
+    color: #123e6b;
+    font-size: 11px;
+    font-weight: 900;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+  }
+
+  .schedule tbody tr.group.headquarters td {
+    background: #d4ece4;
+    border-color: #75a999;
+    color: #155545;
+  }
+
+  .schedule tbody tr.operational-group-heading td {
+    height: 24px !important;
+    padding: 4px 11px !important;
+    border-top: 2px solid #7f9bb3 !important;
+    border-bottom: 1px solid #a9bdcd !important;
+    background: #edf4f9 !important;
+    color: #1b5078;
+  }
+
+  .schedule tbody tr.post-row > td,
+  .schedule tbody tr.vehicle-row > td {
+    min-height: 52px;
+    height: auto;
+    padding: 4px 6px !important;
+    border: 1px solid var(--sheet-line);
+    border-top: 0;
+    background: #fff;
+    vertical-align: middle;
+  }
+
+  .schedule tbody tr.post-row > td:first-child,
+  .schedule tbody tr.vehicle-row > td:first-child {
+    padding: 5px 8px !important;
+    border-right: 2px solid #31485d;
+    background: #fff;
+  }
+
+  .schedule tbody tr.post-row > td.period-day,
+  .schedule tbody tr.vehicle-row > td.period-day {
+    background: var(--sheet-day);
+  }
+
+  .schedule tbody tr.post-row > td.period-night,
+  .schedule tbody tr.vehicle-row > td.period-night {
+    background: var(--sheet-night);
+  }
+
+  .schedule tbody tr.post-row:hover > td,
+  .schedule tbody tr.vehicle-row:hover > td {
+    background: #f2f8fd;
+  }
+
+  .resource {
+    min-height: 40px;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .resource > div {
+    min-width: 0;
+    padding: 1px 0;
+  }
+
+  .resource > div > b {
+    color: #17283b;
+    font-size: 11px;
+    font-weight: 900;
+    line-height: 1.2;
+  }
+
+  .resource > div > small {
+    margin-top: 2px;
+    color: #48657e;
+    font-size: 9px;
+    line-height: 1.2;
+  }
+
+  .resource > .vehicle {
+    width: 24px;
+    color: #174d7b;
+    font-size: 17px;
+  }
+
+  .resource-quick-button,
+  .vehicle-quick-button,
+  .resource-add-person {
+    padding: 3px 5px !important;
+    border-radius: 4px !important;
+    font-size: 9px !important;
+  }
+
+  .resource-remove-button {
+    width: 21px;
+    height: 21px;
+    font-size: 15px;
+  }
+
+  /* Cada GM ocupa uma linha curta e ainda conserva horários, ícones e badges. */
+  .live-person-card {
+    min-width: 0;
+  }
+
+  .live-person-card + .live-person-card {
+    margin-top: 1px;
+    padding-top: 1px;
+    border-top: 1px solid #d5dde5;
+  }
+
+  .live-person-card .live-person {
+    min-height: 29px;
+    padding: 3px 5px 3px 27px;
+    border: 0;
+    border-radius: 2px;
+    background: transparent;
+    color: #17283b;
+    font-size: 11px;
+    line-height: 1.15;
+  }
+
+  .live-person-card .live-person:hover,
+  .live-person-card .live-person.is-selected {
+    background: #eaf4fc;
+  }
+
+  .live-person-card .live-person b {
+    font-weight: 900;
+  }
+
+  .live-person-card .live-person small {
+    margin-top: 2px;
+    color: #294968;
+    font-size: 9px;
+    line-height: 1.1;
+  }
+
+  .live-person-card .role {
+    width: 17px;
+    height: 17px;
+    margin-right: 4px;
+    border-radius: 3px;
+    font-size: 8px;
+  }
+
+  .live-person-card .badge {
+    padding: 1px 4px;
+    border-radius: 7px;
+    font-size: 8px;
+    vertical-align: middle;
+  }
+
+  .live-person-card .inline-he-extension {
+    min-width: 42px;
+    width: 42px;
+    padding: 3px 4px;
+    border-radius: 4px;
+    font-size: 8px;
+  }
+
+  .live-hole {
+    min-height: 29px;
+    padding: 5px 4px;
+    border: 1px dashed #d47a81;
+    border-radius: 3px;
+    background: #fff7f7;
+    color: #a62934;
+    font-size: 9px;
+  }
+
+  .cell-add-member,
+  .cell-paste-assignment {
+    min-height: 24px;
+    margin-top: 2px;
+    padding: 3px 4px;
+    border-radius: 3px;
+    font-size: 9px;
+  }
+
+  .resource-section-footer td {
+    padding: 5px 8px 8px !important;
+    border-top: 1px solid #8ba9bf !important;
+    background: #eef5fa !important;
+  }
+
+  .resource-section-footer button {
+    padding: 5px 8px;
+    border-color: #83a9c8;
+    background: #fff;
+    font-size: 9px;
+  }
+
+  .schedule-wrap::-webkit-scrollbar {
+    width: 11px;
+    height: 11px;
+  }
+
+  .schedule-wrap::-webkit-scrollbar-thumb {
+    border: 3px solid #fff;
+    border-radius: 8px;
+    background: #7894ad;
+  }
+
+  .schedule-wrap::-webkit-scrollbar-track {
+    background: #edf2f6;
+  }
+
+  @media (max-width: 1100px) {
+    .topbar {
+      padding: 9px 14px;
+    }
+
+    .toolbar .toolbar-link {
+      margin-left: 0;
+    }
+
+    .workspace.schedule-only {
+      padding: 0 9px 14px;
+    }
+  }
+
+  @media (max-width: 700px) {
+    .topbar {
+      padding: 9px 11px;
+      gap: 8px 12px;
+    }
+
+    .brand {
+      min-width: 0;
+      width: 100%;
+    }
+
+    .brand b {
+      font-size: 15px;
+    }
+
+    .tabs {
+      gap: 18px;
+      padding: 0 12px;
+    }
+
+    .toolbar {
+      padding: 9px 10px;
+    }
+
+    .toolbar > strong {
+      width: 100%;
+      font-size: 14px;
+    }
+
+    .toolbar .pattern-confirm {
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .toolbar > input {
+      order: 3;
+      width: 100%;
+      margin: 2px 0 0;
+    }
+
+    .workspace.schedule-only {
+      padding: 0 5px 10px;
+    }
+
+    .schedule-wrap {
+      max-height: calc(100vh - 238px);
+      border-radius: 4px;
+    }
+
+    .schedule {
+      min-width: 1080px;
+    }
+
+    .schedule th:first-child {
+      width: 225px;
+    }
+
+    .schedule th.period-group {
+      font-size: 10px;
+    }
+
+    .schedule thead tr:nth-child(2) th {
+      height: 34px;
+      font-size: 9px;
+    }
+
+    .schedule tbody tr.post-row > td,
+    .schedule tbody tr.vehicle-row > td {
+      min-height: 48px;
+      padding: 3px 4px !important;
+    }
+
+    .schedule tbody tr.post-row > td:first-child,
+    .schedule tbody tr.vehicle-row > td:first-child {
+      padding: 4px 5px !important;
+    }
+
+    .resource > div > b {
+      font-size: 10px;
+    }
+
+    .resource > div > small {
+      font-size: 8px;
+    }
+
+    .resource-quick-button,
+    .vehicle-quick-button {
+      font-size: 8px !important;
+    }
+
+    .live-person-card .live-person {
+      min-height: 27px;
+      padding-top: 2px;
+      padding-bottom: 2px;
+      font-size: 10px;
+    }
+
+    .live-person-card .live-person small {
+      font-size: 8px;
+    }
+
+    .live-person-card .inline-he-extension {
+      min-width: 40px;
+      width: 40px;
+    }
+  }
+}

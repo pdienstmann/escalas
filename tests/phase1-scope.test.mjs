@@ -686,6 +686,21 @@ test("long post and vehicle names wrap instead of being clipped", () => {
   assert.match(density, /\.pattern-resource>header>div>small/);
 });
 
+test("spreadsheet visual theme preserves the live grid controls while restyling the matrix", () => {
+  const layout = readFileSync(resolve("app/layout.tsx"), "utf8");
+  const theme = readFileSync(resolve("app/spreadsheet-theme.css"), "utf8");
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  assert.match(layout, /spreadsheet-theme\.css/);
+  assert.match(theme, /\.schedule tbody tr\.group td/);
+  assert.match(theme, /\.schedule th\.period-day-head/);
+  assert.match(theme, /\.schedule th\.period-night-head/);
+  assert.match(theme, /\.live-person-card \.live-person/);
+  assert.match(theme, /@media screen/);
+  assert.match(schedule, /className="schedule-add-trigger"/);
+  assert.match(schedule, /className="resource-add-person"/);
+  assert.match(schedule, /className="inline-he-extension"/);
+});
+
 test("manual HE suggestions can be persistently dismissed", () => {
   const api = readFileSync(resolve("app/api/overtime/route.ts"), "utf8");
   const dashboard = readFileSync(resolve("app/overtime-dashboard.tsx"), "utf8");
