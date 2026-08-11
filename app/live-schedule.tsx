@@ -90,6 +90,12 @@ type ResourceDialogState = {
   initialSection?: string;
 };
 type ResourceChoice = { kind: "post" | "vehicle"; resource: Rec; section: string };
+type SmartEditorCandidate = {
+  guardId: number;
+  source: "redeploy" | "overtime";
+  detail: string;
+  assignmentIds?: number[];
+};
 const shifts = SHIFT_DEFS;
 const scheduleCacheKey=(date:string)=>`gmnh:schedule:${date}`;
 function readScheduleCache(date:string):State|null{if(typeof window==="undefined")return null;try{const raw=sessionStorage.getItem(scheduleCacheKey(date));if(!raw)return null;const parsed=JSON.parse(raw) as {savedAt:number;data:State};return Date.now()-parsed.savedAt<5*60_000?parsed.data:null}catch{return null}}
@@ -412,6 +418,20 @@ export function LiveSchedule() {
     if (!data || !pick) return;
     const body = Object.fromEntries(new FormData(e.currentTarget)),
       [destination, id] = String(body.destination).split(":");
+    const smartSource = String(body.smartSource || "");
+    const smartAssignmentIds = String(body.smartAssignmentIds || "").split(",").map(Number).filter(Boolean);
+    if (pick.manualAdd && smartSource === "redeploy" && smartAssignmentIds.length) {
+      await postAssignment({
+        action: "redeploy_group",
+        assignmentIds: smartAssignmentIds,
+        scheduleId: data.schedule.id,
+        postId: destination === "post" ? Number(id) : null,
+        vehicleId: destination === "vehicle" ? Number(id) : null,
+        role: body.role || (pick.kind === "vehicle" ? "patrol" : "guard"),
+        reassignmentNote: "Remanejamento rápido a partir da sugestão inteligente",
+      });
+      return;
+    }
     const fillingHole = !pick.assignment && !pick.manualAdd;
     const t = fillingHole
       ? fullPeriodWindow(data.date, String(body.shift || pick.shift))
@@ -430,6 +450,8 @@ export function LiveSchedule() {
       vehicleId: destination === "vehicle" ? Number(id) : null,
       extensionPostId: extensionDestination[0] === "post" ? Number(extensionDestination[1]) : null,
       extensionVehicleId: extensionDestination[0] === "vehicle" ? Number(extensionDestination[1]) : null,
+      status: smartSource === "overtime" ? "overtime" : body.status,
+      requestRef: smartSource === "overtime" ? "Sugestão inteligente · equipe oposta" : body.requestRef || null,
     });
   }
   async function remove() {
@@ -534,9 +556,12 @@ export function LiveSchedule() {
         entity = created.entity as Rec;
         resourceId = Number(entity.id);
       }
-      const guardIds = form.getAll("crewGuardId").map(Number);
-      const roles = form.getAll("crewRole").map(String);
-      const members = guardIds.map((guardId, index) => ({ guardId, role: kind === "vehicle" ? roles[index] || "third" : "guard" })).filter((member) => member.guardId > 0);
+       const selectedGuards = form.getAll("crewGuardId").map(String);
+       const roles = form.getAll("crewRole").map(String);
+       const members = selectedGuards.map((value, index) => {
+         const [rawId, source] = value.split("|");
+         return { guardId: Number(rawId), role: kind === "vehicle" ? roles[index] || "third" : "guard", source: source === "redeploy" ? "redeploy" : "overtime" };
+       }).filter((member) => member.guardId > 0);
       const assignResponse = await fetch("/api/schedule", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "assign_resource_group", scheduleId: data.schedule.id, shift: form.get("shift"), postId: kind === "post" ? resourceId : null, vehicleId: kind === "vehicle" ? resourceId : null, members }) });
       const assigned = await assignResponse.json();
       setMessage(assignResponse.ok ? assigned.message : assigned.error);
@@ -628,15 +653,6 @@ export function LiveSchedule() {
       }),
     });
     setPick(null);
-  }
-  function jumpToManualEditor() {
-    if (!holePick) return;
-    setPick({
-      kind: holePick.kind,
-      resource: holePick.resource,
-      shift: holePick.shift,
-    });
-    setHolePick(null);
   }
   function startManualAdd() {
     const resource = data?.posts[0] || data?.vehicles[0];
@@ -1485,7 +1501,6 @@ export function LiveSchedule() {
             busy={saving}
             onPick={confirmHoleSuggestion}
             onRedeploy={confirmSameDayRedeployment}
-            onManual={jumpToManualEditor}
             onClose={() => setHolePick(null)}
           />
         </>
@@ -1574,6 +1589,8 @@ function QuickCreateDialog({initialKind,data,saving,onClose,onSave}:{initialKind
   </section></div>
 }
 
+type CrewCandidate = { id: number; name: string; registration: string; detail: string; source: "redeploy" | "overtime" };
+
 function ResourceCrewDialog({kind,initialResourceId,initialShift="2",initialMode,initialSection,data,saving,onClose,onSave}:ResourceDialogState&{data:State;saving:boolean;onClose:()=>void;onSave:(event:FormEvent<HTMLFormElement>,kind:"post"|"vehicle")=>void}){
   const resources=kind==="vehicle"?data.vehicles:data.posts;
   const selectableResources=kind==="post"&&initialSection
@@ -1589,6 +1606,52 @@ function ResourceCrewDialog({kind,initialResourceId,initialShift="2",initialMode
   const [extraCount,setExtraCount]=useState(kind==="post"||firstHasPair?1:0);
   const needsPair=kind==="vehicle"&&(mode==="new"||!vehicleHasPair(data,Number(resourceId),shift));
   const sectionLabels=[...new Set(data.sections.filter(section=>String(section.section_key).startsWith("POST:")).map(section=>String(section.label)))];
+  const [smartData, setSmartData] = useState<{ sameDayCandidates?: Array<{ guardId: number; origins?: string[]; availableForRedeployment?: boolean }>; suggestions?: Array<{ id: number; oppositeTeam?: boolean; currentHeHours?: number }> }>({});
+  useEffect(() => {
+    const controller = new AbortController();
+    const params = new URLSearchParams({ date: data.date, shift, suggest: "1" });
+    if (mode === "existing" && kind === "post" && resourceId) params.set("postId", String(resourceId));
+    if (mode === "existing" && kind === "vehicle" && resourceId) params.set("vehicleId", String(resourceId));
+    fetch(`/api/schedule?${params}`, { cache: "no-store", signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error();
+        return response.json();
+      })
+      .then((value) => setSmartData(value))
+      .catch((reason: unknown) => {
+        if (!(reason instanceof DOMException && reason.name === "AbortError")) setSmartData({});
+      });
+    return () => controller.abort();
+  }, [data.date, kind, mode, resourceId, shift]);
+  const smartCrewCandidates = useMemo<CrewCandidate[]>(() => {
+    const byId = new Map<number, CrewCandidate>();
+    const guardById = new Map(data.guards.map((guard) => [Number(guard.id), guard]));
+    for (const candidate of smartData.sameDayCandidates || []) {
+      if (!candidate.availableForRedeployment) continue;
+      const guard = guardById.get(Number(candidate.guardId));
+      if (!guard) continue;
+      byId.set(Number(candidate.guardId), {
+        id: Number(candidate.guardId),
+        name: String(guard.name || ""),
+        registration: String(guard.registration || ""),
+        detail: `À disposição · ${(candidate.origins || []).join(" + ") || "aguardando destino"}`,
+        source: "redeploy",
+      });
+    }
+    for (const candidate of smartData.suggestions || []) {
+      if (!candidate.oppositeTeam || byId.has(Number(candidate.id))) continue;
+      const guard = guardById.get(Number(candidate.id));
+      if (!guard) continue;
+      byId.set(Number(candidate.id), {
+        id: Number(candidate.id),
+        name: String(guard.name || ""),
+        registration: String(guard.registration || ""),
+        detail: `HE · ${Number(candidate.currentHeHours || 0).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}h no mês · equipe oposta`,
+        source: "overtime",
+      });
+    }
+    return [...byId.values()];
+  }, [data.guards, smartData]);
   function chooseExisting(id:string){setResourceId(id);setExtraCount(kind==="post"||vehicleHasPair(data,Number(id),shift)?1:0)}
   function chooseShift(value:"2"|"4"){setShift(value);setExtraCount(kind==="post"||(mode==="existing"&&vehicleHasPair(data,Number(resourceId),value))?1:0)}
   return <div className="quick-create-backdrop"><form className="resource-crew-dialog" role="dialog" aria-modal="true" aria-labelledby="resource-crew-title" onSubmit={event=>onSave(event,kind)}><header><div><small>INCLUIR DIRETAMENTE NA ESCALA</small><h2 id="resource-crew-title">{kind==="vehicle"?"Viatura e guarnição":"Posto e efetivo"}</h2><p>Use um cadastro existente ou crie outro e já posicione os GMs.</p></div><button type="button" onClick={onClose} aria-label="Fechar">×</button></header><nav className="resource-mode"><button type="button" className={mode==="existing"?"active":""} disabled={!selectableResources.length} onClick={()=>{setMode("existing");setExtraCount(kind==="post"||vehicleHasPair(data,Number(resourceId),shift)?1:0)}}>Usar {kind==="vehicle"?"VTR":"posto"} existente</button><button type="button" className={mode==="new"?"active":""} onClick={()=>{setMode("new");setExtraCount(kind==="post"?1:0)}}>＋ Criar {kind==="vehicle"?"nova VTR":"novo posto"}</button></nav><input type="hidden" name="resourceMode" value={mode}/>
@@ -1596,13 +1659,12 @@ function ResourceCrewDialog({kind,initialResourceId,initialShift="2",initialMode
     {mode==="new"&&kind==="vehicle"&&<div className="new-resource-fields"><label>Prefixo<input name="prefix" required placeholder="Ex.: VTR 1400"/></label><label>Tipo<select name="type" defaultValue="sedan"><option value="sedan">Sedan</option><option value="pickup">Caminhonete</option><option value="suv">SUV</option><option value="van">Furgão</option><option value="moto">Moto</option><option value="other">Outro</option></select></label><label>Zona / área<input name="zone" placeholder="Área de atuação"/></label></div>}
     {mode==="new"&&kind==="post"&&<div className="new-resource-fields"><label>Nome do posto<input name="name" required placeholder="Ex.: Recepção"/></label><label>Seção<select name="groupName" required defaultValue={initialSection||""}><option value="">Selecionar seção</option>{sectionLabels.map(label=><option key={label} value={label}>{label}</option>)}</select></label><input type="hidden" name="sortOrder" value="99"/></div>}
     <label>Período da equipe<select name="shift" value={shift} onChange={event=>chooseShift(event.target.value as "2"|"4")}><option value="2">Diurno · 07h–19h</option><option value="4">Noturno · 19h–07h</option></select></label>
-    <fieldset className="crew-builder"><legend>{kind==="vehicle"?"Composição da guarnição":"GMs do posto"}</legend>{needsPair&&<div className="crew-rule"><b>Dupla obrigatória</b><span>A VTR precisa sair com motorista e patrulheiro.</span></div>}{!needsPair&&kind==="vehicle"&&<div className="crew-rule complete"><b>Dupla já existente</b><span>Os novos nomes entrarão como reforço.</span></div>}{needsPair&&<><CrewGuardRow data={data} shift={shift} label="Motorista" crewRole="driver"/><CrewGuardRow data={data} shift={shift} label="Patrulheiro" crewRole="patrol"/></>}{Array.from({length:extraCount},(_,index)=><CrewGuardRow key={index} data={data} shift={shift} label={kind==="vehicle"?`Integrante adicional ${index+1}`:`GM ${index+1}`} crewRole={kind==="vehicle"?"third":"guard"} removable onRemove={()=>setExtraCount(count=>Math.max(0,count-1))}/>)}<button type="button" className="add-crew-member" disabled={extraCount>=6} onClick={()=>setExtraCount(count=>Math.min(6,count+1))}>＋ {kind==="vehicle"?"Adicionar terceiro integrante ou reforço":"Adicionar outro GM"}</button></fieldset>
+    <fieldset className="crew-builder"><legend>{kind==="vehicle"?"Composição da guarnição":"GMs do posto"}</legend><div className="crew-rule smart-crew-rule"><b>Sugestões inteligentes</b><span>Somente GMs à disposição ou da equipe oposta elegível para HE.</span></div>{needsPair&&<div className="crew-rule"><b>Dupla obrigatória</b><span>A VTR precisa sair com motorista e patrulheiro.</span></div>}{!needsPair&&kind==="vehicle"&&<div className="crew-rule complete"><b>Dupla já existente</b><span>Os novos nomes entrarão como reforço.</span></div>}{needsPair&&<><CrewGuardRow candidates={smartCrewCandidates} shift={shift} label="Motorista" crewRole="driver"/><CrewGuardRow candidates={smartCrewCandidates} shift={shift} label="Patrulheiro" crewRole="patrol"/></>}{Array.from({length:extraCount},(_,index)=><CrewGuardRow key={index} candidates={smartCrewCandidates} shift={shift} label={kind==="vehicle"?`Integrante adicional ${index+1}`:`GM ${index+1}`} crewRole={kind==="vehicle"?"third":"guard"} removable onRemove={()=>setExtraCount(count=>Math.max(0,count-1))}/>)}{!smartCrewCandidates.length&&<small className="crew-suggestion-empty">Nenhum GM à disposição ou da equipe oposta está elegível neste período.</small>}<button type="button" className="add-crew-member" disabled={extraCount>=6} onClick={()=>setExtraCount(count=>Math.min(6,count+1))}>＋ {kind==="vehicle"?"Adicionar terceiro integrante ou reforço":"Adicionar outro GM"}</button></fieldset>
     <footer><button type="button" onClick={onClose}>Cancelar</button><button className="save" disabled={saving}>{saving?"Incluindo…":mode==="new"?`Criar e escalar ${kind==="vehicle"?"guarnição":"efetivo"}`:`Adicionar à escala`}</button></footer></form></div>
 }
 
-function CrewGuardRow({data,shift,label,crewRole,removable,onRemove}:{data:State;shift:string;label:string;crewRole:string;removable?:boolean;onRemove?:()=>void}){
-  const candidates=data.guards.filter(guard=>guardAvailableForPeriod(data,Number(guard.id),shift));
-  return <div className={`crew-guard-row ${crewRole}`}><span className="crew-role">{crewRole==="driver"?"M":crewRole==="patrol"?"P":crewRole==="third"?"R":"GM"}</span><label>{label}<select name="crewGuardId" required defaultValue=""><option value="">Selecionar GM disponível</option>{candidates.map(guard=><option key={String(guard.id)} value={String(guard.id)}>{guard.name} · {guard.registration}</option>)}</select></label><input type="hidden" name="crewRole" value={crewRole}/>{removable&&<button type="button" onClick={onRemove} aria-label={`Remover ${label}`}>×</button>}</div>
+function CrewGuardRow({candidates,label,crewRole,removable,onRemove}:{candidates:CrewCandidate[];shift:string;label:string;crewRole:string;removable?:boolean;onRemove?:()=>void}){
+  return <div className={`crew-guard-row ${crewRole}`}><span className="crew-role">{crewRole==="driver"?"M":crewRole==="patrol"?"P":crewRole==="third"?"R":"GM"}</span><label>{label}<select name="crewGuardId" required defaultValue=""><option value="">Selecionar sugestão</option>{candidates.map(guard=><option key={`${guard.id}|${guard.source}`} value={`${guard.id}|${guard.source}`}>{guard.name} · {guard.registration} · {guard.detail}</option>)}</select></label><input type="hidden" name="crewRole" value={crewRole}/>{removable&&<button type="button" onClick={onRemove} aria-label={`Remover ${label}`}>×</button>}</div>
 }
 
 function MovementDialog({data,edit,saving,onClose,onSave}:{data:State;edit:MovementEdit;saving:boolean;onClose:()=>void;onSave:(event:FormEvent<HTMLFormElement>)=>void}){
@@ -1632,12 +1694,6 @@ function GuardSwapDialog({data,swap,saving,onClose,onSelect}:{data:State;swap:Sw
 
 function vehicleHasPair(data:State,vehicleId:number,shift:string){const period=isDayShift(shift)?"day":"night";const crew=data.assignments.filter(assignment=>Number(assignment.vehicle_id)===vehicleId&&(isDayShift(String(assignment.shift))?"day":"night")===period);return crew.some(assignment=>assignment.role==="driver")&&crew.some(assignment=>assignment.role==="patrol")}
 function uniqueCrewCount(data:State,vehicleId:number){return new Set(data.assignments.filter(assignment=>Number(assignment.vehicle_id)===vehicleId).map(assignment=>Number(assignment.guard_id))).size}
-function guardAvailableForPeriod(data:State,guardId:number,shift:string){
-  const window=fullPeriodWindow(data.date,shift);
-  const overlaps=(item:Rec)=>Number(item.guard_id)===guardId&&String(item.starts_at)<window.end&&String(item.ends_at)>window.start;
-  return !data.assignments.some(overlaps)&&!data.availableForRedeployment.some(overlaps)&&!data.movements.some(overlaps);
-}
-
 function RedeployQuickEditor({data,assignments,saving,onClose,onSave}:{data:State;assignments:Rec[];saving:boolean;onClose:()=>void;onSave:(e:FormEvent<HTMLFormElement>)=>void}) {
   const [query,setQuery]=useState("");
   const assignment=assignments[0];
@@ -1946,6 +2002,9 @@ function Row({
     );
     return guards
       .filter((guard) => {
+        // A inclusÃ£o rÃ¡pida sÃ³ usa a bandeja Ã€ disposiÃ§Ã£o. GMs sem escala
+        // nÃ£o aparecem aqui; a equipe oposta Ã© oferecida pelo fluxo de HE.
+        if (!quickAddAvailableIds.has(Number(guard.id))) return false;
         if (query && !`${guard.name || ""} ${guard.registration || ""} ${guard.platoon || ""}`.toLowerCase().includes(query)) return false;
         if (serviceAdjustmentBlockedIds.has(Number(guard.id))) return false;
         if (movements.some((movement) => Number(movement.guard_id) === Number(guard.id) && String(movement.starts_at) < target.end && String(movement.ends_at) > target.start)) return false;
@@ -1956,8 +2015,7 @@ function Row({
         );
       })
       .sort((left, right) => {
-        const availability = Number(quickAddAvailableIds.has(Number(right.id))) - Number(quickAddAvailableIds.has(Number(left.id)));
-        return availability || String(left.name || "").localeCompare(String(right.name || ""), "pt-BR");
+        return String(left.name || "").localeCompare(String(right.name || ""), "pt-BR");
       })
       .slice(0, 8);
   }, [addQuery, addShift, allScheduleAssignments, date, guards, movements, quickAddAvailableIds, serviceAdjustments]);
@@ -2159,16 +2217,16 @@ function Row({
             ? ["driver", "patrol"].filter((role) => !list.some((assignment) => String(assignment.role) === role && !isOvertimeExtensionCell(assignment,date,s.id)))
             : list.length ? [] : ["guard"];
           const toggleQuickAdd = () => { setAddShift(current => current === s.id ? null : s.id); setAddQuery(""); };
-          const quickPicker = (withSmartSuggestion = false) => addShift === s.id && <div className="quick-add-picker" role="group" aria-label={`Adicionar GM em ${String(kind === "vehicle" ? resource.prefix : resource.name)}`}>
-            <input value={addQuery} onChange={(event) => setAddQuery(event.target.value)} placeholder="Buscar nome ou matrícula..." aria-label="Buscar GM disponível" />
+          const quickPicker = (withSmartSuggestion = false) => addShift === s.id && <div className="quick-add-picker" role="group" aria-label={`Sugestões inteligentes para ${String(kind === "vehicle" ? resource.prefix : resource.name)}`}>
+            <strong className="quick-add-title">Sugestões para este furo</strong>
+            <input value={addQuery} onChange={(event) => setAddQuery(event.target.value)} placeholder="Buscar GM à disposição..." aria-label="Buscar GM à disposição" />
             <div className="quick-add-results">
               {quickAddCandidates.map((guard) => <button type="button" key={String(guard.id)} onClick={() => { setAddShift(null); setAddQuery(""); void onQuickAdd(Number(guard.id), kind, resource, s.id); }}>
-                <span><b>{guard.name}</b><small><em className={`quick-add-origin ${quickAddAvailableIds.has(Number(guard.id)) ? "available" : "free"}`}>{quickAddAvailableIds.has(Number(guard.id)) ? "À disposição" : "Livre no turno"}</em> · {guard.registration || "Sem matrícula"} · {guard.platoon || "Disponível"}</small></span><strong>Adicionar</strong>
+                <span><b>{guard.name}</b><small><em className="quick-add-origin available">À disposição</em> · {guard.registration || "Sem matrícula"} · {guard.platoon || "Equipe do dia"}</small></span><strong>Remanejar</strong>
               </button>)}
-              {!quickAddCandidates.length && <small>Nenhum GM livre neste horário. Use “Mais opções” para consultar a lista completa.</small>}
+              {!quickAddCandidates.length && <small>Nenhum GM à disposição neste período. Use as sugestões de HE da equipe oposta.</small>}
             </div>
-            {withSmartSuggestion && <button type="button" className="quick-add-smart" onClick={(event) => { setAddShift(null); onHolePick(kind, resource, s.id, event); }}>Sugestão inteligente...</button>}
-            <button type="button" className="quick-add-advanced" onClick={() => { setAddShift(null); onAddToResource(kind, resource, s.id); }}>Mais opções...</button>
+            {withSmartSuggestion && <button type="button" className="quick-add-smart" onClick={(event) => { setAddShift(null); onHolePick(kind, resource, s.id, event); }}>Abrir sugestões inteligentes · HE/remanejamento</button>}
           </div>;
           return (
             <td
@@ -2293,7 +2351,7 @@ function Row({
                 >
                   ＋ GM
                 </button>
-                {quickPicker(kind === "vehicle")}
+                {quickPicker(true)}
                 </>
               )}
             </td>
@@ -2371,19 +2429,68 @@ function Editor({
     [extensionMode, setExtensionMode] = useState(Boolean(pick.extension)),
     [extensionStartsAt, setExtensionStartsAt] = useState(String(a?.regular_ends_at || `${data.date}T19:00`)),
     [extensionEndsAt, setExtensionEndsAt] = useState(String(a?.regular_ends_at ? a?.ends_at : `${data.date}T23:00`)),
-    [extensionDestination, setExtensionDestination] = useState(`${pick.kind}:${pick.resource.id}`),
-    [advancedOpen,setAdvancedOpen]=useState(Boolean(pick.extension||(a?.status&&a.status!=="normal")||Number(a?.is_reassigned)===1||a?.request_ref)),
-    guard = data.guards.find((g) => String(g.id) === guardId);
+      [extensionDestination, setExtensionDestination] = useState(`${pick.kind}:${pick.resource.id}`),
+      [advancedOpen,setAdvancedOpen]=useState(Boolean(pick.extension||(a?.status&&a.status!=="normal")||Number(a?.is_reassigned)===1||a?.request_ref)),
+      guard = data.guards.find((g) => String(g.id) === guardId);
+  const [smartCandidates, setSmartCandidates] = useState<SmartEditorCandidate[]>([]);
   const tomorrow=new Date(`${data.date}T12:00:00Z`);tomorrow.setUTCDate(tomorrow.getUTCDate()+1);const tomorrowDate=tomorrow.toISOString().slice(0,10);
+  useEffect(() => {
+    if (!manualAdd && !fillingHole) {
+      return;
+    }
+    const controller = new AbortController();
+    const params = new URLSearchParams({
+      date: data.date,
+      shift: pick.shift,
+      suggest: "1",
+    });
+    if (pick.kind === "post") params.set("postId", String(pick.resource.id));
+    if (pick.kind === "vehicle") params.set("vehicleId", String(pick.resource.id));
+    fetch(`/api/schedule?${params}`, { cache: "no-store", signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error();
+        return response.json();
+      })
+      .then((value: {
+        sameDayCandidates?: Array<{ guardId: number; name: string; origins?: string[]; assignmentIds?: number[]; availableForRedeployment?: boolean }>;
+        suggestions?: Array<{ id: number; name: string; currentHeHours?: number; oppositeTeam?: boolean }>;
+      }) => {
+        const candidates: SmartEditorCandidate[] = [];
+        for (const candidate of value.sameDayCandidates || []) {
+          if (!candidate.availableForRedeployment) continue;
+          candidates.push({
+            guardId: Number(candidate.guardId),
+            source: "redeploy",
+            detail: `À disposição · ${(candidate.origins || []).join(" + ") || "aguardando destino"}`,
+            assignmentIds: candidate.assignmentIds || [],
+          });
+        }
+        for (const candidate of value.suggestions || []) {
+          if (!candidate.oppositeTeam || candidates.some((item) => item.guardId === Number(candidate.id))) continue;
+          candidates.push({
+            guardId: Number(candidate.id),
+            source: "overtime",
+            detail: `HE · ${Number(candidate.currentHeHours || 0).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}h no mês · equipe oposta`,
+          });
+        }
+        setSmartCandidates(candidates);
+      })
+      .catch((reason: unknown) => {
+        if (!(reason instanceof DOMException && reason.name === "AbortError")) setSmartCandidates([]);
+      });
+    return () => controller.abort();
+  }, [data.date, fillingHole, manualAdd, pick.kind, pick.resource.id, pick.shift]);
   const eligibleGuards = useMemo(() => {
     const q = guardQuery.toLowerCase().trim();
+    const smartIds = new Set(smartCandidates.map((candidate) => candidate.guardId));
     return data.guards.filter((g) => {
+      if ((manualAdd || fillingHole) && !smartIds.has(Number(g.id))) return false;
       if (!q) return true;
       return `${g.name || ""} ${g.registration || ""} ${g.platoon || ""}`
         .toLowerCase()
         .includes(q);
     });
-  }, [data.guards, guardQuery]);
+  }, [data.guards, fillingHole, guardQuery, manualAdd, smartCandidates]);
   return (
     <form onSubmit={onSave}>
       <div className="editor-head">
@@ -2417,10 +2524,12 @@ function Editor({
       {manualAdd && (
         <div className="editing-alert manual-add-alert">
           <b>Novo lançamento:</b>
-          <span>Escolha GM, destino, turno, função e horário.</span>
+          <span>Escolha somente um GM à disposição ou da equipe oposta para HE.</span>
         </div>
       )}
       <input type="hidden" name="saveMode" value={extensionMode ? "split" : "single"}/>
+      <input type="hidden" name="smartSource" value={smartCandidates.find((candidate) => candidate.guardId === Number(guardId))?.source || ""}/>
+      <input type="hidden" name="smartAssignmentIds" value={smartCandidates.find((candidate) => candidate.guardId === Number(guardId))?.assignmentIds?.join(",") || ""}/>
       <div className="editing-alert">
         <b>Confira antes de salvar:</b>
         <span>{guard?.name || "nenhum GM selecionado"}</span>
@@ -2441,14 +2550,17 @@ function Editor({
           onChange={(e) => setGuardId(e.target.value)}
           required
         >
-          <option value="">Selecionar GM</option>
-          {eligibleGuards.map((g) => (
-            <option key={g.id} value={String(g.id)}>
-              {g.name} · {g.registration} · {g.platoon}
-            </option>
-          ))}
-        </select>
-      </label>
+              <option value="">Selecionar GM</option>
+              {eligibleGuards.map((g) => (
+                <option key={g.id} value={String(g.id)}>
+                  {g.name} · {g.registration} · {smartCandidates.find((candidate) => candidate.guardId === Number(g.id))?.detail || g.platoon}
+                </option>
+              ))}
+            </select>
+          </label>
+          {(manualAdd || fillingHole) && !smartCandidates.length && (
+            <p className="full-period-note">Nenhum GM à disposição ou da equipe oposta está elegível para este período.</p>
+          )}
       <label>
         Destino
         <select

@@ -228,7 +228,7 @@ test("copying a regular block into another quadrant is automatically classified 
   assert.match(schedule, /a cópia será marcada como HE/);
 });
 
-test("completed cells expose a quick available-GM picker before the advanced editor", () => {
+test("completed cells expose only redeployment and intelligent HE suggestions", () => {
   const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
   const usability = readFileSync(resolve("app/usability.css"), "utf8");
   assert.match(schedule, /className="cell-add-member"/);
@@ -238,7 +238,10 @@ test("completed cells expose a quick available-GM picker before the advanced edi
   assert.match(schedule, /movements\.some\(\(movement\) => Number\(movement\.guard_id\)/);
   assert.match(schedule, /quickAddAvailableIds\.has\(Number\(guard\.id\)\)/);
   assert.match(schedule, /previous\.movements === next\.movements/);
-  assert.match(schedule, /className="quick-add-advanced"/);
+  assert.match(schedule, /Abrir sugestões inteligentes/);
+  assert.match(schedule, /Nenhum GM à disposição neste período/);
+  assert.doesNotMatch(schedule, /Livre no turno/);
+  assert.doesNotMatch(schedule, /className="quick-add-advanced"/);
   assert.match(usability, /\.quick-add-picker/);
 });
 
@@ -451,7 +454,7 @@ test("schedule moves reset destination lane metadata and offer HE for a third ve
   const density = readFileSync(resolve("app/schedule-density.css"), "utf8");
   assert.match(schedule, /const regularCrew = list\.filter/);
   assert.match(schedule, /: "third"/);
-  assert.match(schedule, /quickPicker\(kind === "vehicle"\)/);
+  assert.match(schedule, /quickPicker\(true\)/);
   assert.match(api, /lane_order=CASE WHEN COALESCE\(post_id,0\)/);
   assert.match(api, /post_id=\?,vehicle_id=\?,lane_order=NULL/);
   assert.match(density, /has-he-action \.live-person\{padding-right:54px\}/);
@@ -488,6 +491,16 @@ test("same-day hole suggestions only expose guards already awaiting redeployment
   assert.match(api, /Number\(assignment\.awaiting_redeploy\) !== 1\) continue/);
   assert.doesNotMatch(dialog, /assignedCandidates/);
   assert.doesNotMatch(dialog, /Move o período do GM de outro posto/);
+});
+
+test("intelligent HE suggestions are limited to the opposite 12x36 team", () => {
+  const api = readFileSync(resolve("app/api/schedule/route.ts"), "utf8");
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  assert.match(api, /const automaticPattern = appliedPattern \? null : await resolvePatternCodes/);
+  assert.match(api, /const smartRanked = ranked\.filter\(\(candidate\) => candidate\.oppositeTeam\)/);
+  assert.match(api, /suggestions: smartRanked\.map/);
+  assert.match(schedule, /Somente GMs à disposição ou da equipe oposta/);
+  assert.match(schedule, /source: "overtime"/);
 });
 
 test("daily operations have an isolated workflow, crew slots and PDF annex", () => {

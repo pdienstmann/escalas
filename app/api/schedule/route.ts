@@ -1200,8 +1200,12 @@ export async function POST(request: Request) {
     const postId = Number(b.postId || 0) || null;
     const vehicleId = Number(b.vehicleId || 0) || null;
     const requestedShift = String(b.shift || "2");
-    const members = ((b as unknown as { members?: Array<{ guardId?: number; role?: string }> }).members || [])
-      .map((member) => ({ guardId: Number(member.guardId), role: String(member.role || "guard") }))
+    const members = ((b as unknown as { members?: Array<{ guardId?: number; role?: string; source?: string }> }).members || [])
+      .map((member) => ({
+        guardId: Number(member.guardId),
+        role: String(member.role || "guard"),
+        source: (member.source === "redeploy" ? "redeploy" : member.source === "overtime" ? "overtime" : "normal") as "redeploy" | "overtime" | "normal",
+      }))
       .filter((member) => member.guardId > 0)
       .slice(0, 8);
     if ((postId ? 1 : 0) + (vehicleId ? 1 : 0) !== 1)
@@ -1234,9 +1238,31 @@ export async function POST(request: Request) {
     if (excluded)
       return Response.json({ error: "Este recurso foi retirado desta escala. Recoloque-o antes de adicionar uma equipe." }, { status: 409 });
     const periodShifts = fullPeriodShifts(requestedShift);
+    const periodStart = periodShiftTimes(schedule.date, periodShifts[0]).start;
+    const periodEnd = periodShiftTimes(schedule.date, periodShifts[periodShifts.length - 1]).end;
+    const redeploySources = new Map<number, Record<string, unknown>[]>();
+    for (const member of members.filter((item) => item.source === "redeploy")) {
+      const rows = (
+        await env.DB.prepare(
+          `SELECT a.* FROM assignments a
+           WHERE a.schedule_id=? AND a.guard_id=? AND a.starts_at<? AND a.ends_at>?
+             AND COALESCE(a.work_kind,'shift')!='overtime_extension'
+             AND ((a.post_id IS NULL AND a.vehicle_id IS NULL)
+               OR EXISTS (SELECT 1 FROM schedule_resource_exclusions e WHERE e.schedule_id=a.schedule_id AND e.resource_kind='post' AND e.resource_id=a.post_id)
+               OR EXISTS (SELECT 1 FROM schedule_resource_exclusions e WHERE e.schedule_id=a.schedule_id AND e.resource_kind='vehicle' AND e.resource_id=a.vehicle_id)
+               OR EXISTS (SELECT 1 FROM vehicle_outages o WHERE o.vehicle_id=a.vehicle_id AND o.active=1 AND o.starts_on<=? AND (o.ends_on IS NULL OR o.ends_on>=?)))
+           ORDER BY a.starts_at`
+        ).bind(scheduleId, member.guardId, periodEnd, periodStart, schedule.date, schedule.date).all<Record<string, unknown>>()
+      ).results;
+      if (!rows.length) {
+        return Response.json({ error: "Este GM deixou de estar À disposição. Atualize as sugestões antes de salvar." }, { status: 409 });
+      }
+      redeploySources.set(member.guardId, rows);
+    }
     for (const member of members) {
       for (const shift of periodShifts) {
         const interval = periodShiftTimes(schedule.date, shift);
+        if (member.source === "redeploy") continue;
         const blocked = await assertAssignable(scheduleId, member.guardId, interval.start, interval.end);
         if (blocked) return Response.json({ error: blocked.error }, { status: blocked.status });
       }
@@ -1248,12 +1274,27 @@ export async function POST(request: Request) {
           return Response.json({ error: "Toda viatura precisa ter motorista e patrulheiro. Selecione as duas funções antes de salvar." }, { status: 400 });
       }
     }
-    const statements = periodShifts.flatMap((shift) => {
-      const interval = periodShiftTimes(schedule.date, shift);
-      return members.map((member) => env.DB.prepare("INSERT INTO assignments (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,work_kind,status) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(scheduleId, member.guardId, postId, vehicleId, shift, vehicleId ? member.role : "guard", interval.start, interval.end, "shift", "normal"));
-    });
+    const statements: D1PreparedStatement[] = [];
+    const changedIds: number[] = [];
+    for (const member of members.filter((item) => item.source === "redeploy")) {
+      for (const assignment of redeploySources.get(member.guardId) || []) {
+        const id = Number(assignment.id);
+        if (!id) continue;
+        changedIds.push(id);
+        statements.push(env.DB.prepare(
+          "UPDATE assignments SET post_id=?,vehicle_id=?,role=?,status='normal',request_ref=NULL,is_reassigned=1,reassignment_note=?,lane_order=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        ).bind(postId, vehicleId, vehicleId ? member.role : "guard", `Remanejamento rápido para ${vehicleId ? "viatura" : "posto"}`, id));
+      }
+    }
+    for (const member of members.filter((item) => item.source !== "redeploy")) {
+      for (const shift of periodShifts) {
+        const interval = periodShiftTimes(schedule.date, shift);
+        const isOvertime = member.source === "overtime";
+        statements.push(env.DB.prepare("INSERT INTO assignments (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,work_kind,status,request_ref) VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(scheduleId, member.guardId, postId, vehicleId, shift, vehicleId ? member.role : "guard", interval.start, interval.end, "shift", isOvertime ? "overtime" : "normal", isOvertime ? "Sugestão inteligente · equipe oposta" : null));
+      }
+    }
     const results = await env.DB.batch(statements);
-    const ids = results.map((result) => Number(result.meta.last_row_id)).filter(Boolean);
+    const ids = [...changedIds, ...results.map((result) => Number(result.meta.last_row_id)).filter(Boolean)];
     const placeholders = ids.map(() => "?").join(",");
     const assignments = ids.length
       ? (await env.DB.prepare(`SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id IN (${placeholders}) ORDER BY a.starts_at,a.role`).bind(...ids).all<Record<string, unknown>>()).results
@@ -1880,8 +1921,16 @@ async function buildSuggestions(request: Request, date: string) {
     guardHistoryByGuard.set(Number(h.guard_id), list);
   }
 
-  const dayCodes = new Set<string>(appliedPattern?.day_code ? [appliedPattern.day_code] : []);
-  const nightCodes = new Set<string>(appliedPattern?.night_code ? [appliedPattern.night_code] : []);
+  // Sugestão de HE nunca deve abrir a escala para um GM simplesmente "livre".
+  // Quando o padrão ainda não foi gravado na escala, use a paridade automática
+  // do dia para identificar D1/D2 e N1/N2 mesmo assim.
+  const automaticPattern = appliedPattern ? null : await resolvePatternCodes(env.DB, date);
+  const dayCodes = new Set<string>(
+    [appliedPattern?.day_code, automaticPattern?.dayCode].filter(Boolean) as string[],
+  );
+  const nightCodes = new Set<string>(
+    [appliedPattern?.night_code, automaticPattern?.nightCode].filter(Boolean) as string[],
+  );
 
   const ranked = rankGuardSuggestions(
     guards.results.filter((g) => Number(g.overtime_eligible) !== 0).map((g) => ({
@@ -1904,6 +1953,10 @@ async function buildSuggestions(request: Request, date: string) {
     },
   );
 
+  // A lista de HE fica restrita à equipe 12x36 oposta. GMs sem escala no dia
+  // não são candidatos automáticos e não aparecem como "livres no turno".
+  const smartRanked = ranked.filter((candidate) => candidate.oppositeTeam);
+
   return Response.json({
     date,
     shift,
@@ -1911,7 +1964,7 @@ async function buildSuggestions(request: Request, date: string) {
     postId,
     vehicleId,
     role,
-    suggestions: ranked.map((s) => ({
+    suggestions: smartRanked.map((s) => ({
       ...s,
       reasons: describeReasons(s.reasons, s),
     })),

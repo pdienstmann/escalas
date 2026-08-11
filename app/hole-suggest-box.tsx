@@ -57,7 +57,6 @@ export function HoleSuggestBox({
   resourceLabel,
   onPick,
   onRedeploy,
-  onManual,
   onClose,
   busy,
   position,
@@ -70,7 +69,6 @@ export function HoleSuggestBox({
   resourceLabel: string;
   onPick: (guardId: number, guardName: string) => void | Promise<void>;
   onRedeploy: (candidate: SameDayCandidate) => void | Promise<void>;
-  onManual: () => void;
   onClose: () => void;
   busy: boolean;
   position?: SuggestionPosition | null;
@@ -275,8 +273,7 @@ export function HoleSuggestBox({
         <button type="button" className="hole-suggest-manual" onClick={() => setShowOppositeTeam(true)}>
           Ver equipe do dia oposto ({oppositeTeam.length})
         </button>
-        <button type="button" className="hole-suggest-manual secondary" onClick={onManual}>Seleção manual completa</button>
-        <small>A sugestão nunca é aplicada sem confirmação.</small>
+        <small>A lista mostra somente GMs à disposição ou da equipe oposta elegível para HE. Nada é aplicado sem confirmação.</small>
       </footer>}
     </div>
     {showOppositeTeam && <div className="opposite-team-backdrop">
