@@ -92,7 +92,7 @@ export async function GET(request: Request) {
          AND NOT EXISTS (
            SELECT 1 FROM overtime_entries e
            JOIN assignments ea ON ea.id=e.assignment_id
-           WHERE e.status IN ('confirmed','partial')
+            WHERE e.status IN ('confirmed','partial','not_performed','cancelled')
              AND ea.guard_id=a.guard_id AND date(ea.starts_at)=date(a.starts_at)
              AND COALESCE(ea.post_id,0)=COALESCE(a.post_id,0)
              AND COALESCE(ea.vehicle_id,0)=COALESCE(a.vehicle_id,0)
@@ -202,6 +202,98 @@ export async function POST(request: Request) {
       undoable: false,
     });
     return Response.json({ ok: true, guard, message: "Preferências de HE salvas." });
+  }
+
+  if (body.action === "suggestion_dismiss") {
+    const assignmentId = Number(body.assignmentId);
+    if (!assignmentId)
+      return Response.json({ error: "Sugestão de HE inválida." }, { status: 400 });
+
+    const suggestion = await env.DB.prepare(
+      `SELECT a.id assignment_id,a.guard_id,g.name guard_name,g.registration,g.platoon,
+         date(a.starts_at) service_date,COALESCE(a.regular_ends_at,a.starts_at) starts_at,a.ends_at,
+         CAST(ROUND((julianday(a.ends_at)-julianday(COALESCE(a.regular_ends_at,a.starts_at)))*1440) AS INTEGER) planned_minutes,
+         COALESCE(p.name,v.prefix,'Sem local') location,a.request_ref
+       FROM assignments a
+       JOIN guards g ON g.id=a.guard_id
+       LEFT JOIN posts p ON p.id=a.post_id
+       LEFT JOIN vehicles v ON v.id=a.vehicle_id
+       WHERE a.id=? AND a.status='overtime'`,
+    )
+      .bind(assignmentId)
+      .first<Row>();
+    if (!suggestion)
+      return Response.json({ error: "Sugestão de HE não encontrada ou já removida." }, { status: 404 });
+
+    const serviceDate = String(suggestion.service_date || "");
+    if (!(await ensureMonthOpen(serviceDate.slice(0, 7))))
+      return Response.json(
+        { error: "Este mês de HE está fechado. Reabra-o antes de dispensar sugestões." },
+        { status: 409 },
+      );
+
+    const minutes = Math.max(0, Number(suggestion.planned_minutes || 0));
+    if (!minutes)
+      return Response.json({ error: "A sugestão não possui horas válidas para dispensar." }, { status: 409 });
+
+    const note = String(body.notes || "Sugestão dispensada no controle de HE.").trim();
+    const existing = await env.DB.prepare(
+      "SELECT id,status FROM overtime_entries WHERE assignment_id=?",
+    )
+      .bind(assignmentId)
+      .first<Row>();
+    let entryId: number;
+    if (existing) {
+      if (["confirmed", "partial"].includes(String(existing.status)))
+        return Response.json({ error: "Esta sugestão já foi lançada no saldo." }, { status: 409 });
+      entryId = Number(existing.id);
+      await env.DB.prepare(
+        `UPDATE overtime_entries SET service_date=?,starts_at=?,ends_at=?,planned_minutes=?,confirmed_minutes=0,
+         status='not_performed',source='schedule',location=?,request_ref=?,notes=?,confirmed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
+         WHERE id=?`,
+      )
+        .bind(
+          serviceDate,
+          suggestion.starts_at,
+          suggestion.ends_at,
+          minutes,
+          suggestion.location,
+          suggestion.request_ref || null,
+          note,
+          entryId,
+        )
+        .run();
+    } else {
+      const created = await env.DB.prepare(
+        `INSERT INTO overtime_entries
+         (assignment_id,guard_id,service_date,starts_at,ends_at,planned_minutes,confirmed_minutes,status,source,location,request_ref,notes,confirmed_at)
+         VALUES (?,?,?,?,?,?,0,'not_performed','schedule',?,?,?,CURRENT_TIMESTAMP)`,
+      )
+        .bind(
+          assignmentId,
+          suggestion.guard_id,
+          serviceDate,
+          suggestion.starts_at,
+          suggestion.ends_at,
+          minutes,
+          suggestion.location,
+          suggestion.request_ref || null,
+          note,
+        )
+        .run();
+      entryId = Number(created.meta.last_row_id);
+    }
+
+    const entry = await joinedEntry(entryId);
+    await writeAudit(request, {
+      action: "update",
+      entityType: "overtime_entry",
+      entityId: entryId,
+      summary: `Dispensou sugestão de HE de ${suggestion.guard_name}`,
+      after: entry as Record<string, unknown>,
+      undoable: false,
+    });
+    return Response.json({ ok: true, entry, message: "Sugestão de HE dispensada." });
   }
 
   if (body.action === "entry_review") {

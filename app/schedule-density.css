@@ -65,3 +65,36 @@
   .cell-quick-actions button{flex-basis:82px;font-size:9px}
   .inline-move-tools{display:flex}
 }
+
+/* Nomes de postos e zonas nunca devem desaparecer por reticências. A coluna
+   cresce verticalmente quando o cadastro possui um nome longo, mantendo a
+   identificação completa no computador e no celular. */
+.schedule tbody tr.post-row .resource>div,
+.schedule tbody tr.vehicle-row .resource>div{min-width:0}
+.schedule tbody tr.post-row .resource>div>b,
+.schedule tbody tr.post-row .resource>div>small,
+.schedule tbody tr.vehicle-row .resource>div>b,
+.schedule tbody tr.vehicle-row .resource>div>small{display:block;overflow:visible;text-overflow:clip;white-space:normal;overflow-wrap:anywhere;word-break:break-word}
+.schedule tbody tr.post-row .resource>div>b,
+.schedule tbody tr.vehicle-row .resource>div>b{line-height:1.25}
+.schedule tbody tr.post-row .resource>div>small,
+.schedule tbody tr.vehicle-row .resource>div>small{line-height:1.25}
+.schedule th:first-child{width:270px}
+.app.compact .schedule th:first-child{width:235px}
+@media(max-width:700px){
+  .schedule th:first-child{width:250px}
+  .app.compact .schedule th:first-child{width:225px}
+}
+
+/* O mapa dos padrões usa cards, mas deve obedecer à mesma regra da grade:
+   posto, prefixo e zona completos, inclusive em telas estreitas. */
+.pattern-resource>header>div{min-width:0}
+.pattern-resource>header>div>b,
+.pattern-resource>header>div>small{display:block;overflow:visible;text-overflow:clip;white-space:normal;overflow-wrap:anywhere;word-break:break-word;line-height:1.25}
+
+/* A sugestão de HE pode ser confirmada ou dispensada sem abrir outro fluxo. */
+.he-suggestion-actions{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:5px}
+.he-suggestions .he-suggestion-actions button{grid-column:auto}
+.he-suggestions .he-suggestion-actions .dismiss{border-color:#d5a5a8;background:#fff7f7;color:#9a2730}
+.he-suggestions .he-suggestion-actions button:disabled{cursor:not-allowed;opacity:.55}
+@media(max-width:420px){.he-suggestion-actions{grid-template-columns:1fr}}

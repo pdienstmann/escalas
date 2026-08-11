@@ -676,6 +676,30 @@ test("manual overtime dashboard exposes actionable alerts, safe refresh state an
   assert.match(styles, /\.he-load-error/);
 });
 
+test("long post and vehicle names wrap instead of being clipped", () => {
+  const density = readFileSync(resolve("app/schedule-density.css"), "utf8");
+  assert.match(density, /overflow-wrap:anywhere/);
+  assert.match(density, /text-overflow:clip/);
+  assert.match(density, /\.schedule th:first-child\{width:270px\}/);
+  assert.match(density, /\.app\.compact \.schedule th:first-child\{width:235px\}/);
+  assert.match(density, /\.pattern-resource>header>div>b/);
+  assert.match(density, /\.pattern-resource>header>div>small/);
+});
+
+test("manual HE suggestions can be persistently dismissed", () => {
+  const api = readFileSync(resolve("app/api/overtime/route.ts"), "utf8");
+  const dashboard = readFileSync(resolve("app/overtime-dashboard.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/schedule-density.css"), "utf8");
+  assert.match(api, /body\.action === "suggestion_dismiss"/);
+  assert.match(api, /status='not_performed'/);
+  assert.match(api, /not_performed','cancelled/);
+  assert.match(dashboard, /async function dismissSuggestion/);
+  assert.match(dashboard, /action: "suggestion_dismiss"/);
+  assert.match(dashboard, /className="dismiss"/);
+  assert.match(dashboard, />Dispensar<\/button>/);
+  assert.match(styles, /\.he-suggestion-actions/);
+});
+
 test("management modules reuse a date-scoped cache while synchronizing D1 silently", () => {
   const source = readFileSync(resolve("app/gestao-client.tsx"), "utf8");
   assert.match(source, /escala-admin-cache/);
