@@ -45,14 +45,16 @@ export function OvertimeDashboard() {
   const [closureDialog, setClosureDialog] = useState<"close" | "reopen" | null>(null);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [message, setMessage] = useState("");
   const [hoursBand, setHoursBand] = useState<"all" | "zero" | "under12" | "over12">("all");
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (background = false) => {
     const cached = readOvertimeCache(month);
-    if (cached) setData(cached);
-    setLoading(true);
+    if (cached && !background) setData(cached);
+    if (background) setSyncing(true);
+    else setLoading(true);
     setLoadError("");
     try {
       const response = await fetch(`/api/overtime?month=${month}&_=${Date.now()}`, {
@@ -64,8 +66,10 @@ export function OvertimeDashboard() {
       writeOvertimeCache(next);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Nao foi possivel carregar o livro de HE.");
+      if (background) setMessage("A alteração foi salva, mas a lista ainda não foi sincronizada. Tente atualizar novamente.");
     } finally {
-      setLoading(false);
+      if (background) setSyncing(false);
+      else setLoading(false);
     }
   }, [month]);
   useEffect(() => {
@@ -115,7 +119,7 @@ export function OvertimeDashboard() {
   const adjustmentCount = entries.filter((entry) => entry.source === "adjustment").length;
   const unusualDurationCount = entries.filter((entry) => Math.abs(Number(entry.confirmed_minutes || 0)) > 12 * 60).length;
   const blockedCount = data.ranking.filter((guard) => Number(guard.overtime_eligible) === 0).length;
-  const isRefreshing = loading || !monthMatches;
+  const isRefreshing = loading || syncing || !monthMatches;
 
   async function postAction(body: Record<string, unknown>) {
     if (saving) return false;
@@ -128,7 +132,7 @@ export function OvertimeDashboard() {
       });
       const result = await response.json();
       setMessage(response.ok ? result.message : result.error);
-      if (response.ok) await load();
+      if (response.ok) await load(true);
       return response.ok;
     } finally {
       setSaving(false);

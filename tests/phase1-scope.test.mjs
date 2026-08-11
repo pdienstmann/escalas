@@ -820,7 +820,16 @@ test("overtime dashboard reuses a month cache while refreshing the live book", (
   assert.match(dashboard, /useState<Data \| null>\(\(\) => readOvertimeCache\(date\.slice\(0, 7\)\)\)/);
   assert.match(dashboard, /const cached = readOvertimeCache\(month\)/);
   assert.match(dashboard, /writeOvertimeCache\(next\)/);
-  assert.match(dashboard, /const isRefreshing = loading \|\| !monthMatches/);
+  assert.match(dashboard, /const isRefreshing = loading \|\| syncing \|\| !monthMatches/);
+});
+
+test("overtime edits refresh silently without replacing the visible book", () => {
+  const dashboard = readFileSync(resolve("app/overtime-dashboard.tsx"), "utf8");
+  assert.match(dashboard, /const \[syncing, setSyncing\] = useState\(false\)/);
+  assert.match(dashboard, /const load = useCallback\(async \(background = false\)/);
+  assert.match(dashboard, /if \(cached && !background\) setData\(cached\)/);
+  assert.match(dashboard, /if \(response\.ok\) await load\(true\)/);
+  assert.match(dashboard, /const isRefreshing = loading \|\| syncing \|\| !monthMatches/);
 });
 
 test("publication validation respects FA resources and reports actionable critical issues", () => {
