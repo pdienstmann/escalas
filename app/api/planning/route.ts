@@ -327,6 +327,15 @@ export async function GET(request: Request) {
   const [year, monthNumber] = requested.split("-").map(Number);
   for (let dayNumber = 1; dayNumber <= bounds.days; dayNumber++) {
     const date = dateValue(year, monthNumber, dayNumber);
+    const fleetByType = new Map<string, { type: string; availablePrefixes: string[]; outagePrefixes: string[] }>();
+    for (const vehicle of catalogVehicles.results) {
+      const type = String(vehicle.type || "other").toLowerCase();
+      const current = fleetByType.get(type) || { type, availablePrefixes: [], outagePrefixes: [] };
+      const prefix = String(vehicle.prefix || "VTR sem prefixo");
+      if (outageFor(vehicle.id, date)) current.outagePrefixes.push(prefix);
+      else current.availablePrefixes.push(prefix);
+      fleetByType.set(type, current);
+    }
     const dayPeriods: Record<PeriodKey, Row> = {} as Record<PeriodKey, Row>;
     for (const period of ["day", "night"] as PeriodKey[]) {
       const positions = effectivePositions(date, period);
@@ -407,7 +416,16 @@ export async function GET(request: Request) {
     if (dayStatus === "critical") criticalDays++; else if (dayStatus === "attention") attentionDays++;
     const savedAssignments = (assignmentsByDate.get(date) || []).length > 0;
     const baseSource = savedAssignments ? "escala existente" : scheduleDates.has(date) ? "escala aberta · padrão" : "projeção pelo padrão";
-    days.push({ date, weekday: dayOfWeek(date), pattern: { day: dayPeriods.day.code, night: dayPeriods.night.code }, source: scenarioActive ? `simulação · ${baseSource}` : baseSource, status: dayStatus, day: dayPeriods.day, night: dayPeriods.night });
+    days.push({
+      date,
+      weekday: dayOfWeek(date),
+      pattern: { day: dayPeriods.day.code, night: dayPeriods.night.code },
+      source: scenarioActive ? `simulação · ${baseSource}` : baseSource,
+      status: dayStatus,
+      day: dayPeriods.day,
+      night: dayPeriods.night,
+      fleet: [...fleetByType.values()].sort((left, right) => left.type.localeCompare(right.type)),
+    });
   }
   return Response.json({ month: requested, anchorDate: anchor, days, catalog: { guards: guards.results.map(({ id, name, registration, platoon }) => ({ id, name, registration, platoon })), vehicles: catalogVehicles.results }, simulation: { active: scenarioActive, events: effectiveScenario }, summary: { days: bounds.days, totalExpected, totalAvailable, totalAway, totalHoles, criticalDays, attentionDays, absenceTotals, overtimeNeeded: totalHoles }, generatedAt: new Date().toISOString() }, { headers: { "cache-control": "no-store" } });
 }

@@ -1398,6 +1398,16 @@ function FleetPanorama({date,vehicles,outages,crews,saving,onEdit,onQuickOutage,
     const text=`${row.vehicle.prefix||""} ${row.vehicle.zone||""} ${row.vehicle.type||""} ${row.crew?.crew_names||""}`.toLowerCase();
     return(filter==="all"||row.status===filter)&&text.includes(query.toLowerCase().trim());
   });
+  const typeOrder=["moto","sedan","suv","pickup","van"];
+  const groupedMap=new Map<string,typeof visible>();
+  for(const row of visible){const type=String(row.vehicle.type||"other").toLowerCase();groupedMap.set(type,[...(groupedMap.get(type)||[]),row])}
+  const grouped=[...groupedMap.entries()].sort(([left],[right])=>{
+    const leftIndex=typeOrder.indexOf(left),rightIndex=typeOrder.indexOf(right);
+    return(leftIndex<0?99:leftIndex)-(rightIndex<0?99:rightIndex)||left.localeCompare(right);
+  }).map(([type,items])=>({type,items:items.sort((left,right)=>{
+    const statusOrder={available:0,service:1,outage:2};
+    return statusOrder[left.status]-statusOrder[right.status]||String(left.vehicle.prefix).localeCompare(String(right.vehicle.prefix),"pt-BR",{numeric:true});
+  })}));
   const count=(status:string)=>rows.filter(row=>row.status===status).length;
   return <section className="fleet-panorama">
     <header><div><small>FROTA NA DATA DA ESCALA</small><h2>Panorama operacional</h2><p>As situações refletem a escala aberta e os registros de FA.</p></div><input value={query} onChange={event=>setQuery(event.target.value)} placeholder="Buscar VTR, zona ou GM…"/></header>
@@ -1407,11 +1417,15 @@ function FleetPanorama({date,vehicles,outages,crews,saving,onEdit,onQuickOutage,
       <button className={filter==="service"?"active":""} onClick={()=>setFilter("service")}><b>{count("service")}</b><span>Em serviço</span></button>
       <button className={filter==="outage"?"active":""} onClick={()=>setFilter("outage")}><b>{count("outage")}</b><span>Em FA</span></button>
     </div>
-    <div className="fleet-map">{visible.map(({vehicle,outage,crew,status})=><article key={String(vehicle.id)} className={`fleet-card ${status}`}>
-      <span className="fleet-card-icon">{vehicleIconLabel(String(vehicle.type))}</span>
-      <div><header><b>{String(vehicle.prefix)}</b><span>{status==="outage"?"EM FA":status==="service"?"EM SERVIÇO":"DISPONÍVEL"}</span></header><strong>{String(vehicle.zone||"Zona não definida")}</strong><small>{vehicleTypeLabel(String(vehicle.type))}</small>{crew&&<p><b>Equipe:</b> {String(crew.crew_names)}</p>}{outage&&<p><b>FA:</b> {String(outage.reason||"Sem motivo informado")} · {outage.ends_on?`retorno ${formatDate(outage.ends_on)}`:"prazo indeterminado"}</p>}</div>
-       <div className="fleet-card-actions"><button disabled={saving} onClick={()=>onEdit(vehicle)}>Editar</button>{outage?<button className="available" disabled={saving} onClick={()=>onClearOutage(outage.id)}>Registrar retorno</button>:<button className="outage" disabled={saving} onClick={()=>onQuickOutage(vehicle)}>Marcar FA</button>}</div>
-    </article>)}</div>
+    <div className="fleet-type-groups">{grouped.map(group=>{
+      const availableCount=group.items.filter(item=>item.status!=="outage").length;
+      const outageCount=group.items.length-availableCount;
+      return <section className="fleet-type-group" key={group.type}><header><div><span aria-hidden="true">{vehicleIconLabel(group.type)}</span><div><h3>{vehicleTypeLabel(group.type)}</h3><small>{group.items.length} viatura{group.items.length===1?"":"s"}</small></div></div><p><b>{availableCount}</b> disponíveis <em>·</em> <strong>{outageCount}</strong> em FA</p></header><div className="fleet-map">{group.items.map(({vehicle,outage,crew,status})=><article key={String(vehicle.id)} className={`fleet-card ${status}`}>
+        <span className="fleet-card-icon">{vehicleIconLabel(String(vehicle.type))}</span>
+        <div><header><b>{String(vehicle.prefix)}</b><span>{status==="outage"?"EM FA":status==="service"?"EM SERVIÇO":"DISPONÍVEL"}</span></header><strong>{String(vehicle.zone||"Zona não definida")}</strong><small>{vehicleTypeLabel(String(vehicle.type))}</small>{crew&&<p><b>Equipe:</b> {String(crew.crew_names)}</p>}{outage&&<p><b>FA:</b> {String(outage.reason||"Sem motivo informado")} · {outage.ends_on?`retorno ${formatDate(outage.ends_on)}`:"prazo indeterminado"}</p>}</div>
+         <div className="fleet-card-actions"><button disabled={saving} onClick={()=>onEdit(vehicle)}>Editar</button>{outage?<button className="available" disabled={saving} onClick={()=>onClearOutage(outage.id)}>Registrar retorno</button>:<button className="outage" disabled={saving} onClick={()=>onQuickOutage(vehicle)}>Marcar FA</button>}</div>
+      </article>)}</div></section>;
+    })}</div>
     {!visible.length&&<p className="fleet-empty">Nenhuma viatura corresponde aos filtros.</p>}
   </section>
 }

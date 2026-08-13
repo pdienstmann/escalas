@@ -1441,3 +1441,23 @@ test("leave imports stay in the 12x36 workforce and pattern editors isolate work
   assert.match(patterns, /Importações de folgas permanecem no efetivo 12x36/);
   assert.match(patterns, /unassignedGuards = shiftGuards\(data\.guards\)/);
 });
+
+test("fleet views group vehicle types and expose date-specific available and FA prefixes", () => {
+  const management = readFileSync(resolve("app/gestao-client.tsx"), "utf8");
+  const dashboard = readFileSync(resolve("app/management-dashboard.tsx"), "utf8");
+  const planningApi = readFileSync(resolve("app/api/planning/route.ts"), "utf8");
+  const managementStyles = readFileSync(resolve("app/management.css"), "utf8");
+  const dashboardStyles = readFileSync(resolve("app/management-dashboard.css"), "utf8");
+  assert.match(management, /fleet-type-groups/);
+  assert.match(management, /vehicleIconLabel\(group\.type\)/);
+  assert.match(management, /availableCount/);
+  assert.match(planningApi, /fleetByType/);
+  assert.match(planningApi, /outageFor\(vehicle\.id, date\)/);
+  assert.match(planningApi, /availablePrefixes/);
+  assert.match(planningApi, /outagePrefixes/);
+  assert.match(dashboard, /function DashboardFleet/);
+  assert.match(dashboard, /Disponíveis:/);
+  assert.match(dashboard, /Em FA:/);
+  assert.match(managementStyles, /\.fleet-type-group/);
+  assert.match(dashboardStyles, /\.dashboard-fleet-types/);
+});

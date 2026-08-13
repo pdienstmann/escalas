@@ -24,6 +24,12 @@ type PlanningDay = {
   status: string;
   day: Period;
   night: Period;
+  fleet?: FleetTypeSummary[];
+};
+type FleetTypeSummary = {
+  type: string;
+  availablePrefixes: string[];
+  outagePrefixes: string[];
 };
 type PlanningData = {
   month: string;
@@ -242,10 +248,28 @@ export function ManagementDashboard({ initialDate }: { initialDate: string }) {
       </section>
       <section className="dashboard-bottom-grid">
         <div className="dashboard-alerts"><header><div><small>PRIORIDADES</small><h3>Furos projetados por período</h3></div><Link href={`/planejamento?date=${selected?.date || initialDate}`}>Planejamento completo</Link></header><div className="dashboard-priority-columns"><PriorityPeriod kind="day" label="Diurno" items={priorities.day} onSelect={setSelectedDate} /><PriorityPeriod kind="night" label="Noturno" items={priorities.night} onSelect={setSelectedDate} /></div></div>
-        <div className="dashboard-shortcuts"><header><small>ACESSO RÁPIDO</small><h3>Rotinas da gestão</h3></header><div><Link href={`/folgas?date=${selected?.date || initialDate}`}><span>F</span><b>Folgas mensais</b><small>Importar e revisar solicitações</small></Link><Link href={`/movimentacoes?date=${selected?.date || initialDate}`}><span>P</span><b>Pendências</b><small>Férias, cursos e afastamentos</small></Link><Link href={`/horas-extras?date=${selected?.date || initialDate}`}><span>HE</span><b>Horas extras</b><small>Lançamentos e distribuição</small></Link><Link href={`/viaturas?date=${selected?.date || initialDate}`}><span>V</span><b>Viaturas</b><small>Disponíveis e em FA</small></Link></div></div>
+        <div className="dashboard-side-stack">
+          {selected && <DashboardFleet date={selected.date} items={selected.fleet || []} />}
+          <div className="dashboard-shortcuts"><header><small>ACESSO RÁPIDO</small><h3>Rotinas da gestão</h3></header><div><Link href={`/folgas?date=${selected?.date || initialDate}`}><span>F</span><b>Folgas mensais</b><small>Importar e revisar solicitações</small></Link><Link href={`/movimentacoes?date=${selected?.date || initialDate}`}><span>P</span><b>Pendências</b><small>Férias, cursos e afastamentos</small></Link><Link href={`/horas-extras?date=${selected?.date || initialDate}`}><span>HE</span><b>Horas extras</b><small>Lançamentos e distribuição</small></Link><Link href={`/viaturas?date=${selected?.date || initialDate}`}><span>V</span><b>Viaturas</b><small>Disponíveis e em FA</small></Link></div></div>
+        </div>
       </section>
     </div>}
   </main>;
+}
+
+const dashboardVehicleType = (type: string) => ({ moto: ["🏍️", "Motos"], pickup: ["🛻", "Caminhonetes"], van: ["🚐", "Furgões"], suv: ["🚙", "SUVs"], sedan: ["🚓", "Sedans"] } as Record<string, [string, string]>)[type] || ["🚔", "Outras"];
+
+function DashboardFleet({ date, items }: { date: string; items: FleetTypeSummary[] }) {
+  const available = items.reduce((sum, item) => sum + item.availablePrefixes.length, 0);
+  const outages = items.reduce((sum, item) => sum + item.outagePrefixes.length, 0);
+  return <section className="dashboard-fleet">
+    <header><div><small>FROTA EM {new Date(`${date}T12:00:00`).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}</small><h3>Viaturas por tipo</h3></div><Link href={`/viaturas?date=${date}`}>Ver frota</Link></header>
+    <div className="dashboard-fleet-totals"><span className="available"><b>{available}</b> disponíveis</span><span className="outage"><b>{outages}</b> em FA</span></div>
+    <div className="dashboard-fleet-types">{items.map((item) => {
+      const [icon, label] = dashboardVehicleType(item.type);
+      return <article key={item.type}><span aria-hidden="true">{icon}</span><div><header><b>{label}</b><small>{item.availablePrefixes.length} disponíveis · {item.outagePrefixes.length} FA</small></header><p className="available"><b>Disponíveis:</b> {item.availablePrefixes.length ? item.availablePrefixes.join(" · ") : "nenhuma"}</p>{item.outagePrefixes.length > 0 && <p className="outage"><b>Em FA:</b> {item.outagePrefixes.join(" · ")}</p>}</div></article>;
+    })}</div>
+  </section>;
 }
 
 function PriorityPeriod({ kind, label, items, onSelect }: { kind: "day" | "night"; label: string; items: PeriodPriority[]; onSelect: (date: string) => void }) {
