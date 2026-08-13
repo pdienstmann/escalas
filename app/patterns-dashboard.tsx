@@ -144,7 +144,7 @@ export function PatternsDashboard() {
       setMessage(response.ok ? json.message || "Padrão atualizado." : json.error || "Não foi possível salvar.");
       if (response.ok) {
         if (json.undoable && json.auditId) setLastUndo({ id: Number(json.auditId), label: "Desfazer última alteração" });
-        else if (body.action !== "apply") setLastUndo(null);
+        else setLastUndo(null);
         await load(true);
       }
       return response.ok;
