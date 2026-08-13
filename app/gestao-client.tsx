@@ -1204,8 +1204,8 @@ function MovementRecords({
   onEdit?:(item:Item)=>void;
   onDelete?:(item:Item)=>void;
 }) {
-  const [filters, setFilters] = useModuleUiState("movimentos", date, { query: "", typeFilter: "all", page: 1 });
-  const { query, typeFilter, page } = filters;
+  const [filters, setFilters] = useModuleUiState("movimentos", date, { query: "", typeFilter: "all", scope: "all", dateFrom: "", dateTo: "", page: 1 });
+  const { query, typeFilter, scope, dateFrom, dateTo, page } = filters;
   const updateFilters = (next: Partial<typeof filters>) => setFilters((current) => ({ ...current, ...next }));
   const pageSize = 50;
   const [remote, setRemote] = useState<{ items: Item[]; total: number; counts: Item; loading: boolean }>({ items, total: items.length, counts: {}, loading: false });
@@ -1216,6 +1216,9 @@ function MovementRecords({
       const params = new URLSearchParams({ date, view: "movimentos", movementPage: String(page), movementPageSize: String(pageSize) });
       if (typeFilter !== "all") params.set("movementType", typeFilter);
       if (query.trim()) params.set("movementQuery", query.trim());
+      if (scope !== "all") params.set("movementScope", scope);
+      if (dateFrom) params.set("movementDateFrom", dateFrom);
+      if (dateTo) params.set("movementDateTo", dateTo);
       fetch(`/api/admin?${params}`, { cache: "no-store", signal: controller.signal })
         .then(async (response) => {
           const next = await response.json() as Data;
@@ -1231,7 +1234,7 @@ function MovementRecords({
         .catch((error) => { if (error.name !== "AbortError") setRemote((current) => ({ ...current, loading: false })); });
     }, query.trim() ? 260 : 0);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [date, items, page, pageSize, query, setFilters, typeFilter]);
+  }, [date, dateFrom, dateTo, items, page, pageSize, query, scope, setFilters, typeFilter]);
   const visible = remote.items;
   const totalPages = Math.max(1, Math.ceil(remote.total / pageSize));
   const safePage = Math.min(page, totalPages);
@@ -1252,10 +1255,17 @@ function MovementRecords({
         <button type="button" className={typeFilter==="all"?"active":""} onClick={()=>updateFilters({typeFilter:"all",page:1})}><b>{remote.total}</b><span>Todos</span></button>
         {movementTypeOptions.map(option=><button type="button" key={option.value} className={typeFilter===option.value?"active":""} disabled={!counts[option.value]} onClick={()=>updateFilters({typeFilter:typeFilter===option.value?"all":option.value,page:1})}><b>{counts[option.value]||0}</b><span>{option.label}</span></button>)}
       </div>
+      <div className="movement-quick-scopes" aria-label="Filtros rápidos de afastamento">
+        <button type="button" className={scope==="active"?"active":""} onClick={()=>updateFilters({scope:scope==="active"?"all":"active",page:1})}>Ativos nesta data</button>
+        <button type="button" className={scope==="upcoming"?"active":""} onClick={()=>updateFilters({scope:scope==="upcoming"?"all":"upcoming",page:1})}>Começam depois</button>
+        <button type="button" className={scope==="ended"?"active":""} onClick={()=>updateFilters({scope:scope==="ended"?"all":"ended",page:1})}>Já encerrados</button>
+      </div>
       <div className="movement-filters">
         <label>Buscar GM, matrícula ou requerimento<input value={query} onChange={(event) => updateFilters({query:event.target.value,page:1})} placeholder="Digite para filtrar…" /></label>
         <label>Tipo<select value={typeFilter} onChange={(event) => updateFilters({typeFilter:event.target.value,page:1})}><option value="all">Todos ({remote.total})</option>{movementTypeOptions.map((option) => <option key={option.value} value={option.value}>{option.label} ({counts[option.value] || 0})</option>)}</select></label>
-        {(query || typeFilter!=="all")&&<button type="button" className="movement-clear-filters" onClick={()=>updateFilters({query:"",typeFilter:"all",page:1})}>Limpar filtros</button>}
+        <label>De<input type="date" value={dateFrom} onChange={(event)=>updateFilters({dateFrom:event.target.value,page:1})}/></label>
+        <label>Até<input type="date" value={dateTo} onChange={(event)=>updateFilters({dateTo:event.target.value,page:1})}/></label>
+        {(query || typeFilter!=="all" || scope!=="all" || dateFrom || dateTo)&&<button type="button" className="movement-clear-filters" onClick={()=>updateFilters({query:"",typeFilter:"all",scope:"all",dateFrom:"",dateTo:"",page:1})}>Limpar filtros</button>}
       </div>
       {!visible.length && !remote.loading ? <p className="movement-empty">Nenhum registro corresponde aos filtros.</p> : <div className="movement-record-groups" aria-busy={remote.loading}>
         {groups.map((group) => {

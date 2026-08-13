@@ -444,6 +444,7 @@ export async function GET(request: Request) {
   const movementQuery = String(searchParams.get("movementQuery") || "").trim().slice(0, 80);
   const movementDateFrom = isValidIsoDate(String(searchParams.get("movementDateFrom") || "")) ? String(searchParams.get("movementDateFrom")) : "";
   const movementDateTo = isValidIsoDate(String(searchParams.get("movementDateTo") || "")) ? String(searchParams.get("movementDateTo")) : "";
+  const movementScope = new Set(["all", "active", "upcoming", "ended"]).has(String(searchParams.get("movementScope") || "")) ? String(searchParams.get("movementScope")) : "all";
   const movementWhere = ["m.status!='rejected'"];
   const movementCountWhere = ["m.status!='rejected'"];
   const movementValues: Array<string | number> = [];
@@ -452,6 +453,13 @@ export async function GET(request: Request) {
   if (movementQuery) { movementWhere.push("LOWER(g.name||' '||COALESCE(g.registration,'')||' '||COALESCE(m.request_ref,'')||' '||COALESCE(m.notes,'')) LIKE ?"); movementCountWhere.push("LOWER(g.name||' '||COALESCE(g.registration,'')||' '||COALESCE(m.request_ref,'')||' '||COALESCE(m.notes,'')) LIKE ?"); const queryValue = `%${movementQuery.toLocaleLowerCase("pt-BR")}%`; movementValues.push(queryValue); movementCountValues.push(queryValue); }
   if (movementDateFrom) { movementWhere.push("m.ends_at>=?"); movementCountWhere.push("m.ends_at>=?"); const fromValue = `${movementDateFrom}T00:00`; movementValues.push(fromValue); movementCountValues.push(fromValue); }
   if (movementDateTo) { movementWhere.push("m.starts_at<?"); movementCountWhere.push("m.starts_at<?"); const next = new Date(`${movementDateTo}T12:00:00Z`); next.setUTCDate(next.getUTCDate() + 1); const toValue = `${next.toISOString().slice(0, 10)}T00:00`; movementValues.push(toValue); movementCountValues.push(toValue); }
+  const scopeStart = `${requestedDate}T00:00`;
+  const scopeEndDate = new Date(`${requestedDate}T12:00:00Z`);
+  scopeEndDate.setUTCDate(scopeEndDate.getUTCDate() + 1);
+  const scopeEnd = `${scopeEndDate.toISOString().slice(0, 10)}T00:00`;
+  if (movementScope === "active") { movementWhere.push("m.starts_at<? AND m.ends_at>?"); movementCountWhere.push("m.starts_at<? AND m.ends_at>?"); movementValues.push(scopeEnd, scopeStart); movementCountValues.push(scopeEnd, scopeStart); }
+  if (movementScope === "upcoming") { movementWhere.push("m.starts_at>=?"); movementCountWhere.push("m.starts_at>=?"); movementValues.push(scopeEnd); movementCountValues.push(scopeEnd); }
+  if (movementScope === "ended") { movementWhere.push("m.ends_at<=?"); movementCountWhere.push("m.ends_at<=?"); movementValues.push(scopeStart); movementCountValues.push(scopeStart); }
   const movementWhereSql = movementWhere.join(" AND ");
   const movementCountWhereSql = movementCountWhere.join(" AND ");
   const emptyRows = () => Promise.resolve({ results: [] as Record<string, unknown>[] });

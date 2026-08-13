@@ -61,7 +61,7 @@ Este arquivo transforma a revisao de UX em trabalho executavel. Nenhuma etapa de
 ### Pendente
 
 - Paginacao remota concluida com `page`, `pageSize`, `type`, `query`, `dateFrom`, `dateTo` e totais por tipo.
-- Adicionar filtros rapidos: ativos hoje, proximos 7 dias, encerrados, com conflito e sem requerimento.
+- Filtros rapidos ativos na data, futuros e encerrados; tambem ha intervalo livre por data. Ainda faltam os filtros por conflito e por requerimento.
 - Manter lista estavel durante scroll e permitir duplicar/continuar cadastro de afastamentos.
 
 ## 5. Folgas e planejamento mensal

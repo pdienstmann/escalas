@@ -1615,3 +1615,18 @@ test("operations allow safe basic edits and expose their impact before confirmat
   assert.match(styles, /\.operation-impact/);
   assert.match(styles, /\.operation-edit-protection/);
 });
+
+test("movement records support fast active, future and completed filters without loading every record", () => {
+  const api = readFileSync(resolve("app/api/admin/route.ts"), "utf8");
+  const dashboard = readFileSync(resolve("app/gestao-client.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/management.css"), "utf8");
+  assert.match(api, /movementScope/);
+  assert.match(api, /m\.starts_at<\? AND m\.ends_at>\?/);
+  assert.match(api, /m\.starts_at>=\?/);
+  assert.match(api, /m\.ends_at<=\?/);
+  assert.match(dashboard, /Ativos nesta data/);
+  assert.match(dashboard, /Começam depois/);
+  assert.match(dashboard, /Já encerrados/);
+  assert.match(dashboard, /movementDateFrom/);
+  assert.match(styles, /\.movement-quick-scopes/);
+});
