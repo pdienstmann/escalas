@@ -2814,7 +2814,7 @@ function Row({
               onDragOver={(e) => { if (canReceiveDrag(s.id)) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; } }}
                onDrop={(e) => { if (canReceiveDrag(s.id)) drop(e, s.id); else { e.preventDefault(); e.stopPropagation(); setDropTargetId(null); } }}
             >
-              {list.map((a) => {const visualStatus=statusInShift(a,date,s.id),adjustmentBadge=assignmentAdjustmentBadge(a,serviceAdjustments,date),canExtendAfter=showExtensionShortcut(a,s.id),canExtendBefore=showEarlyExtensionShortcut(a,s.id);return (<Fragment key={String(a.id)}><Fragment>
+              {list.map((a) => {const visualStatus=statusInShift(a,date,s.id),adjustmentBadge=assignmentAdjustmentBadge(a,serviceAdjustments,date),weeklyFixedHe=fixedWeeklyOvertimeLabel(a),canExtendAfter=showExtensionShortcut(a,s.id),canExtendBefore=showEarlyExtensionShortcut(a,s.id);return (<Fragment key={String(a.id)}><Fragment>
                 <div className={`live-person-card ${canExtendAfter||canExtendBefore?"has-he-action":""} ${dropTargetId===Number(a.id)?"drop-target":""} ${draggingAssignmentId===Number(a.id)?"dragging-source":""}`} onDragEnter={()=>{if(canDropOnCard(a))setDropTargetId(Number(a.id))}} onDragLeave={(event)=>{const next=event.relatedTarget;if(next instanceof Node&&event.currentTarget.contains(next))return;setDropTargetId(current=>current===Number(a.id)?null:current)}} onDragOver={(event)=>{if(!draggingAssignment)return;event.preventDefault();event.stopPropagation();event.dataTransfer.dropEffect=canDropOnCard(a)?"move":"none"}} onDrop={(event)=>{if(!draggingAssignment)return;event.preventDefault();event.stopPropagation();if(canDropOnCard(a))drop(event,s.id,Number(a.id))}}>
                 <button
                   type="button"
@@ -2843,9 +2843,9 @@ function Row({
                   )}
                   <b>{a.guard_name}</b>
                   {operationalSession && (() => { const period = a.shift === "2" || a.shift === "3" ? "day" : a.shift === "4" || a.shift === "1" ? "night" : "global"; const guardMeta = guardOperationalMetaByShift.get(`${Number(a.guard_id)}:${period}`) || guardOperationalMeta.get(Number(a.guard_id)); return guardMeta && (guardMeta.team_label || guardMeta.group_short_name || guardMeta.group_name) ? <span className="person-operational-chip">{guardMeta.team_label ? `Equipe ${guardMeta.team_label}` : String(guardMeta.group_short_name || guardMeta.group_name)}</span> : null; })()}
-                  {visualStatus !== "normal" && (
-                    <span className={`badge ${statusClass(visualStatus)} ${adjustmentBadge.startsWith("BH+")?"settlement-badge":""}`}>
-                      {adjustmentBadge|| (String(a.work_kind)==="overtime_extension"?overtimeHoursLabel(a):visualStatus==="overtime"&&a.regular_ends_at?`HE · após ${String(a.regular_ends_at).slice(11,16)}`:statusShort(visualStatus))}
+                  {(visualStatus !== "normal" || weeklyFixedHe) && (
+                    <span className={`badge ${weeklyFixedHe ? "he weekly-fixed-he" : statusClass(visualStatus)} ${adjustmentBadge.startsWith("BH+")?"settlement-badge":""}`}>
+                      {weeklyFixedHe || adjustmentBadge|| (String(a.work_kind)==="overtime_extension"?overtimeHoursLabel(a):visualStatus==="overtime"&&a.regular_ends_at?`HE · após ${String(a.regular_ends_at).slice(11,16)}`:statusShort(visualStatus))}
                     </span>
                   )}
                   {Number(a.is_reassigned)===1&&<span className="badge remanejamento" title={String(a.reassignment_note||"Avisar sobre o remanejamento")}>AVISAR REM</span>}
@@ -3263,6 +3263,12 @@ function statusInShift(a:Rec,date:string,shift:string){
 }
 function isOvertimeExtensionCell(a:Rec,date:string,shift:string){const regular=String(a.regular_ends_at||"");return Boolean(regular)&&String(a.status)==="overtime"&&operationalShiftWindow(date,shift).start>=regular}
 function overtimeHoursLabel(a:Rec){const hours=Math.max(0,(Date.parse(String(a.ends_at))-Date.parse(String(a.starts_at)))/3600000);return `${String(Math.round(hours)).padStart(2,"0")} HE`}
+function fixedWeeklyOvertimeLabel(a:Rec){
+  if(String(a.work_kind)!=="weekly"||!a.regular_ends_at)return "";
+  const hours=Math.max(0,(Date.parse(String(a.ends_at))-Date.parse(String(a.regular_ends_at)))/3600000);
+  if(!hours)return "";
+  return `${Number(hours.toFixed(1))}HE`;
+}
 function assignmentDisplayInShift(a:Rec,date:string,shift:string){
   if(String(a.work_kind)==="weekly"&&(shift==="2"||shift==="3"))return weeklyDisplay(a);
   const window=operationalShiftWindow(date,shift),start=String(a.starts_at),end=String(a.ends_at);

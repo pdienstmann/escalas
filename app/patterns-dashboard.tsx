@@ -211,7 +211,16 @@ export function PatternsDashboard() {
   async function saveWeekly(event: FormEvent<HTMLFormElement>, id?: number) {
     event.preventDefault();
     const form = event.currentTarget;
-    if (await action({ ...Object.fromEntries(new FormData(form)), action: "weekly_save", id: id || null })) {
+    const values = Object.fromEntries(new FormData(form));
+    const overtimeHours = Math.max(0, Number(values.overtimeHours || 0));
+    const regularEnd = String(values.regularEnd || "");
+    if (await action({
+      ...values,
+      overtimeHours,
+      overtimeEnd: overtimeHours > 0 ? timeAfterHours(regularEnd, overtimeHours) : "",
+      action: "weekly_save",
+      id: id || null,
+    })) {
       if (!id) form.reset();
     }
   }
@@ -622,25 +631,26 @@ function PatternPreview({ data, date, dayCode, nightCode, busy, onClose, onApply
 }
 
 function WeeklyEditor({ data, busy, onSave, onDelete }: { data: Data; busy: boolean; onSave: (event: FormEvent<HTMLFormElement>, id?: number) => void; onDelete: (slot: Rec) => void }) {
-  const eligibleGuards = weeklyGuards(data.guards);
+  const eligibleGuards = data.guards;
   const grouped = [...new Map(data.weeklySlots.map((slot) => {
     const key = slot.vehicle_id ? `vehicle:${slot.vehicle_id}` : `post:${slot.post_id}`;
     return [key, { key, label: weeklyDestinationLabel(slot, data), slots: data.weeklySlots.filter((item) => (item.vehicle_id ? `vehicle:${item.vehicle_id}` : `post:${item.post_id}`) === key) }];
   })).values()];
   return <section className="weekly-patterns">
-    <header><div><span>SEGUNDA A SEXTA</span><h2>Padrões semanais</h2><p>Cada GM aparece no destino correspondente, com expediente normal e HE fixa claramente separados.</p></div><b>{data.weeklySlots.length} integrantes</b></header>
+    <header><div><span>SEGUNDA A SEXTA · INSERÇÃO AUTOMÁTICA</span><h2>Escala semanal</h2><p>Cadastre expediente, intervalo e a quantidade fixa de HE. O GM será inserido automaticamente nas escalas de segunda a sexta.</p></div><b>{data.weeklySlots.length} integrantes</b></header>
+    <aside className="weekly-flow-note"><strong>Como funciona</strong><span>Horário normal e intervalo permanecem visíveis. A HE começa na saída normal, e sua quantidade aparece em vermelho no cartão diário.</span></aside>
     {!data.weeklySlots.length && <div className="weekly-empty">Nenhum GM semanal cadastrado. Use o formulário abaixo para criar o primeiro expediente.</div>}
     <div className="weekly-slot-groups">{grouped.map((group) => <article className="weekly-slot-group" key={group.key}>
       <header><div><span>DESTINO</span><b>{group.label}</b></div><small>{group.slots.length} GM(s)</small></header>
       <div className="weekly-slot-list">{group.slots.map((slot) => <form className="weekly-slot-card" key={String(slot.id)} onSubmit={(event) => onSave(event, Number(slot.id))}>
-        <div className="weekly-slot-card-head"><label>GM<select name="guardId" defaultValue={String(slot.guard_id)} aria-label="GM semanal">{eligibleGuards.map((guard) => <option key={String(guard.id)} value={String(guard.id)}>{guard.name}</option>)}</select></label><label>Função<select name="role" defaultValue={String(slot.role)}><RoleOptions /></select></label><span className={slot.overtime_end ? "weekly-he-badge" : "weekly-normal-badge"}>{slot.overtime_end ? `HE fixa até ${String(slot.overtime_end)}` : "Sem HE fixa"}</span></div>
-        <input type="hidden" name="destination" value={slot.vehicle_id ? `vehicle:${slot.vehicle_id}` : `post:${slot.post_id}`} />
-        <div className="weekly-slot-row"><label>Dias úteis<input name="weekdays" defaultValue={String(slot.weekdays)} aria-label="Dias da semana" /></label><label>Entrada<input name="startsAt" type="time" defaultValue={String(slot.starts_at)} aria-label="Entrada" /></label><label>Saída normal<input name="regularEnd" type="time" defaultValue={String(slot.regular_end)} aria-label="Fim normal" /></label></div>
-        <div className="weekly-slot-row"><label>Início intervalo<input name="breakStart" type="time" defaultValue={String(slot.break_start || "")} aria-label="Início do intervalo" /></label><label>Fim intervalo<input name="breakEnd" type="time" defaultValue={String(slot.break_end || "")} aria-label="Fim do intervalo" /></label><label className="weekly-he-field">Fim da HE fixa<input name="overtimeEnd" type="time" defaultValue={String(slot.overtime_end || "")} aria-label="Fim com HE semanal" /></label></div>
-        <div className="weekly-slot-summary"><span>Normal: {weeklyHoursLabel(slot)}</span>{slot.overtime_end && <strong>+ HE diária fixa: {String(slot.regular_end)}–{String(slot.overtime_end)}</strong>}<button disabled={busy}>Salvar alteração</button><button type="button" className="remove-slot" onClick={() => onDelete(slot)}>Remover</button></div>
+        <div className="weekly-slot-card-head"><label>GM<select name="guardId" defaultValue={String(slot.guard_id)} aria-label="GM semanal">{eligibleGuards.filter((guard) => Number(guard.id) === Number(slot.guard_id) || !data.weeklySlots.some((weekly) => Number(weekly.guard_id) === Number(guard.id))).map((guard) => <option key={String(guard.id)} value={String(guard.id)}>{guard.name}</option>)}</select></label><label>Destino<select name="destination" defaultValue={slot.vehicle_id ? `vehicle:${slot.vehicle_id}` : `post:${slot.post_id}`} aria-label="Destino semanal"><DestinationOptions data={data} /></select></label><label>Função<select name="role" defaultValue={String(slot.role)}><RoleOptions /></select></label><span className={slot.overtime_end ? "weekly-he-badge" : "weekly-normal-badge"}>{slot.overtime_end ? `${weeklyOvertimeHours(slot)}HE fixa/dia` : "Sem HE fixa"}</span></div>
+        <input type="hidden" name="weekdays" value="1,2,3,4,5" />
+        <div className="weekly-slot-row"><div className="weekly-weekdays"><small>DIAS</small><b>SEG · TER · QUA · QUI · SEX</b></div><label>Entrada<input name="startsAt" type="time" required defaultValue={String(slot.starts_at)} aria-label="Entrada" /></label><label>Saída normal<input name="regularEnd" type="time" required defaultValue={String(slot.regular_end)} aria-label="Fim normal" /></label></div>
+        <div className="weekly-slot-row"><label>Início intervalo<input name="breakStart" type="time" defaultValue={String(slot.break_start || "")} aria-label="Início do intervalo" /></label><label>Fim intervalo<input name="breakEnd" type="time" defaultValue={String(slot.break_end || "")} aria-label="Fim do intervalo" /></label><label className="weekly-he-field">HE fixa por dia<input name="overtimeHours" type="number" min="0" max="8" step="0.5" defaultValue={weeklyOvertimeHours(slot) || ""} placeholder="Ex.: 2" aria-label="Quantidade de horas extras fixas por dia" /></label></div>
+        <div className="weekly-slot-summary"><span>Normal: {weeklyHoursLabel(slot)}</span>{slot.overtime_end && <strong>+ {weeklyOvertimeHours(slot)}HE · {String(slot.regular_end).slice(0,5)}–{String(slot.overtime_end).slice(0,5)}</strong>}<button disabled={busy}>Salvar alteração</button><button type="button" className="remove-slot" onClick={() => onDelete(slot)}>Remover</button></div>
       </form>)}</div>
     </article>)}</div>
-    <form className="weekly-add" onSubmit={(event) => onSave(event)}><b>Adicionar escala semanal</b><small className="weekly-add-help">Somente GMs definidos como “Semanal” em Cadastros aparecem aqui. Importações de folgas permanecem no efetivo 12x36.</small><label>GM<select name="guardId" required defaultValue=""><option value="">Selecione o GM semanal</option>{eligibleGuards.filter((guard) => !data.weeklySlots.some((slot) => Number(slot.guard_id) === Number(guard.id))).map((guard) => <option key={String(guard.id)} value={String(guard.id)}>{guard.name} · {guard.platoon}</option>)}</select></label><label>Destino<select name="destination" required defaultValue=""><option value="">Selecione posto ou VTR</option><DestinationOptions data={data} /></select></label><label>Dias<input name="weekdays" defaultValue="1,2,3,4,5" aria-label="Dias úteis" /></label><label>Entrada<input name="startsAt" type="time" defaultValue="08:00" aria-label="Entrada" /></label><label>Saída normal<input name="regularEnd" type="time" defaultValue="17:00" aria-label="Fim normal" /></label><label>Início intervalo<input name="breakStart" type="time" defaultValue="12:00" aria-label="Início do intervalo" /></label><label>Fim intervalo<input name="breakEnd" type="time" defaultValue="13:00" aria-label="Fim do intervalo" /></label><label>Fim da HE fixa<input name="overtimeEnd" type="time" aria-label="Fim com HE semanal" /></label><label>Função<select name="role"><RoleOptions /></select></label><button className="save" disabled={busy || eligibleGuards.length === 0}>Adicionar semanal</button></form>
+    <form className="weekly-add" onSubmit={(event) => onSave(event)}><b>Adicionar GM à escala semanal</b><small className="weekly-add-help">Ao salvar, o GM passa para o regime semanal e deixa de ocupar os padrões 12x36. Ele será incluído nos dias úteis automaticamente.</small><label>GM<select name="guardId" required defaultValue=""><option value="">Selecione o GM</option>{eligibleGuards.filter((guard) => !data.weeklySlots.some((slot) => Number(slot.guard_id) === Number(guard.id))).map((guard) => <option key={String(guard.id)} value={String(guard.id)}>{guard.name} · {guard.platoon}</option>)}</select></label><label>Destino<select name="destination" required defaultValue=""><option value="">Selecione posto ou VTR</option><DestinationOptions data={data} /></select></label><input type="hidden" name="weekdays" value="1,2,3,4,5" /><div className="weekly-weekdays"><small>DIAS</small><b>SEG · TER · QUA · QUI · SEX</b></div><label>Entrada<input name="startsAt" type="time" defaultValue="08:00" aria-label="Entrada" /></label><label>Saída normal<input name="regularEnd" type="time" defaultValue="17:00" aria-label="Fim normal" /></label><label>Início intervalo<input name="breakStart" type="time" defaultValue="12:00" aria-label="Início do intervalo" /></label><label>Fim intervalo<input name="breakEnd" type="time" defaultValue="13:00" aria-label="Fim do intervalo" /></label><label className="weekly-he-field">HE fixa/dia<input name="overtimeHours" type="number" min="0" max="8" step="0.5" defaultValue="0" aria-label="Quantidade de horas extras fixas por dia" /></label><label>Função<select name="role"><RoleOptions /></select></label><button className="save" disabled={busy || eligibleGuards.length === 0}>Adicionar semanal</button></form>
   </section>;
 }
 
@@ -659,12 +669,16 @@ function weeklyHoursLabel(slot: Rec) {
   return breakStart && breakEnd ? `${start}–${breakStart} / ${breakEnd}–${regular}` : `${start}–${regular}`;
 }
 
-function shiftGuards(guards: Rec[]) {
-  return guards.filter((guard) => String(guard.work_regime || "12x36") === "12x36");
+function weeklyOvertimeHours(slot: Rec) {
+  const regular = String(slot.regular_end || "").slice(0, 5), overtime = String(slot.overtime_end || "").slice(0, 5);
+  if (!regular || !overtime) return 0;
+  const [regularHour, regularMinute] = regular.split(":").map(Number), [overtimeHour, overtimeMinute] = overtime.split(":").map(Number);
+  const minutes = (overtimeHour * 60 + overtimeMinute - regularHour * 60 - regularMinute + 1440) % 1440;
+  return Number((minutes / 60).toFixed(1));
 }
 
-function weeklyGuards(guards: Rec[]) {
-  return guards.filter((guard) => String(guard.work_regime || "12x36") === "weekly");
+function shiftGuards(guards: Rec[]) {
+  return guards.filter((guard) => String(guard.work_regime || "12x36") === "12x36");
 }
 
 function DestinationOptions({ data }: { data: Data }) {

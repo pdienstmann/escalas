@@ -326,14 +326,17 @@ export async function POST(request: Request) {
     }
     if(body.action==="weekly_save") {
       const d=destination(body),id=Number(body.id||0),guardId=Number(body.guardId);
-      if (!(await guardUsesRegime(guardId, "weekly")))
-        return Response.json({ error: "Somente GMs definidos como escala semanal em Cadastros podem ser incluídos aqui." }, { status: 409 });
+      const activeGuard=await env.DB.prepare("SELECT id FROM guards WHERE id=? AND active=1").bind(guardId).first();
+      if (!activeGuard) return Response.json({ error: "Selecione um GM ativo para a escala semanal." }, { status: 409 });
+      const duplicateWeekly=await env.DB.prepare("SELECT id FROM weekly_slots WHERE guard_id=? AND active=1 AND id<>? LIMIT 1").bind(guardId,id).first();
+      if (duplicateWeekly) return Response.json({ error: "Este GM já possui um cadastro na escala semanal." }, { status: 409 });
       const before=id?await env.DB.prepare("SELECT * FROM weekly_slots WHERE id=?").bind(id).first<Record<string,unknown>>():null;
       let weeklyId=id;
       if(id)await env.DB.prepare("UPDATE weekly_slots SET guard_id=?,weekdays=?,post_id=?,vehicle_id=?,role=?,starts_at=?,break_start=?,break_end=?,regular_end=?,overtime_end=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(guardId,body.weekdays||"1,2,3,4,5",d.postId,d.vehicleId,body.role,body.startsAt,body.breakStart||null,body.breakEnd||null,body.regularEnd,body.overtimeEnd||null,id).run();
       else {const created=await env.DB.prepare("INSERT INTO weekly_slots (guard_id,weekdays,post_id,vehicle_id,role,starts_at,break_start,break_end,regular_end,overtime_end) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(guardId,body.weekdays||"1,2,3,4,5",d.postId,d.vehicleId,body.role,body.startsAt,body.breakStart||null,body.breakEnd||null,body.regularEnd,body.overtimeEnd||null).run();weeklyId=Number(created.meta.last_row_id)}
-      await env.DB.prepare("UPDATE guards SET base_shift='Semanal' WHERE id=?").bind(guardId).run();
+      await env.DB.prepare("UPDATE guards SET work_regime='weekly',base_shift='Semanal' WHERE id=?").bind(guardId).run();
       await env.DB.prepare("DELETE FROM pattern_slots WHERE guard_id=?").bind(guardId).run();
+      if(before&&Number(before.guard_id)!==guardId)await env.DB.prepare("UPDATE guards SET work_regime='12x36',base_shift=CASE WHEN upper(COALESCE(platoon,'')) LIKE 'N%' THEN '12x36 noite' ELSE '12x36 dia' END WHERE id=?").bind(before.guard_id).run();
       const after=await env.DB.prepare("SELECT * FROM weekly_slots WHERE id=?").bind(weeklyId).first();
       await writeAudit(request,{action:id?"update":"create",entityType:"weekly_slot",entityId:weeklyId,summary:`${id?"Alterou":"Criou"} escala semanal`,before,after:after as Record<string,unknown>});
       return Response.json({ok:true,message:"Escala semanal salva e integrada aos dias úteis."});

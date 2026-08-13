@@ -1414,12 +1414,18 @@ test("pattern group links are exposed to the applied daily scale", () => {
 
 test("weekly pattern cards distinguish regular hours from fixed daily overtime", () => {
   const dashboard = readFileSync(resolve("app/patterns-dashboard.tsx"), "utf8");
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const api = readFileSync(resolve("app/api/patterns/route.ts"), "utf8");
   const styles = readFileSync(resolve("app/patterns-enhanced.css"), "utf8");
-  assert.match(dashboard, /Padrões semanais/);
-  assert.match(dashboard, /HE fixa até/);
-  assert.match(dashboard, /HE diária fixa/);
+  assert.match(dashboard, /Escala semanal/);
+  assert.match(dashboard, /HE fixa por dia/);
+  assert.match(dashboard, /SEG · TER · QUA · QUI · SEX/);
+  assert.match(dashboard, /timeAfterHours\(regularEnd, overtimeHours\)/);
   assert.match(dashboard, /regular_end/);
   assert.match(dashboard, /overtime_end/);
+  assert.match(api, /work_regime='weekly'/);
+  assert.match(schedule, /fixedWeeklyOvertimeLabel/);
+  assert.match(schedule, /weekly-fixed-he/);
   assert.match(styles, /\.weekly-slot-card/);
   assert.match(styles, /\.weekly-he-badge/);
 });
@@ -1592,16 +1598,16 @@ test("holes are filled alerts and redeployment keeps the complete operational pe
   assert.match(styles, /\.redeployment-pool\.redeployment-pool-top/);
 });
 
-test("leave imports stay in the 12x36 workforce and pattern editors isolate work regimes", () => {
+test("leave imports stay 12x36 while the weekly editor can explicitly convert a selected GM", () => {
   const adminApi = readFileSync(resolve("app/api/admin/route.ts"), "utf8");
   const patternsApi = readFileSync(resolve("app/api/patterns/route.ts"), "utf8");
   const patterns = readFileSync(resolve("app/patterns-dashboard.tsx"), "utf8");
   assert.match(adminApi, /requested\.baseShift \|\| "12x36 dia", "12x36"/);
-  assert.match(patternsApi, /guardUsesRegime\(guardId, "weekly"\)/);
+  assert.match(patternsApi, /work_regime='weekly',base_shift='Semanal'/);
+  assert.match(patternsApi, /SELECT id FROM guards WHERE id=\? AND active=1/);
   assert.match(patternsApi, /guardUsesRegime\(guardId, "12x36"\)/);
-  assert.match(patterns, /function weeklyGuards/);
-  assert.match(patterns, /eligibleGuards = weeklyGuards\(data\.guards\)/);
-  assert.match(patterns, /Importações de folgas permanecem no efetivo 12x36/);
+  assert.match(patterns, /eligibleGuards = data\.guards/);
+  assert.match(patterns, /o GM passa para o regime semanal e deixa de ocupar os padrões 12x36/);
   assert.match(patterns, /unassignedGuards = shiftGuards\(data\.guards\)/);
 });
 

@@ -94,6 +94,7 @@ Este arquivo transforma a revisao de UX em trabalho executavel. Nenhuma etapa de
 - Grade-resumo de grupamentos e equipes com GM, destino, VTR, equipe interna e jornada visiveis sem abrir formularios.
 - Desfazer contextual para data-base e posicoes do padrao, usando o historico auditavel e bloqueando desfazer fora de ordem.
 - Previa consulta a escala existente, mostra quantidade de posicoes e ajustes protegidos e exige confirmacao explicita para substituicao.
+- Escala semanal ganhou area propria em Padroes: converte o GM de forma explicita, cadastra destino, expediente, intervalo e quantidade de HE fixa, calcula o fim automaticamente e insere o efetivo de segunda a sexta. Os cards diarios exibem a quantidade de HE fixa em vermelho.
 
 ### Pendente
 
