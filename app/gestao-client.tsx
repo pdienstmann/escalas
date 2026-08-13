@@ -1007,7 +1007,7 @@ function LeaveImport({guards,choices,defaultMonth,saving,locked=false,onImport}:
    </fieldset>{saving&&<div className="leave-import-progress" role="status"><span className="loading-spinner" aria-hidden="true"/><div><b>Incluindo folgas...</b><small>Todos os registros estão sendo processados. Não feche esta tela.</small></div></div>}{reviewContent}</section>
 }
 function LeaveMonthOverview({overview}:{overview:LeaveOverview|null}) {
-  if(!overview)return <section className="leave-overview empty"><b>Panorama mensal</b><p>Abra uma campanha de folgas para visualizar os dias críticos.</p></section>;
+  if(!overview)return <section className="leave-overview empty"><b>Panorama mensal</b><p>Importe ou registre folgas neste mês para visualizar os dias de maior impacto.</p></section>;
   const [year,month]=overview.month.split("-").map(Number);
   const totalDays=new Date(year,month,0).getDate();
   const leading=(new Date(`${overview.month}-01T12:00:00`).getDay()+6)%7;

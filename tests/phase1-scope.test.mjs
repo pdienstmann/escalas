@@ -805,6 +805,8 @@ test("monthly leave import can register an unknown GM during the review", () => 
   assert.match(dashboard, /Matrícula \(opcional\)/);
   assert.match(dashboard, /Confirmação obrigatória antes de incluir/);
   assert.match(api, /registration \|\| `SEM-MATRICULA-\$\{crypto\.randomUUID\(\)\}`/);
+  assert.match(api, /Todo GM novo precisa de um nome antes da importação/);
+  assert.doesNotMatch(api, /Todo GM novo precisa de nome e matrícula antes da importação/);
   assert.match(api, /for \(let offset = 0; offset < uniqueRows\.length; offset \+= 75\)/);
   assert.match(dashboard, /confirmedNewGuards/);
   assert.match(dashboard, /leave-import-review-v2/);

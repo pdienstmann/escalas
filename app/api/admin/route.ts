@@ -1025,7 +1025,7 @@ export async function POST(request: Request) {
         const registration = String(rawGuard?.registration || "").trim();
         const key = normalizeImportName(name);
         if (!name || !key)
-          return Response.json({ error: "Todo GM novo precisa de nome e matrícula antes da importação." }, { status: 400 });
+          return Response.json({ error: "Todo GM novo precisa de um nome antes da importação." }, { status: 400 });
         const previous = newGuardRequests.get(key);
         if (previous && previous.registration && registration && previous.registration !== registration)
           return Response.json({ error: `O GM ${name} recebeu mais de uma matrícula na importação.` }, { status: 409 });
@@ -1057,7 +1057,7 @@ export async function POST(request: Request) {
       if (normalizedRows.some((row) => !isValidIsoDate(row.date) || !row.date.startsWith(`${month}-`)))
         return Response.json({ error: "Há datas inválidas ou fora do mês selecionado." }, { status: 400 });
       if (normalizedRows.some((row) => row.guardId === null && !newGuardRequests.has(normalizeImportName(row.guardName))))
-        return Response.json({ error: "Há GM(s) não cadastrado(s) sem matrícula informada." }, { status: 400 });
+        return Response.json({ error: "Há GM(s) não cadastrados sem confirmação para criar o cadastro." }, { status: 400 });
       if (normalizedRows.some((row) => row.guardId !== null && !activeGuardIds.has(row.guardId)))
         return Response.json({ error: "A importação contém um GM inexistente ou inativo." }, { status: 400 });
 
