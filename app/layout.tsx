@@ -27,6 +27,7 @@ import "./request-reference.css";
 import "./segment-remove.css";
 import "./service-adjustments.css";
 import "./spreadsheet-theme.css";
+import "./contextual-actions.css";
 import "./monthly-planning.css";
 import "./monthly-planning-simulation.css";
 import "./monthly-planning-print.css";

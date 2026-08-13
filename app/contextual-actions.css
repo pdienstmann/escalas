@@ -1,0 +1,57 @@
+/* Ações rotineiras ficam em um único menu curto, ancorado ao GM selecionado. */
+.cell-quick-actions{
+  display:grid!important;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  align-items:stretch;
+  width:min(390px,calc(100vw - 24px));
+  gap:5px;
+  padding:7px;
+}
+.cell-quick-head{
+  grid-column:1/-1;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  min-width:0;
+  padding:1px 1px 5px;
+  border-bottom:1px solid #d9e4ed;
+}
+.cell-quick-head>span{display:grid;min-width:0;margin-right:auto;text-align:left}
+.cell-quick-head b{overflow:hidden;color:#164f80;font-size:11px;text-overflow:ellipsis;white-space:nowrap}
+.cell-quick-head small{overflow:hidden;color:#60758a;font-size:8px;text-overflow:ellipsis;white-space:nowrap}
+.cell-quick-actions button{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:4px;
+  min-width:0;
+  min-height:30px;
+  padding:5px 6px;
+  line-height:1.15;
+  white-space:normal;
+}
+.cell-quick-actions .primary-action{border-color:#0871e1;background:#0871e1;color:#fff;font-weight:900}
+.cell-quick-actions .advanced-action{border-color:#c4d1dc;background:#f7fafc;color:#4f687d}
+.cell-quick-actions .danger{border-color:#e1b5b9;background:#fff7f7;color:#a12631}
+.cell-quick-actions .cell-quick-close{
+  flex:none;
+  width:27px;
+  min-height:27px;
+  padding:0;
+  border:0;
+  border-radius:50%;
+  background:#edf2f6;
+  color:#526b82;
+  font-size:17px;
+}
+.cell-quick-actions>.drag-context-hint{
+  grid-column:1/-1;
+  margin:0;
+  padding:4px 6px;
+  text-align:left;
+}
+@media(max-width:600px){
+  .cell-quick-actions{grid-template-columns:repeat(2,minmax(0,1fr));width:100%}
+  .cell-quick-actions button{font-size:9px}
+}
+@media print{.cell-quick-actions{display:none!important}}

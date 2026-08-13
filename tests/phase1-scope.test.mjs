@@ -308,6 +308,20 @@ test("selected GM cards use drag and drop instead of a destination picker", () =
   assert.match(schedule, /drag-context-hint/);
 });
 
+test("selected GM cards expose one compact contextual action menu", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/contextual-actions.css"), "utf8");
+  assert.match(schedule, /className="cell-quick-head"/);
+  assert.match(schedule, /> Ajustar<\/button>/);
+  assert.match(schedule, /> Mais detalhes<\/button>/);
+  assert.match(schedule, /> Remover horário<\/button>/);
+  assert.match(schedule, /Para mover ou alinhar, arraste o quadradinho diretamente/);
+  assert.doesNotMatch(schedule, /> Alterar \/ mover<\/button>/);
+  assert.doesNotMatch(schedule, /className="inline-move-tools"/);
+  assert.match(styles, /grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
+  assert.match(styles, /@media\(max-width:600px\)/);
+});
+
 test("selected regular GM cards use drop-on-card to choose lane position", () => {
   const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
   assert.doesNotMatch(schedule, /quick-position-trigger|Ajustar posição/);
@@ -960,14 +974,14 @@ test("daily scale exposes contextual section editing", () => {
 
 test("selected GM cards expose a quick adjustment dialog before the advanced editor", () => {
   const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
-  const styles = readFileSync(resolve("app/simple-ux.css"), "utf8");
+  const styles = readFileSync(resolve("app/contextual-actions.css"), "utf8");
   assert.match(schedule, /\[quickEdit, setQuickEdit\] = useState/);
   assert.match(schedule, /async function saveQuickAssignment/);
   assert.match(schedule, /function QuickAssignmentEditor/);
-  assert.match(schedule, /className="quick-inline-edit"/);
+  assert.match(schedule, /className="primary-action" onClick=\{\(\)=>onQuickEdit/);
   assert.match(schedule, /onQuickEdit=\{setQuickEdit\}/);
   assert.match(schedule, /expectedUpdatedAt: assignment\.updated_at/);
-  assert.match(styles, /\.quick-inline-edit/);
+  assert.match(styles, /\.cell-quick-actions \.primary-action/);
 });
 
 test("dragging a GM highlights compatible and blocked schedule destinations", () => {

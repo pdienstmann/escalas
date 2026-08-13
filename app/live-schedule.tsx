@@ -2705,13 +2705,22 @@ function Row({
                 {canExtendAfter&&<button type="button" className="inline-he-extension" aria-label={`Adicionar hora extra para ${String(a.guard_name)} após o expediente`} title="Adicionar hora extra após o expediente" onClick={()=>onExtend(a,kind,resource,s.id,"after")}><span aria-hidden="true">◷</span>+HE</button>}
                 {canExtendBefore&&<button type="button" className="inline-he-extension early" aria-label={`Adicionar hora extra antes do turno de ${String(a.guard_name)}`} title="Fazer o GM da noite começar mais cedo em HE" onClick={()=>onExtend(a,kind,resource,s.id,"before")}><span aria-hidden="true">◷</span>+HE</button>}
                 </div>
-                {Number(a.id)===selectedId&&<div className="cell-quick-actions" role="group" aria-label={`Ações rápidas de ${String(a.guard_name)}`}><b>{a.guard_name}</b><button type="button" className="swap-action" onClick={()=>onSwap(a,kind,resource,s.id)}><span aria-hidden="true">⇄</span> Trocar GM</button><button type="button" onClick={()=>onEdit({kind,resource,shift:s.id,assignment:a})}><span aria-hidden="true">✎</span> Alterar / mover</button><button type="button" className={a.status==="time_bank"?"active":""} onClick={()=>onQuickStatus(a,a.status==="time_bank"?"normal":"time_bank")}><span aria-hidden="true">◷</span> BH</button><button type="button" className="copy-action" onClick={()=>onCopy(a)}><span aria-hidden="true">▣</span> Copiar</button><button type="button" className="danger" onClick={()=>onQuickDelete(a)}><span aria-hidden="true">×</span> Remover</button><button type="button" aria-label="Fechar ações" onClick={()=>onContextPick({kind,resource,shift:s.id})}>×</button></div>}</Fragment>
-                {Number(a.id)===selectedId&&<div className="inline-move-tools">
-                  <button type="button" className="quick-inline-edit" onClick={()=>onQuickEdit({kind,resource,shift:s.id,assignment:a})}>
-                    ✎ Ajuste rápido
-                  </button>
-                  <small className="drag-context-hint">Arraste este quadradinho para outro posto/viatura ou solte sobre outro GM para ordenar.</small>
-                </div>}
+                {Number(a.id)===selectedId&&<div className="cell-quick-actions" role="group" aria-label={`Ações rápidas de ${String(a.guard_name)}`}>
+                  <div className="cell-quick-head">
+                    <span>
+                      <b>{a.guard_name}</b>
+                      <small>{kind==="vehicle"?String(resource.prefix):String(resource.name)} · {s.label}</small>
+                    </span>
+                    <button type="button" className="cell-quick-close" aria-label="Fechar ações" title="Fechar" onClick={()=>onContextPick({kind,resource,shift:s.id})}>×</button>
+                  </div>
+                  <button type="button" className="primary-action" onClick={()=>onQuickEdit({kind,resource,shift:s.id,assignment:a})}><span aria-hidden="true">✎</span> Ajustar</button>
+                  <button type="button" className="swap-action" onClick={()=>onSwap(a,kind,resource,s.id)}><span aria-hidden="true">⇄</span> Trocar GM</button>
+                  <button type="button" className={a.status==="time_bank"?"active":""} onClick={()=>onQuickStatus(a,a.status==="time_bank"?"normal":"time_bank")}><span aria-hidden="true">◷</span> BH</button>
+                  <button type="button" className="copy-action" onClick={()=>onCopy(a)}><span aria-hidden="true">▣</span> Copiar</button>
+                  <button type="button" className="advanced-action" onClick={()=>onEdit({kind,resource,shift:s.id,assignment:a})}><span aria-hidden="true">⋯</span> Mais detalhes</button>
+                  <button type="button" className="danger" onClick={()=>onQuickDelete(a,s.id)}><span aria-hidden="true">×</span> Remover horário</button>
+                  <small className="drag-context-hint">Para mover ou alinhar, arraste o quadradinho diretamente.</small>
+                </div>}</Fragment>
               </Fragment>)})}
               {copiedAssignment&&pasteAllowed&&<button type="button" className="cell-paste-assignment" onClick={()=>onPaste(kind,resource,s.id)}><span aria-hidden="true">▣</span> Colar aqui</button>}
               {missingRoles.length > 0 && (
