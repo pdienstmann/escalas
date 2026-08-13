@@ -10,6 +10,10 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const entity = url.searchParams.get("entity") || "";
   const query = url.searchParams.get("q") || "";
+  const requestedPage = Number(url.searchParams.get("page") || "1");
+  const requestedPageSize = Number(url.searchParams.get("pageSize") || "40");
+  const page = Number.isFinite(requestedPage) ? Math.max(1, Math.floor(requestedPage)) : 1;
+  const pageSize = Number.isFinite(requestedPageSize) ? Math.min(100, Math.max(20, Math.floor(requestedPageSize))) : 40;
   const clauses = ["1=1"];
   const values: string[] = [];
   if (entity) { clauses.push("entity_type=?"); values.push(entity); }
@@ -17,8 +21,12 @@ export async function GET(request: Request) {
     clauses.push("(summary LIKE ? OR actor_name LIKE ? OR actor_email LIKE ?)");
     values.push(`%${query}%`,`%${query}%`,`%${query}%`);
   }
-  const items = await env.DB.prepare(`SELECT * FROM audit_events WHERE ${clauses.join(" AND ")} ORDER BY id DESC LIMIT 150`).bind(...values).all();
-  return Response.json({items:items.results,actor:actorFromRequest(request)},{headers:{"cache-control":"no-store"}});
+  const where = clauses.join(" AND ");
+  const [items, total] = await Promise.all([
+    env.DB.prepare(`SELECT * FROM audit_events WHERE ${where} ORDER BY id DESC LIMIT ? OFFSET ?`).bind(...values, pageSize, (page - 1) * pageSize).all(),
+    env.DB.prepare(`SELECT COUNT(*) total FROM audit_events WHERE ${where}`).bind(...values).first<{total:number|string}>(),
+  ]);
+  return Response.json({items:items.results,actor:actorFromRequest(request),meta:{page,pageSize,total:Number(total?.total||0)}},{headers:{"cache-control":"no-store"}});
 }
 
 type Row = Record<string, unknown>;

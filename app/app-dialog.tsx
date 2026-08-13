@@ -22,6 +22,7 @@ export function AppDialog({ children, className = "", onClose, closeOnBackdrop =
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const target = root.current?.querySelector<HTMLElement>("[role='dialog']") || root.current;
+    if (target && !target.hasAttribute("tabindex")) target.tabIndex = -1;
     const timer = window.setTimeout(() => target?.focus(), 0);
     const closeWithEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -29,10 +30,21 @@ export function AppDialog({ children, className = "", onClose, closeOnBackdrop =
         onClose();
       }
     };
+    const keepFocusInside = (event: KeyboardEvent) => {
+      if (event.key !== "Tab" || !target) return;
+      const focusable = [...target.querySelectorAll<HTMLElement>('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')]
+        .filter((element) => !element.hasAttribute("hidden"));
+      if (!focusable.length) { event.preventDefault(); target.focus(); return; }
+      const first = focusable[0], last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
     window.addEventListener("keydown", closeWithEscape);
+    window.addEventListener("keydown", keepFocusInside);
     return () => {
       window.clearTimeout(timer);
       window.removeEventListener("keydown", closeWithEscape);
+      window.removeEventListener("keydown", keepFocusInside);
       document.body.style.overflow = previousOverflow;
     };
   }, [onClose]);
