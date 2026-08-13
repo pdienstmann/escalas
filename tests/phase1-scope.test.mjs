@@ -1431,7 +1431,8 @@ test("applied operational groups render as sessions inside the main scale grid",
   assert.match(schedule, /pattern_period/);
   assert.match(schedule, /OperationalGroupsGrid/);
   assert.match(schedule, /GRUPAMENTOS E EQUIPES/);
-  assert.match(schedule, /\+ VTR \/ dupla/);
+  assert.match(schedule, /Sem VTR ou posto definido no padrão/);
+  assert.match(schedule, /NÃO LANÇADO NESTA ESCALA/);
   assert.match(schedule, /firstPostIndex/);
   assert.match(scheduleStyles, /\.operational-groups-grid-team/);
 });
@@ -1657,6 +1658,10 @@ test("operational group GM cards keep contextual actions and offer same-group HE
   assert.match(schedule, /draggable=\{Boolean\(actionAssignment\)\}/);
   assert.match(schedule, /dataTransfer\.setData\("text\/assignment"/);
   assert.match(schedule, /assignment \? assignmentDisplayInShift\(assignment, date, shift\.id\) : configuredTime/);
+  assert.match(schedule, /const teamVehicleIds = \[\.\.\.new Set/);
+  assert.match(schedule, /NÃO LANÇADO NESTA ESCALA/);
+  assert.doesNotMatch(schedule, /\+ VTR \/ dupla/);
+  assert.doesNotMatch(schedule, /"Selecionar destino"/);
   assert.match(styles, /\.group-he-suggestions/);
 });
 
