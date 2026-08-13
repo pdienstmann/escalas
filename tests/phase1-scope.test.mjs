@@ -855,7 +855,9 @@ test("manual overtime dashboard exposes actionable alerts, safe refresh state an
   assert.match(dashboard, /he-pattern-summary/);
   assert.match(dashboard, /const pendingCount = data\.suggestions\.length/);
   assert.match(dashboard, /className="he-alerts"/);
-  assert.match(dashboard, /missingRequestCount/);
+  assert.doesNotMatch(dashboard, /missingRequestCount/);
+  assert.match(dashboard, /suggestionsExpanded/);
+  assert.match(dashboard, /he-suggestions-toggle/);
   assert.match(dashboard, /hoursBand/);
   assert.match(dashboard, /value="over12"/);
   assert.match(dashboard, /isRefreshing/);
@@ -866,6 +868,28 @@ test("manual overtime dashboard exposes actionable alerts, safe refresh state an
   assert.match(styles, /\.he-load-error/);
   assert.match(styles, /@media print/);
   assert.match(styles, /\.overtime-page \.he-spreadsheet table\{width:100%/);
+});
+
+test("monthly operations distinguish absences, vehicle coverage and rapid sequential records", () => {
+  const dashboard = readFileSync(resolve("app/management-dashboard.tsx"), "utf8");
+  const planning = readFileSync(resolve("app/monthly-planning.tsx"), "utf8");
+  const management = readFileSync(resolve("app/gestao-client.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/operational-clarity.css"), "utf8");
+  const planningApi = readFileSync(resolve("app/api/planning/route.ts"), "utf8");
+  assert.match(dashboard, /function AbsenceMini/);
+  assert.match(dashboard, /Férias/);
+  assert.match(dashboard, /Atestado/);
+  assert.match(planning, /Viaturas para conferir/);
+  assert.match(planning, /function VehiclePeriod/);
+  assert.match(planning, /2º \+ 3º turno/);
+  assert.match(planning, /4º \+ 1º turno/);
+  assert.match(management, /Salvar e adicionar outro/);
+  assert.match(management, /keepAdding/);
+  assert.match(management, /tipo e período foram mantidos/);
+  assert.match(planningApi, /rawType === "other_leave" \? "other"/);
+  assert.match(styles, /\.planning-vehicle-focus/);
+  assert.match(styles, /\.dashboard-absence-mini/);
+  assert.match(styles, /\.he-suggestions-toggle/);
 });
 
 test("long post and vehicle names wrap instead of being clipped", () => {

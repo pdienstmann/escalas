@@ -70,6 +70,24 @@ function folgas(period: Period) {
   return Number(period.absenceCounts?.folga || 0);
 }
 
+const absenceShortLabels: Record<string, string> = {
+  vacation: "Férias",
+  course: "Curso",
+  medical_leave: "Atestado",
+  technical_reserve: "Reserva",
+  time_bank: "BH",
+  negative_full: "BH-",
+  negative_late: "BH-",
+  negative_early: "BH-",
+  other: "Outros",
+};
+
+function otherAbsences(period: Period) {
+  return Object.entries(period.absenceCounts || {})
+    .filter(([key, value]) => key !== "folga" && Number(value) > 0)
+    .map(([key, value]) => ({ key, label: absenceShortLabels[key] || key, value: Number(value) }));
+}
+
 type PeriodPriority = {
   day: PlanningDay;
   period: Period;
@@ -282,9 +300,15 @@ function DashboardPeriodOverview({ kind, label, schedule, average, leaves, holes
 
 function DashboardDay({ day, selected, noteCount, onSelect }: { day: PlanningDay; selected: boolean; noteCount: number; onSelect: () => void }) {
   const dayFolgas = folgas(day.day), nightFolgas = folgas(day.night);
-  return <button type="button" className={`dashboard-day ${day.status} ${selected ? "selected" : ""}`} onClick={onSelect} aria-pressed={selected} aria-label={`${formatLongDate(day.date)}: diurno ${day.day.available} GMs, noturno ${day.night.available} GMs`}><header><b>{Number(day.date.slice(-2))}</b><span>{weekDays[day.weekday]} · {day.pattern.day}/{day.pattern.night}</span></header><div className="dashboard-day-period day"><span><b>D</b> Diurno</span><strong>{day.day.available}<small> GMs</small></strong><em>{dayFolgas} folga{dayFolgas === 1 ? "" : "s"}{day.day.holes ? ` · ${day.day.holes} furos` : ""}</em></div><div className="dashboard-day-period night"><span><b>N</b> Noturno</span><strong>{day.night.available}<small> GMs</small></strong><em>{nightFolgas} folga{nightFolgas === 1 ? "" : "s"}{day.night.holes ? ` · ${day.night.holes} furos` : ""}</em></div>{noteCount > 0 && <i title={`${noteCount} observação(ões)`}>{noteCount}</i>}</button>;
+  return <button type="button" className={`dashboard-day ${day.status} ${selected ? "selected" : ""}`} onClick={onSelect} aria-pressed={selected} aria-label={`${formatLongDate(day.date)}: diurno ${day.day.available} GMs, noturno ${day.night.available} GMs`}><header><b>{Number(day.date.slice(-2))}</b><span>{weekDays[day.weekday]} · {day.pattern.day}/{day.pattern.night}</span></header><div className="dashboard-day-period day"><span><b>D</b> Diurno</span><strong>{day.day.available}<small> GMs</small></strong><em>{dayFolgas} folga{dayFolgas === 1 ? "" : "s"}{day.day.holes ? ` · ${day.day.holes} furos` : ""}</em><AbsenceMini period={day.day}/></div><div className="dashboard-day-period night"><span><b>N</b> Noturno</span><strong>{day.night.available}<small> GMs</small></strong><em>{nightFolgas} folga{nightFolgas === 1 ? "" : "s"}{day.night.holes ? ` · ${day.night.holes} furos` : ""}</em><AbsenceMini period={day.night}/></div>{noteCount > 0 && <i title={`${noteCount} observação(ões)`}>{noteCount}</i>}</button>;
+}
+
+function AbsenceMini({ period }: { period: Period }) {
+  const items = otherAbsences(period);
+  if (!items.length) return <small className="dashboard-absence-mini clear">Sem outros afastamentos</small>;
+  return <small className="dashboard-absence-mini" title={items.map((item) => `${item.label}: ${item.value}`).join(" · ")}>{items.map((item) => <span key={item.key}>{item.label} <b>{item.value}</b></span>)}</small>;
 }
 
 function PeriodSummary({ label, period }: { label: string; period: Period }) {
-  return <article className={`${period.status} ${label === "Diurno" ? "period-day" : "period-night"}`}><header><b>{label}</b><span>{period.code}</span></header><strong>{period.available}<small> GMs disponíveis</small></strong><p><b>{folgas(period)}</b> folga{folgas(period) === 1 ? "" : "s"} · {period.away} afastado{period.away === 1 ? "" : "s"}</p>{period.holes > 0 && <em>{period.holes} furo{period.holes === 1 ? "" : "s"}</em>}</article>;
+  return <article className={`${period.status} ${label === "Diurno" ? "period-day" : "period-night"}`}><header><b>{label}</b><span>{period.code}</span></header><strong>{period.available}<small> GMs disponíveis</small></strong><p><b>{folgas(period)}</b> folga{folgas(period) === 1 ? "" : "s"} · {period.away} afastado{period.away === 1 ? "" : "s"}</p><AbsenceMini period={period}/>{period.holes > 0 && <em>{period.holes} furo{period.holes === 1 ? "" : "s"}</em>}</article>;
 }

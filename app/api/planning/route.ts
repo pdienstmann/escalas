@@ -354,7 +354,7 @@ export async function GET(request: Request) {
         else if (isActual && guardId) availableGuardIds.add(guardId);
         for (const absence of absences) {
           const rawType = String(absence.type || "other");
-          const type = (rawType === "day_off" ? "folga" : rawType) as keyof ReturnType<typeof emptyCounts>;
+          const type = (rawType === "day_off" ? "folga" : rawType === "other_leave" ? "other" : rawType) as keyof ReturnType<typeof emptyCounts>;
           const absenceKey = `${type}:${guardId}`;
           if (countedAbsences.has(absenceKey)) continue;
           countedAbsences.add(absenceKey);

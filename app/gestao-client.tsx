@@ -143,6 +143,9 @@ export function GestaoClient({
     setMessage("");
     const form = e.currentTarget;
     const body = Object.fromEntries(new FormData(form));
+    const submitter = (e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
+    const keepAdding = action === "movement" && submitter?.value === "continue";
+    const repeatValues = keepAdding ? { type: String(body.type || "vacation"), startsAt: String(body.startsAt || date), endsAt: String(body.endsAt || date) } : null;
     try {
       const r = await fetch("/api/admin", {
         method: "POST",
@@ -159,6 +162,14 @@ export function GestaoClient({
       );
       if (r.ok) {
         form.reset();
+        if (repeatValues) {
+          const setValue = (name: string, value: string) => { const field = form.elements.namedItem(name) as HTMLInputElement | HTMLSelectElement | null; if (field) field.value = value; };
+          setValue("type", repeatValues.type);
+          setValue("startsAt", repeatValues.startsAt);
+          setValue("endsAt", repeatValues.endsAt);
+          window.setTimeout(() => (form.elements.namedItem("guardId") as HTMLSelectElement | null)?.focus(), 0);
+          setMessage("Afastamento incluído. Selecione o próximo GM; tipo e período foram mantidos.");
+        }
         const catalogKey = action === "guard" ? "guards" : action === "post" ? "posts" : action === "vehicle" ? "vehicles" : null;
         if (catalogKey && j.entity) {
           setData((current) => {
@@ -625,6 +636,7 @@ export function GestaoClient({
         <Form
           title="Novo afastamento / indisponibilidade"
           onSubmit={(e) => submit(e, "movement")}
+          submitLabel="Salvar e concluir"
         >
           <div className="field-caption"><span>GM</span><GuardSelect guards={data.guards} /></div>
           <label className="field-caption">Tipo de registro<select name="type" defaultValue="vacation">
@@ -643,6 +655,7 @@ export function GestaoClient({
           <small className="form-hint">Use o mesmo dia nos dois campos para um afastamento de um dia. O retorno é aplicado automaticamente à escala.</small>
           <label className="field-caption">Nº do requerimento<input name="requestRef" placeholder="Opcional" /></label>
           <label className="field-caption">Observação / destino<input name="notes" placeholder="Opcional" /></label>
+          <div className="movement-submit-actions"><button type="submit" name="movementSubmit" value="continue">Salvar e adicionar outro</button><small>Mantém tipo e datas para lançamentos em sequência.</small></div>
         </Form>
         {message && <p className="notice">{message}</p>}
         <MovementRecords
@@ -1081,11 +1094,13 @@ function Module({
 function Form({
   title,
   disabled = false,
+  submitLabel = "Salvar",
   onSubmit,
   children,
 }: {
   title: string;
   disabled?: boolean;
+  submitLabel?: string;
   onSubmit: (e: FormEvent<HTMLFormElement>) => void;
   children: React.ReactNode;
 }) {
@@ -1094,7 +1109,7 @@ function Form({
       <fieldset disabled={disabled}>
         <h3>{title}</h3>
         {children}
-        <button className="save">Salvar</button>
+        <button className="save">{submitLabel}</button>
       </fieldset>
     </form>
   );
@@ -1200,7 +1215,8 @@ function MovementRecords({
         <p>Registros ativos retiram o GM automaticamente do período informado e mostram o furo na escala.</p>
       </header>
       <div className="movement-record-summary" role="status">
-        {movementTypeOptions.filter(option=>counts[option.value]).map(option=><button type="button" key={option.value} className={typeFilter===option.value?"active":""} onClick={()=>setTypeFilter(typeFilter===option.value?"all":option.value)}><b>{counts[option.value]}</b><span>{option.label}</span></button>)}
+        <button type="button" className={typeFilter==="all"?"active":""} onClick={()=>setTypeFilter("all")}><b>{items.length}</b><span>Todos</span></button>
+        {movementTypeOptions.map(option=><button type="button" key={option.value} className={typeFilter===option.value?"active":""} disabled={!counts[option.value]} onClick={()=>setTypeFilter(typeFilter===option.value?"all":option.value)}><b>{counts[option.value]||0}</b><span>{option.label}</span></button>)}
       </div>
       <div className="movement-filters">
         <label>Buscar GM, matrícula ou requerimento<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Digite para filtrar…" /></label>

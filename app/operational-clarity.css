@@ -1,0 +1,239 @@
+/* Refinamentos transversais: leitura mensal, cobertura operacional e lançamentos rápidos. */
+.dashboard-day {
+  min-height: 138px;
+}
+
+.dashboard-day-period {
+  align-content: start;
+  grid-template-rows: auto auto auto;
+}
+
+.dashboard-absence-mini {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 3px;
+  min-width: 0;
+  margin-top: 2px;
+  overflow: hidden;
+  color: #52677c;
+  font-size: 6.5px;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.dashboard-absence-mini span {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+  min-width: 0;
+  padding: 1px 3px;
+  border: 1px solid #d7e2ec;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, .72);
+}
+
+.dashboard-absence-mini b {
+  color: #173f64;
+}
+
+.dashboard-absence-mini.clear {
+  color: #718396;
+  opacity: .82;
+}
+
+.dashboard-selected-periods .dashboard-absence-mini {
+  flex-wrap: wrap;
+  margin: 5px 0 1px;
+  overflow: visible;
+  font-size: 8px;
+  white-space: normal;
+}
+
+.planning-absence-mini {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 5px;
+}
+
+.planning-absence-mini span {
+  padding: 2px 5px;
+  border-radius: 5px;
+  background: #eef4f8;
+  color: #3d566d;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.planning-vehicle-focus {
+  margin: 16px 0 12px;
+  padding: 14px;
+  border: 1px solid #aac9df;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #f3f9fd, #e7f2f9);
+}
+
+.planning-vehicle-focus > header small {
+  color: #0b6598;
+  font-weight: 900;
+  letter-spacing: .08em;
+}
+
+.planning-vehicle-focus > header h3,
+.planning-vehicle-focus > header p {
+  margin: 3px 0;
+}
+
+.planning-vehicle-focus > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.planning-vehicle-period {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #c7dbe8;
+  border-radius: 9px;
+  background: #fff;
+}
+
+.planning-vehicle-period > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+
+.planning-vehicle-period > header div {
+  display: grid;
+}
+
+.planning-vehicle-period > header small {
+  color: #657b8d;
+}
+
+.planning-vehicle-period > header span {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #fff1cf;
+  color: #855400;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.planning-vehicle-period.covered > header span {
+  background: #dff4e7;
+  color: #176a3d;
+}
+
+.planning-vehicle-period > div {
+  display: grid;
+  gap: 6px;
+}
+
+.planning-vehicle-period .planning-resource-card {
+  margin: 0;
+}
+
+.movement-record-summary button:disabled {
+  cursor: default;
+  opacity: .55;
+}
+
+.movement-submit-actions {
+  display: grid;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.data-form .movement-submit-actions button {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid #0b6ab3;
+  border-radius: 8px;
+  background: #eaf5fd;
+  color: #07558f;
+  font-weight: 900;
+}
+
+.movement-submit-actions small {
+  color: #627489;
+  font-size: 10px;
+  text-align: center;
+}
+
+.he-suggestions.collapsed {
+  padding: 0;
+}
+
+.he-suggestions-toggle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: inherit;
+  background: #f5f9fc;
+  color: #173c5c;
+  text-align: left;
+}
+
+.he-suggestions-toggle span {
+  display: grid;
+  gap: 2px;
+}
+
+.he-suggestions-toggle small {
+  color: #65798b;
+  font-weight: 500;
+}
+
+.he-suggestions-toggle strong {
+  display: grid;
+  place-items: center;
+  min-width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: #dbeaf5;
+}
+
+.he-suggestions-toggle i {
+  color: #0870b7;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.he-suggestions.expanded .he-suggestions-toggle {
+  width: calc(100% + 32px);
+  margin: -16px -16px 12px;
+  border-bottom: 1px solid #dbe6ee;
+  border-radius: 12px 12px 0 0;
+}
+
+@media (max-width: 760px) {
+  .dashboard-day {
+    min-height: 126px;
+  }
+
+  .dashboard-absence-mini {
+    font-size: 6px;
+  }
+
+  .planning-vehicle-focus > div {
+    grid-template-columns: 1fr;
+  }
+
+  .he-suggestions-toggle {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .he-suggestions-toggle i {
+    grid-column: 1 / -1;
+  }
+}
