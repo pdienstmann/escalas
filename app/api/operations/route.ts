@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { permitted } from "../../../lib/access";
 import { writeAudit } from "../../../lib/audit";
 import { isScheduleDate } from "../../../lib/schedule-date";
+import { isMotorcycleType } from "../../../lib/crew-rules";
 
 export const dynamic = "force-dynamic";
 type Row = Record<string, unknown>;
@@ -225,29 +226,33 @@ export async function POST(request:Request){
   const requested=Math.max(0,Number(body.requestedGuards||0));
   if(!isScheduleDate(date)||!body.title?.trim()||!Number.isFinite(Date.parse(start))||!Number.isFinite(Date.parse(end))||Date.parse(end)<=Date.parse(start))
     return Response.json({error:"Informe nome, data e intervalo válidos."},{status:400});
-  if(requested<Math.max(1,vehicleIds.length*2))return Response.json({error:`Informe ao menos ${Math.max(1,vehicleIds.length*2)} GM(s) para esta composição.`},{status:400});
   await env.DB.prepare("INSERT OR IGNORE INTO schedules (date,status) VALUES (?,'draft')").bind(date).run();
   const schedule=await env.DB.prepare("SELECT id FROM schedules WHERE date=?").bind(date).first<{id:number}>();
+  const selectedVehicles:Row[]=[];
   for(const vehicleId of vehicleIds){
-    const vehicle=await env.DB.prepare(`SELECT v.id,v.prefix FROM vehicles v WHERE v.id=? AND v.active=1
+    const vehicle=await env.DB.prepare(`SELECT v.id,v.prefix,v.type FROM vehicles v WHERE v.id=? AND v.active=1
       AND NOT EXISTS (SELECT 1 FROM vehicle_outages x WHERE x.vehicle_id=v.id AND x.active=1 AND x.starts_on<=? AND (x.ends_on IS NULL OR x.ends_on>=?))
       AND NOT EXISTS (SELECT 1 FROM operation_vehicles ov JOIN operations o ON o.id=ov.operation_id WHERE ov.vehicle_id=v.id AND o.status!='cancelled' AND o.starts_at<? AND o.ends_at>?)`).bind(vehicleId,date,date,end,start).first<Row>();
     if(!vehicle)return Response.json({error:"Uma das viaturas ficou indisponível ou já foi reservada por outra operação."},{status:409});
+    selectedVehicles.push(vehicle);
   }
+  const requiredVehicleSlots=selectedVehicles.reduce((total,vehicle)=>total+(isMotorcycleType(vehicle.type)?1:2),0);
+  const minimumGuards=Math.max(1,requiredVehicleSlots);
+  if(requested<minimumGuards)return Response.json({error:`Informe ao menos ${minimumGuards} GM(s) para esta composição.`},{status:400});
   const created=await env.DB.prepare("INSERT INTO operations (schedule_id,title,starts_at,ends_at,location,commander,reference,notes,requested_guards,status) VALUES (?,?,?,?,?,?,?,?,?,'draft')")
     .bind(schedule?.id,body.title.trim(),start,end,body.location||null,body.commander||null,body.reference||null,body.notes||null,requested).run();
   const operationId=Number(created.meta.last_row_id);
   let position=0;
   try{
-    for(const vehicleId of vehicleIds){
+    for(const vehicle of selectedVehicles){
+      const vehicleId=Number(vehicle.id);
       const vehicleCreated=await env.DB.prepare("INSERT INTO operation_vehicles (operation_id,vehicle_id,sort_order) VALUES (?,?,?)").bind(operationId,vehicleId,position++).run();
       const operationVehicleId=Number(vehicleCreated.meta.last_row_id);
-      await env.DB.batch([
-        env.DB.prepare("INSERT INTO operation_slots (operation_id,operation_vehicle_id,role,position) VALUES (?,?,?,?)").bind(operationId,operationVehicleId,"driver",0),
-        env.DB.prepare("INSERT INTO operation_slots (operation_id,operation_vehicle_id,role,position) VALUES (?,?,?,?)").bind(operationId,operationVehicleId,"patrol",1),
-      ]);
+      const slots=[env.DB.prepare("INSERT INTO operation_slots (operation_id,operation_vehicle_id,role,position) VALUES (?,?,?,?)").bind(operationId,operationVehicleId,"driver",0)];
+      if(!isMotorcycleType(vehicle.type))slots.push(env.DB.prepare("INSERT INTO operation_slots (operation_id,operation_vehicle_id,role,position) VALUES (?,?,?,?)").bind(operationId,operationVehicleId,"patrol",1));
+      await env.DB.batch(slots);
     }
-    const extras=requested-vehicleIds.length*2;
+    const extras=requested-requiredVehicleSlots;
     if(extras>0)await env.DB.batch(Array.from({length:extras},(_,index)=>env.DB.prepare("INSERT INTO operation_slots (operation_id,operation_vehicle_id,role,position) VALUES (?,NULL,'guard',?)").bind(operationId,index)));
   }catch(error){await env.DB.prepare("DELETE FROM operations WHERE id=?").bind(operationId).run();throw error}
   const operation=await env.DB.prepare("SELECT * FROM operations WHERE id=?").bind(operationId).first<Row>();

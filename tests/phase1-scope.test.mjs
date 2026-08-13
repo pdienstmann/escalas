@@ -263,6 +263,20 @@ test("overtime shortcut lives inside the GM card and stays distinct from add act
   assert.match(density, /border-bottom:4px solid/);
 });
 
+test("motorcycles never expose a patrol hole in the daily scale or operations", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const operations = readFileSync(resolve("app/operations-dashboard.tsx"), "utf8");
+  const operationsApi = readFileSync(resolve("app/api/operations/route.ts"), "utf8");
+  const print = readFileSync(resolve("app/print-schedule.tsx"), "utf8");
+  assert.match(schedule, /isMotorcycleType\(resource\.type\)[\s\S]*?\? list\.some\(\(assignment\) => !isOvertimeExtensionCell/);
+  assert.match(schedule, /Em serviço · condutor definido/);
+  assert.match(operations, /Moto recebe somente um condutor/);
+  assert.match(operations, /isMotorcycleType\(vehicle\.type\)\?"1 condutor"/);
+  assert.match(operationsApi, /requiredVehicleSlots=selectedVehicles\.reduce/);
+  assert.match(operationsApi, /if\(!isMotorcycleType\(vehicle\.type\)\)slots\.push/);
+  assert.match(print, /motorcycle\?<td>—<\/td>/);
+});
+
 test("schedule rows are memoized so shell feedback does not repaint the full matrix", () => {
   const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
   assert.match(schedule, /<MemoizedRow/);

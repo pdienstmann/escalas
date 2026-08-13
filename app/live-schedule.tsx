@@ -1894,6 +1894,7 @@ function RedeployQuickEditor({data,assignments,saving,onClose,onSave}:{data:Stat
     const matches=data.assignments.filter(current=>!movingIds.has(Number(current.id))&&(item.kind==="post"?Number(current.post_id)===Number(item.resource.id):Number(current.vehicle_id)===Number(item.resource.id))&&String(current.starts_at)<String(assignment.ends_at)&&String(current.ends_at)>String(assignment.starts_at));
     if(!matches.length)return{label:"Livre no período",available:true};
     if(item.kind==="vehicle"){
+      if(isMotorcycleType(item.resource.type))return{label:"Em serviço · condutor definido",available:false};
       const roles=new Set(matches.map(current=>String(current.role)));
       const hasHole=!roles.has("driver")||!roles.has("patrol");
       return{label:hasHole?`Com furo · ${matches.length} GM(s)`:`Em serviço · ${matches.length} GM(s)`,available:hasHole};
@@ -2622,7 +2623,9 @@ function Row({
           const list = alignedAssignmentsByShift.get(s.id) || [];
           const pasteAllowed=canPasteInShift(s.id);
           const missingRoles = kind === "vehicle"
-            ? ["driver", "patrol"].filter((role) => !list.some((assignment) => String(assignment.role) === role && !isOvertimeExtensionCell(assignment,date,s.id)))
+            ? isMotorcycleType(resource.type)
+              ? list.some((assignment) => !isOvertimeExtensionCell(assignment,date,s.id)) ? [] : ["driver"]
+              : ["driver", "patrol"].filter((role) => !list.some((assignment) => String(assignment.role) === role && !isOvertimeExtensionCell(assignment,date,s.id)))
             : list.length ? [] : ["guard"];
           const toggleQuickAdd = () => { setAddShift(current => current === s.id ? null : s.id); setAddQuery(""); };
           const quickPicker = (withSmartSuggestion = false) => addShift === s.id && <div className="quick-add-picker" role="group" aria-label={`Sugestões inteligentes para ${String(kind === "vehicle" ? resource.prefix : resource.name)}`}>
