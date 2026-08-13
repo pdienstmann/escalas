@@ -372,6 +372,15 @@ test("overtime shortcut lives inside the GM card and stays distinct from add act
   assert.match(density, /border-bottom:4px solid/);
 });
 
+test("regular and operational-group cards share the same in-scope HE shortcut rules", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  assert.match(schedule, /function extensionShortcutAvailable\(/);
+  assert.match(schedule, /extensionShortcutAvailable\(actionAssignment, shift\.id, date, assignments\)/);
+  assert.match(schedule, /extensionShortcutAvailable\(a,s\.id,date,allScheduleAssignments\)/);
+  assert.match(schedule, /earlyExtensionShortcutAvailable\(actionAssignment, shift\.id, date\)/);
+  assert.doesNotMatch(schedule, /showExtensionShortcut/);
+});
+
 test("motorcycles never expose a patrol hole in the daily scale or operations", () => {
   const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
   const operations = readFileSync(resolve("app/operations-dashboard.tsx"), "utf8");

@@ -2258,8 +2258,8 @@ function OperationalGroupsGrid({ date, groups, members, guards, posts, vehicles,
               <button type="button" draggable={Boolean(actionAssignment)} className={`operational-groups-grid-gm ${assignment ? "assigned" : "unassigned"} ${visualStatus}`} onDragStart={(event) => { if (!actionAssignment) return; event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/assignment", String(actionAssignment.id)); event.dataTransfer.setData("text/assignment-source-shift", shift.id); setAssignmentDragPreview(event, guard?.name, destinationText); onDragStart(actionAssignment); }} onDragEnd={onDragEnd} onClick={() => actionAssignment && onOpenAssignment(actionAssignment, shift.id)} disabled={!assignment} title={assignment ? "Clique para editar ou arraste para mover este quadradinho" : "Integrante previsto no padrão, ainda sem lançamento nesta escala"}>
                 <strong>{String(guard?.name || `GM ${member.resource_id}`)}{hasVisualBadge && <span className={`group-status-badge ${visualStatus === "overtime" ? "he" : visualStatus === "time_bank" ? "bh" : visualStatus === "swap" ? "swap" : "away"}`}>{adjustmentBadge || (visualStatus === "overtime" && assignment?.regular_ends_at ? `HE · após ${String(assignment.regular_ends_at).slice(11, 16)}` : visualStatus === "away" ? String(movement?.type || "AFASTADO").replace("medical_leave", "ATESTADO").replace("day_off", "FOLGA").replace("vacation", "FÉRIAS").toUpperCase() : statusShort(visualStatus))}</span>}</strong><span>{movement && !assignment ? "Fora da escala neste período" : destinationText}</span><em>{assignmentState}</em><small className="operational-groups-grid-time">{assignment ? assignmentDisplayInShift(assignment, date, shift.id) : configuredTime}{extension ? ` · +HE ${overtimeHoursLabel(extension)}` : ""}</small>
               </button>
-              {actionAssignment && showExtensionShortcut(actionAssignment, shift.id) && <button type="button" className="operational-group-inline-he" title="Estender este GM em hora extra" onClick={() => onExtend(actionAssignment, shift.id, "after")}>+HE</button>}
-              {actionAssignment && showEarlyExtensionShortcut(actionAssignment, shift.id) && <button type="button" className="operational-group-inline-he early" title="Antecipar este GM em hora extra" onClick={() => onExtend(actionAssignment, shift.id, "before")}>+HE antes</button>}
+              {actionAssignment && extensionShortcutAvailable(actionAssignment, shift.id, date, assignments) && <button type="button" className="operational-group-inline-he" title="Estender este GM em hora extra" onClick={() => onExtend(actionAssignment, shift.id, "after")}>+HE</button>}
+              {actionAssignment && earlyExtensionShortcutAvailable(actionAssignment, shift.id, date) && <button type="button" className="operational-group-inline-he early" title="Antecipar este GM em hora extra" onClick={() => onExtend(actionAssignment, shift.id, "before")}>+HE antes</button>}
               {actionAssignment && Number(actionAssignment.id) === selectedId && <div className="operational-group-quick-actions" role="group" aria-label={`Ações rápidas de ${String(guard?.name || "GM")}`}>
                 <header><b>{String(guard?.name || "GM")}</b><button type="button" aria-label="Fechar ações" onClick={onCloseActions}>×</button></header>
                 <button type="button" onClick={() => onAdjust(actionAssignment, shift.id)}><span aria-hidden="true">✎</span>Ajustar</button>
@@ -2619,20 +2619,6 @@ function Row({
     }
     next?.focus();
   }
-  function showExtensionShortcut(assignment:Rec,shift:string){
-    if(!isDayShift(shift))return false;
-    if(String(assignment.work_kind)==="overtime_extension")return false;
-    if(String(assignment.status)==="overtime"&&assignment.regular_ends_at&&String(assignment.ends_at)>String(assignment.regular_ends_at))return false;
-    const period=isDayShift(shift)?"day":"night";
-    const related=allScheduleAssignments.filter(item=>Number(item.guard_id)===Number(assignment.guard_id)&&String(item.work_kind)!=="overtime_extension"&&coveredOperationalShifts(item,date).some(id=>(isDayShift(id)?"day":"night")===period));
-    const latest=related.reduce((value,item)=>{const end=String(item.regular_ends_at||item.ends_at);return end>value?end:value},String(assignment.regular_ends_at||assignment.ends_at));
-    const window=operationalShiftWindow(date,shift);
-    return window.start<latest&&window.end>=latest;
-  }
-  function showEarlyExtensionShortcut(assignment:Rec,shift:string){
-    if(shift!=="4"||String(assignment.work_kind)==="overtime_extension")return false;
-    return assignmentOverlapsShift(assignment,date,"4");
-  }
   function canPasteInShift(shift:string){
     if(!copiedAssignment)return false;
     const target=operationalShiftWindow(date,shift);
@@ -2814,7 +2800,7 @@ function Row({
               onDragOver={(e) => { if (canReceiveDrag(s.id)) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; } }}
                onDrop={(e) => { if (canReceiveDrag(s.id)) drop(e, s.id); else { e.preventDefault(); e.stopPropagation(); setDropTargetId(null); } }}
             >
-              {list.map((a) => {const visualStatus=statusInShift(a,date,s.id),adjustmentBadge=assignmentAdjustmentBadge(a,serviceAdjustments,date),weeklyFixedHe=fixedWeeklyOvertimeLabel(a),canExtendAfter=showExtensionShortcut(a,s.id),canExtendBefore=showEarlyExtensionShortcut(a,s.id);return (<Fragment key={String(a.id)}><Fragment>
+              {list.map((a) => {const visualStatus=statusInShift(a,date,s.id),adjustmentBadge=assignmentAdjustmentBadge(a,serviceAdjustments,date),weeklyFixedHe=fixedWeeklyOvertimeLabel(a),canExtendAfter=extensionShortcutAvailable(a,s.id,date,allScheduleAssignments),canExtendBefore=earlyExtensionShortcutAvailable(a,s.id,date);return (<Fragment key={String(a.id)}><Fragment>
                 <div className={`live-person-card ${canExtendAfter||canExtendBefore?"has-he-action":""} ${dropTargetId===Number(a.id)?"drop-target":""} ${draggingAssignmentId===Number(a.id)?"dragging-source":""}`} onDragEnter={()=>{if(canDropOnCard(a))setDropTargetId(Number(a.id))}} onDragLeave={(event)=>{const next=event.relatedTarget;if(next instanceof Node&&event.currentTarget.contains(next))return;setDropTargetId(current=>current===Number(a.id)?null:current)}} onDragOver={(event)=>{if(!draggingAssignment)return;event.preventDefault();event.stopPropagation();event.dataTransfer.dropEffect=canDropOnCard(a)?"move":"none"}} onDrop={(event)=>{if(!draggingAssignment)return;event.preventDefault();event.stopPropagation();if(canDropOnCard(a))drop(event,s.id,Number(a.id))}}>
                 <button
                   type="button"
@@ -3263,6 +3249,19 @@ function statusInShift(a:Rec,date:string,shift:string){
 }
 function isOvertimeExtensionCell(a:Rec,date:string,shift:string){const regular=String(a.regular_ends_at||"");return Boolean(regular)&&String(a.status)==="overtime"&&operationalShiftWindow(date,shift).start>=regular}
 function overtimeHoursLabel(a:Rec){const hours=Math.max(0,(Date.parse(String(a.ends_at))-Date.parse(String(a.starts_at)))/3600000);return `${String(Math.round(hours)).padStart(2,"0")} HE`}
+function extensionShortcutAvailable(assignment:Rec,shift:string,date:string,assignments:Rec[]){
+  if(!isDayShift(shift))return false;
+  if(String(assignment.work_kind)==="overtime_extension")return false;
+  if(String(assignment.status)==="overtime"&&assignment.regular_ends_at&&String(assignment.ends_at)>String(assignment.regular_ends_at))return false;
+  const related=assignments.filter(item=>Number(item.guard_id)===Number(assignment.guard_id)&&String(item.work_kind)!=="overtime_extension"&&coveredOperationalShifts(item,date).some(id=>isDayShift(id)));
+  const latest=related.reduce((value,item)=>{const end=String(item.regular_ends_at||item.ends_at);return end>value?end:value},String(assignment.regular_ends_at||assignment.ends_at));
+  const window=operationalShiftWindow(date,shift);
+  return window.start<latest&&window.end>=latest;
+}
+function earlyExtensionShortcutAvailable(assignment:Rec,shift:string,date:string){
+  if(shift!=="4"||String(assignment.work_kind)==="overtime_extension")return false;
+  return assignmentOverlapsShift(assignment,date,"4");
+}
 function fixedWeeklyOvertimeLabel(a:Rec){
   if(String(a.work_kind)!=="weekly"||!a.regular_ends_at)return "";
   const hours=Math.max(0,(Date.parse(String(a.ends_at))-Date.parse(String(a.regular_ends_at)))/3600000);
