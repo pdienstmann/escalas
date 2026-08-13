@@ -38,7 +38,7 @@ export function MonthlyPlanningPrint({ month, scenario }: { month: string; scena
 
   useEffect(() => {
     const scenarioQuery = scenario ? `&scenario=${encodeURIComponent(scenario)}` : "";
-    fetch(`/api/planning?month=${month}${scenarioQuery}&_=${Date.now()}`, { cache: "no-store" })
+    fetch(`/api/planning?month=${month}&detail=all${scenarioQuery}&_=${Date.now()}`, { cache: "no-store" })
       .then(async (response) => {
         const value = await response.json() as PlanningData & { error?: string };
         if (!response.ok) throw new Error(value.error || "Não foi possível preparar o panorama.");

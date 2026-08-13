@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BackToSchedule, ScheduleNav } from "./schedule-nav";
 import { ModuleLoading } from "./module-loading";
 import { readClientCache, writeClientCache } from "./client-cache";
@@ -13,7 +13,7 @@ type PlanningDay = Rec & { date: string; pattern: { day: string; night: string }
 type CatalogGuard = { id: number; name: string; registration?: string; platoon?: string };
 type CatalogVehicle = { id: number; prefix: string; zone?: string; type?: string };
 type SimulationEvent = { id: string; kind: "guard" | "vehicle"; startDate: string; endDate: string | null; guardId?: number; vehicleId?: number; category?: string; reason?: string };
-type PlanningData = { month: string; anchorDate: string; days: PlanningDay[]; catalog?: { guards: CatalogGuard[]; vehicles: CatalogVehicle[] }; simulation?: { active: boolean; events: SimulationEvent[] }; summary: Rec & { days: number; totalExpected: number; totalAvailable: number; totalAway: number; totalHoles: number; criticalDays: number; attentionDays: number; absenceTotals: Record<string, number>; overtimeNeeded: number } };
+type PlanningData = { month: string; anchorDate: string; detailDate?: string | null; days: PlanningDay[]; catalog?: { guards: CatalogGuard[]; vehicles: CatalogVehicle[] }; simulation?: { active: boolean; events: SimulationEvent[] }; summary: Rec & { days: number; totalExpected: number; totalAvailable: number; totalAway: number; totalHoles: number; criticalDays: number; attentionDays: number; absenceTotals: Record<string, number>; overtimeNeeded: number } };
 type PlanningFilter = "all" | "critical" | "attention" | "affected" | "day" | "night";
 
 const planningCacheKey = (month: string) => `gmnh:monthly-planning:${month}`;
@@ -71,20 +71,25 @@ export function MonthlyPlanning({ initialDate }: { initialDate: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [simulationEvents, setSimulationEvents] = useState<SimulationEvent[]>([]);
+  const loadSequence = useRef(0);
 
-  const load = useCallback(async (requestedMonth: string, requestedSimulation: SimulationEvent[] = []) => {
+  const load = useCallback(async (requestedMonth: string, requestedSimulation: SimulationEvent[] = [], requestedDetail = "") => {
+    const sequence = ++loadSequence.current;
     setLoading(true);
     try {
       const simulationQuery = requestedSimulation.length ? `&scenario=${encodeURIComponent(JSON.stringify(requestedSimulation))}` : "";
-      const response = await fetch(`/api/planning?month=${requestedMonth}${simulationQuery}&_=${Date.now()}`, { cache: "no-store" });
+      const detailQuery = requestedDetail ? `&detail=${encodeURIComponent(requestedDetail)}` : "";
+      const response = await fetch(`/api/planning?month=${requestedMonth}${simulationQuery}${detailQuery}&_=${Date.now()}`, { cache: "no-store" });
       const value = await response.json() as PlanningData & { error?: string };
       if (!response.ok) throw new Error(value.error || "Não foi possível calcular o planejamento mensal.");
+      if (sequence !== loadSequence.current) return;
       setData(value); setError("");
       if (!requestedSimulation.length) { setBaselineData(value); writeClientCache(planningCacheKey(requestedMonth), value); }
       setSelectedDate((current) => current.startsWith(requestedMonth) ? current : value.days[0]?.date || dateFromMonth(requestedMonth));
     } catch (reason) {
+      if (sequence !== loadSequence.current) return;
       setError(reason instanceof Error ? reason.message : "Não foi possível calcular o planejamento mensal.");
-    } finally { setLoading(false); }
+    } finally { if (sequence === loadSequence.current) setLoading(false); }
   }, []);
 
   useEffect(() => {
@@ -94,8 +99,10 @@ export function MonthlyPlanning({ initialDate }: { initialDate: string }) {
     setData(cached);
     setBaselineData(cached);
     setSimulationEvents([]);
-    void load(month, []);
-  }, [load, month]);
+    const detailDate = initialDate.startsWith(month) ? initialDate : dateFromMonth(month);
+    setSelectedDate(detailDate);
+    void load(month, [], detailDate);
+  }, [initialDate, load, month]);
 
   const selected = data?.days.find((day) => day.date === selectedDate) || data?.days[0] || null;
   const visibleDays = useMemo(() => (data?.days || []).filter((day) => {
@@ -112,6 +119,7 @@ export function MonthlyPlanning({ initialDate }: { initialDate: string }) {
   function selectPlanningDay(date: string) {
     setFilter("all");
     setSelectedDate(date);
+    if (data?.detailDate !== date) void load(month, simulationEvents, date);
     window.requestAnimationFrame(() => document.getElementById("planning-day-detail")?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }
 
@@ -120,21 +128,21 @@ export function MonthlyPlanning({ initialDate }: { initialDate: string }) {
     <header className="monthly-planning-top">
       <BackToSchedule date={activeDate} />
       <div><span>VISÃO DE PLANEJAMENTO</span><h1>Planejamento mensal</h1><p>Projeção do efetivo disponível sem contar hora extra.</p></div>
-      <div className="monthly-planning-actions"><label>Mês<input type="month" value={month} onChange={(event) => setMonth(event.target.value)} /></label><button type="button" onClick={() => void load(month)} disabled={loading}>{loading ? "Atualizando…" : "Atualizar"}</button><a className="monthly-planning-print-link" href={printHref} target="_blank" rel="noreferrer">PDF panorama</a></div>
+      <div className="monthly-planning-actions"><label>Mês<input type="month" value={month} onChange={(event) => setMonth(event.target.value)} /></label><button type="button" onClick={() => void load(month, simulationEvents, selectedDate)} disabled={loading}>{loading ? "Atualizando…" : "Atualizar"}</button><a className="monthly-planning-print-link" href={printHref} target="_blank" rel="noreferrer">PDF panorama</a></div>
     </header>
     <ScheduleNav date={activeDate} active="/planejamento" />
-    {error && <section className="planning-error" role="alert"><b>{error}</b><button type="button" onClick={() => void load(month)}>Tentar novamente</button></section>}
+    {error && <section className="planning-error" role="alert"><b>{error}</b><button type="button" onClick={() => void load(month, simulationEvents, selectedDate)}>Tentar novamente</button></section>}
     {data && <>
       <section className="planning-heading"><div><small>PANORAMA DO MÊS</small><h2>{formatMonth(data.month)}</h2><p>Os dias são calculados pelos padrões D1/D2/N1/N2, escala semanal e afastamentos já lançados.</p></div><span className={`planning-source ${data.simulation?.active ? "simulation" : ""}`}>{data.simulation?.active ? "Simulação ativa · não publicada" : data.days.some((day) => day.source.includes("escala existente")) ? "Há dias com escala ajustada" : "Projeção pelo padrão"}</span></section>
-      <PlanningSimulationPanel key={data.month} data={data} baseline={baselineData} events={simulationEvents} onApply={(next) => { setSimulationEvents(next); void load(month, next); }} onClear={() => { setSimulationEvents([]); void load(month, []); }} loading={loading} />
+      <PlanningSimulationPanel key={data.month} data={data} baseline={baselineData} events={simulationEvents} onApply={(next) => { setSimulationEvents(next); void load(month, next, selectedDate); }} onClear={() => { setSimulationEvents([]); void load(month, [], selectedDate); }} loading={loading} />
       <PlanningSummary days={data.days} summary={data.summary} baseline={data.simulation?.active ? baselineData?.summary : null} />
       {priorityDays.length > 0 && <section className="planning-priority" aria-label="Dias prioritários para conferência"><header><div><small>ATENÇÃO OPERACIONAL</small><b>Prioridade de conferência</b></div><span>Ordenado por furos, afastamentos e FA</span></header><div className="planning-priority-list">{priorityDays.map((day) => { const holes = day.day.holes + day.night.holes; const away = day.day.away + day.night.away; return <button type="button" key={day.date} className={day.status} onClick={() => selectPlanningDay(day.date)}><span><b>{formatDay(day.date)}</b><small>{dayNames[Number(day.weekday)]} · {day.pattern.day}/{day.pattern.night}</small></span><strong>{day.status === "critical" ? "Furo / déficit" : "Atenção"}</strong><em>{holes ? `${holes} furo${holes === 1 ? "" : "s"}` : `${away} impacto${away === 1 ? "" : "s"}`}</em></button>; })}</div></section>}
       <section className="planning-controls" aria-label="Filtros do planejamento"><div className="planning-filter-group"><span>Mostrar</span>{([['all', "Todos"], ['critical', "Críticos"], ['attention', "Atenção"], ['affected', "Com impacto"], ['day', "Diurno"], ['night', "Noturno"]] as const).map(([key, label]) => <button type="button" className={filter === key ? "active" : ""} aria-pressed={filter === key} key={key} onClick={() => setFilter(key)}>{label}</button>)}</div><div className="planning-legend"><span><i className="ok" /> Cobertura</span><span><i className="attention" /> Atenção</span><span><i className="critical" /> Déficit</span><span><i className="fa" /> FA</span></div></section>
       <section className="planning-calendar" aria-label={`Dias do planejamento de ${formatMonth(data.month)}`}>
-        {visibleDays.map((day) => <PlanningDayCard key={day.date} day={day} selected={day.date === selected?.date} onSelect={() => setSelectedDate(day.date)} />)}
+        {visibleDays.map((day) => <PlanningDayCard key={day.date} day={day} selected={day.date === selected?.date} onSelect={() => selectPlanningDay(day.date)} />)}
         {!visibleDays.length && <div className="planning-empty"><b>Nenhum dia corresponde ao filtro.</b><button type="button" onClick={() => setFilter("all")}>Mostrar todos</button></div>}
       </section>
-      {selected && <PlanningDayDetail day={selected} resourceFilter={resourceFilter} setResourceFilter={setResourceFilter} />}
+      {selected && (data.detailDate === selected.date ? <PlanningDayDetail day={selected} resourceFilter={resourceFilter} setResourceFilter={setResourceFilter} /> : <section id="planning-day-detail" className="planning-detail-loading" role="status"><span className="route-transition-spinner" aria-hidden="true"/><b>Carregando os recursos de {formatDay(selected.date)}…</b><small>O panorama mensal continua disponível acima.</small></section>)}
     </>}
   </main>;
 }

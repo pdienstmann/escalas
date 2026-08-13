@@ -125,6 +125,22 @@ test("management modules request only their own administrative dataset", () => {
   assert.match(api, /needs\("cadastros"\) \? ensureSections\(\)/);
 });
 
+test("monthly planning sends compact days and loads only the selected detail", () => {
+  const api = readFileSync(resolve("app/api/planning/route.ts"), "utf8");
+  const planning = readFileSync(resolve("app/monthly-planning.tsx"), "utf8");
+  const print = readFileSync(resolve("app/monthly-planning-print.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/monthly-planning.css"), "utf8");
+  assert.match(api, /requestedDetail === "all"/);
+  assert.match(api, /day: \{ \.\.\.\(day\.day as Row\), sections: \[\] \}/);
+  assert.match(api, /detailDate: detailDate === "all" \? null : detailDate/);
+  assert.match(planning, /const loadSequence = useRef\(0\)/);
+  assert.match(planning, /sequence !== loadSequence\.current/);
+  assert.match(planning, /data\?\.detailDate !== date/);
+  assert.match(planning, /planning-detail-loading/);
+  assert.match(print, /detail=all/);
+  assert.match(styles, /\.planning-detail-loading/);
+});
+
 test("every operational module shares date-preserving navigation with discreet feedback", () => {
   const navigation = readFileSync(resolve("app/schedule-nav.tsx"), "utf8");
   const management = readFileSync(resolve("app/gestao-client.tsx"), "utf8");

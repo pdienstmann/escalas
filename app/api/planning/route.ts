@@ -141,9 +141,16 @@ function parseScenario(request: Request, bounds: ReturnType<typeof monthBounds>)
 
 export async function GET(request: Request) {
   if (!permitted(request)) return Response.json({ error: "Não autorizado" }, { status: 401 });
-  const requested = new URL(request.url).searchParams.get("month") || new Date().toISOString().slice(0, 7);
+  const requestUrl = new URL(request.url);
+  const requested = requestUrl.searchParams.get("month") || new Date().toISOString().slice(0, 7);
   if (!monthPattern.test(requested)) return Response.json({ error: "Mês inválido." }, { status: 400 });
   const bounds = monthBounds(requested);
+  const requestedDetail = requestUrl.searchParams.get("detail");
+  const detailDate = requestedDetail === "all"
+    ? "all"
+    : requestedDetail && /^\d{4}-\d{2}-\d{2}$/.test(requestedDetail) && requestedDetail >= bounds.start && requestedDetail < bounds.end
+      ? requestedDetail
+      : null;
   const scenario = parseScenario(request, bounds);
   await ensurePatterns(env.DB);
   await ensureOperationalGroups(env.DB);
@@ -427,5 +434,13 @@ export async function GET(request: Request) {
       fleet: [...fleetByType.values()].sort((left, right) => left.type.localeCompare(right.type)),
     });
   }
-  return Response.json({ month: requested, anchorDate: anchor, days, catalog: { guards: guards.results.map(({ id, name, registration, platoon }) => ({ id, name, registration, platoon })), vehicles: catalogVehicles.results }, simulation: { active: scenarioActive, events: effectiveScenario }, summary: { days: bounds.days, totalExpected, totalAvailable, totalAway, totalHoles, criticalDays, attentionDays, absenceTotals, overtimeNeeded: totalHoles }, generatedAt: new Date().toISOString() }, { headers: { "cache-control": "no-store" } });
+  const responseDays = detailDate === "all" ? days : days.map((day) => {
+    if (detailDate && String(day.date) === detailDate) return day;
+    return {
+      ...day,
+      day: { ...(day.day as Row), sections: [] },
+      night: { ...(day.night as Row), sections: [] },
+    };
+  });
+  return Response.json({ month: requested, anchorDate: anchor, detailDate: detailDate === "all" ? null : detailDate, days: responseDays, catalog: { guards: guards.results.map(({ id, name, registration, platoon }) => ({ id, name, registration, platoon })), vehicles: catalogVehicles.results }, simulation: { active: scenarioActive, events: effectiveScenario }, summary: { days: bounds.days, totalExpected, totalAvailable, totalAway, totalHoles, criticalDays, attentionDays, absenceTotals, overtimeNeeded: totalHoles }, generatedAt: new Date().toISOString() }, { headers: { "cache-control": "no-store" } });
 }
