@@ -111,7 +111,7 @@ Este arquivo transforma a revisao de UX em trabalho executavel. Nenhuma etapa de
 ### Pendente
 
 - Auditoria geral paginada no servidor; falta paginar o historico de HE e incluir intervalo de datas, usuario e selecao multipla de sugestoes.
-- Fazer validacao abrir o problema diretamente na celula; separar validacao diurna/noturna.
+- A validacao ja separa pendencias diurnas e noturnas. Ainda falta abrir cada problema diretamente na celula correspondente.
 - Testar PDF com escala real de mais de 200 GMs em Chrome e Edge e ajustar quebras A4.
 
 ## 9. Responsividade e qualidade

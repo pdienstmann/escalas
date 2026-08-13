@@ -1630,3 +1630,14 @@ test("movement records support fast active, future and completed filters without
   assert.match(dashboard, /movementDateFrom/);
   assert.match(styles, /\.movement-quick-scopes/);
 });
+
+test("validation separates day and night issues before publication", () => {
+  const validation = readFileSync(resolve("app/validate-schedule.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/validation.css"), "utf8");
+  assert.match(validation, /issuePeriod\(issue\)/);
+  assert.match(validation, /Pendências do diurno/);
+  assert.match(validation, /Pendências do noturno/);
+  assert.match(validation, /☀ Diurno/);
+  assert.match(validation, /☾ Noturno/);
+  assert.match(styles, /\.validation-period-tabs/);
+});

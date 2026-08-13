@@ -155,6 +155,7 @@
   text-decoration: none;
   white-space: nowrap;
 }
+.validation-period-tabs{display:flex;gap:8px;margin:14px 0;overflow:auto}.validation-period-tabs button{display:flex;align-items:center;gap:6px;flex:0 0 auto;padding:8px 10px;border:1px solid #cbd9e6;border-radius:7px;background:#fff;color:#456178;font-weight:800}.validation-period-tabs button b{display:grid;place-items:center;min-width:20px;height:20px;border-radius:10px;background:#e3edf6;color:#075cac;font-size:11px}.validation-period-tabs button small{color:#6f8396;font-size:9px}.validation-period-tabs button.active{border-color:#0871e1;background:#eaf4ff;color:#075cac;box-shadow:inset 0 0 0 1px #0871e1}.validation-period-tabs button.active b{background:#0871e1;color:#fff}@media(max-width:700px){.validation-period-tabs{margin:12px 0}.validation-period-tabs button{font-size:11px}}
 .issue-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);

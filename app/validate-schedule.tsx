@@ -57,6 +57,7 @@ export function ValidateSchedule() {
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(true);
   const [visibleIssues, setVisibleIssues] = useState(40);
+  const [period, setPeriod] = useState<"all" | "day" | "night">("all");
 
   useEffect(() => {
     // A new date starts in an explicit checking state; the asynchronous
@@ -110,7 +111,10 @@ export function ValidateSchedule() {
   const currentData = data?.date === date ? data : null;
   const criticalIssues = useMemo(() => issues.filter((issue) => issue.severity === "critical"), [issues]);
   const warningIssues = useMemo(() => issues.filter((issue) => issue.severity === "warning"), [issues]);
-  const shownIssues = issues.slice(0, visibleIssues);
+  const issuesForPeriod = issues.filter((issue) => period === "all" || issuePeriod(issue) === period);
+  const dayIssues = issues.filter((issue) => issuePeriod(issue) === "day");
+  const nightIssues = issues.filter((issue) => issuePeriod(issue) === "night");
+  const shownIssues = issuesForPeriod.slice(0, visibleIssues);
 
   if (!currentData) {
     return (
@@ -151,6 +155,11 @@ export function ValidateSchedule() {
         <article className={checking ? "" : criticalIssues.length ? "bad" : "good"}><b>{checking ? "…" : criticalIssues.length}</b><span>pendências críticas</span><small>{checking ? "conferindo a escala" : "bloqueiam a publicação"}</small></article>
         <article className={checking ? "" : warningIssues.length ? "warning" : "good"}><b>{checking ? "…" : warningIssues.length}</b><span>alertas</span><small>{checking ? "conferindo a escala" : "exigem conferência"}</small></article>
       </div>
+      <nav className="validation-period-tabs" aria-label="Filtrar pendências por período">
+        <button type="button" className={period === "all" ? "active" : ""} onClick={() => { setPeriod("all"); setVisibleIssues(40); }}>Todas <b>{issues.length}</b></button>
+        <button type="button" className={period === "day" ? "active" : ""} onClick={() => { setPeriod("day"); setVisibleIssues(40); }}>☀ Diurno <b>{dayIssues.length}</b><small>2º e 3º</small></button>
+        <button type="button" className={period === "night" ? "active" : ""} onClick={() => { setPeriod("night"); setVisibleIssues(40); }}>☾ Noturno <b>{nightIssues.length}</b><small>4º e 1º</small></button>
+      </nav>
       <p className="validation-preview-note">Conferência automática atualizada ao abrir esta página. O botão abaixo repete a validação antes de publicar.</p>
       <section>
         <h2>Verificações automáticas</h2>
@@ -169,7 +178,7 @@ export function ValidateSchedule() {
       {issues.length > 0 && (
         <section className="validation-issues">
           <header>
-            <div><small>PENDÊNCIAS ENCONTRADAS</small><h2>O que precisa ser conferido</h2></div>
+            <div><small>PENDÊNCIAS ENCONTRADAS</small><h2>{period === "all" ? "O que precisa ser conferido" : period === "day" ? "Pendências do diurno" : "Pendências do noturno"}</h2></div>
             <Link href={hrefFor("/escala")}>Abrir escala</Link>
           </header>
           <div className="issue-grid">
@@ -181,7 +190,7 @@ export function ValidateSchedule() {
               </article>
             ))}
           </div>
-          {visibleIssues < issues.length && <button type="button" className="validation-show-more" onClick={() => setVisibleIssues((value) => value + 40)}>Mostrar mais pendências ({issues.length - visibleIssues} restantes)</button>}
+          {visibleIssues < issuesForPeriod.length && <button type="button" className="validation-show-more" onClick={() => setVisibleIssues((value) => value + 40)}>Mostrar mais pendências ({issuesForPeriod.length - visibleIssues} restantes)</button>}
         </section>
       )}
       <button className="publish-button" disabled={busy} onClick={() => void publish()}>
@@ -189,4 +198,8 @@ export function ValidateSchedule() {
       </button>
     </main>
   );
+}
+
+function issuePeriod(issue: ValidationIssue): "day" | "night" | "other" {
+  return ["2", "3"].includes(String(issue.shift || "")) ? "day" : ["1", "4"].includes(String(issue.shift || "")) ? "night" : "other";
 }
