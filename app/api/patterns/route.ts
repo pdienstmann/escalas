@@ -73,6 +73,21 @@ export async function GET(request: Request) {
         ORDER BY p.period,p.parity,g.sort_order,g.name,m.resource_kind,m.resource_id`).all(),
     ],
   );
+  const currentScheduleRow = await env.DB.prepare("SELECT id,status FROM schedules WHERE date=? LIMIT 1").bind(previewDate).first<{ id: number; status: string }>();
+  let currentSchedule: { exists: boolean; id?: number; status?: string | null; assignmentCount: number; protectedCount: number; appliedDayCode?: string | null; appliedNightCode?: string | null; protectedAssignments?: Record<string, unknown>[] } = { exists: false, assignmentCount: 0, protectedCount: 0, protectedAssignments: [] };
+  if (currentScheduleRow) {
+    const [assignmentCounts, applied, protectedAssignments] = await Promise.all([
+      env.DB.prepare(`SELECT COUNT(*) assignment_count,
+        SUM(CASE WHEN COALESCE(status,'normal')!='normal' OR COALESCE(work_kind,'shift')!='shift' OR request_ref IS NOT NULL OR COALESCE(is_reassigned,0)=1 THEN 1 ELSE 0 END) protected_count
+        FROM assignments WHERE schedule_id=?`).bind(currentScheduleRow.id).first<{ assignment_count: number | string; protected_count: number | string }>(),
+      env.DB.prepare(`SELECT dp.code day_code,np.code night_code FROM schedule_patterns sp JOIN shift_patterns dp ON dp.id=sp.day_pattern_id JOIN shift_patterns np ON np.id=sp.night_pattern_id WHERE sp.schedule_id=?`).bind(currentScheduleRow.id).first<{ day_code: string; night_code: string }>(),
+      env.DB.prepare(`SELECT a.id,a.shift,a.starts_at,a.ends_at,a.status,a.work_kind,a.request_ref,g.name guard_name,p.name post_name,v.prefix vehicle_prefix
+        FROM assignments a JOIN guards g ON g.id=a.guard_id LEFT JOIN posts p ON p.id=a.post_id LEFT JOIN vehicles v ON v.id=a.vehicle_id
+        WHERE a.schedule_id=? AND (COALESCE(a.status,'normal')!='normal' OR COALESCE(a.work_kind,'shift')!='shift' OR a.request_ref IS NOT NULL OR COALESCE(a.is_reassigned,0)=1)
+        ORDER BY a.shift,a.starts_at,g.name LIMIT 80`).bind(currentScheduleRow.id).all<Record<string, unknown>>(),
+    ]);
+    currentSchedule = { exists: true, id: currentScheduleRow.id, status: currentScheduleRow.status, assignmentCount: Number(assignmentCounts?.assignment_count || 0), protectedCount: Number(assignmentCounts?.protected_count || 0), appliedDayCode: applied?.day_code || null, appliedNightCode: applied?.night_code || null, protectedAssignments: protectedAssignments.results };
+  }
   return Response.json({
     patterns: patterns.results,
     slots: slots.results,
@@ -84,6 +99,7 @@ export async function GET(request: Request) {
     operationalGroups: operationalGroups.results,
     operationalGroupMembers: operationalGroupMembers.results,
     patternOperationalGroupMembers: patternOperationalGroupMembers.results,
+    currentSchedule,
   });
 }
 export async function POST(request: Request) {
@@ -103,8 +119,8 @@ export async function POST(request: Request) {
       )
         .bind(body.anchorDate)
         .run();
-      await writeAudit(request,{action:"update",entityType:"pattern_config",entityId:"anchor",summary:`Alterou a data-base dos padrões para ${body.anchorDate}`,before,after:{anchor_date:body.anchorDate},undoable:true});
-      return Response.json({ ok: true, message: "Data-base atualizada." });
+      const auditId = await writeAudit(request,{action:"update",entityType:"pattern_config",entityId:"anchor",summary:`Alterou a data-base dos padrões para ${body.anchorDate}`,before,after:{anchor_date:body.anchorDate},undoable:true});
+      return Response.json({ ok: true, message: "Data-base atualizada.", auditId, undoable: true });
     }
     if (body.action === "operational_group_create") {
       const name = String(body.name || "").trim().replace(/\s+/g, " ");
@@ -239,8 +255,8 @@ export async function POST(request: Request) {
         .bind(body.patternId || null, guardId, d.postId, d.vehicleId, body.shift || null, body.role, body.id)
         .run();
       const after = await env.DB.prepare("SELECT * FROM pattern_slots WHERE id=?").bind(body.id).first();
-      await writeAudit(request,{action:"update",entityType:"pattern_slot",entityId:Number(body.id),summary:"Alterou uma posição do padrão 12x36",before,after:after as Record<string,unknown>,undoable:true});
-      return Response.json({ ok: true });
+      const auditId = await writeAudit(request,{action:"update",entityType:"pattern_slot",entityId:Number(body.id),summary:"Alterou uma posição do padrão 12x36",before,after:after as Record<string,unknown>,undoable:true});
+      return Response.json({ ok: true, auditId, undoable: true });
     }
     if (body.action === "add_slot") {
       const d = destination(body);
@@ -257,8 +273,8 @@ export async function POST(request: Request) {
         .bind(body.patternId, guardId, d.postId, d.vehicleId, body.shift || null, body.role)
         .run();
       const after = await env.DB.prepare("SELECT * FROM pattern_slots WHERE id=?").bind(created.meta.last_row_id).first();
-      await writeAudit(request,{action:"create",entityType:"pattern_slot",entityId:Number(created.meta.last_row_id),summary:"Adicionou uma posição ao padrão 12x36",after:after as Record<string,unknown>,undoable:true});
-      return Response.json({ ok: true });
+      const auditId = await writeAudit(request,{action:"create",entityType:"pattern_slot",entityId:Number(created.meta.last_row_id),summary:"Adicionou uma posição ao padrão 12x36",after:after as Record<string,unknown>,undoable:true});
+      return Response.json({ ok: true, auditId, undoable: true });
     }
     if (body.action === "add_post") {
       const name = String(body.name || "").trim();
@@ -305,8 +321,8 @@ export async function POST(request: Request) {
       await env.DB.prepare("DELETE FROM pattern_slots WHERE id=?")
         .bind(body.id)
         .run();
-      await writeAudit(request,{action:"delete",entityType:"pattern_slot",entityId:Number(body.id),summary:"Removeu uma posição do padrão 12x36",before,undoable:true});
-      return Response.json({ ok: true });
+      const auditId = await writeAudit(request,{action:"delete",entityType:"pattern_slot",entityId:Number(body.id),summary:"Removeu uma posição do padrão 12x36",before,undoable:true});
+      return Response.json({ ok: true, auditId, undoable: true });
     }
     if(body.action==="weekly_save") {
       const d=destination(body),id=Number(body.id||0),guardId=Number(body.guardId);
@@ -336,6 +352,13 @@ export async function POST(request: Request) {
           { status: 400 },
         );
       const date = String(body.date);
+      const existingSchedule = await env.DB.prepare("SELECT id,status FROM schedules WHERE date=? LIMIT 1").bind(date).first<{ id: number; status: string }>();
+      if (existingSchedule) {
+        const existingCount = await env.DB.prepare("SELECT COUNT(*) total FROM assignments WHERE schedule_id=?").bind(existingSchedule.id).first<{ total: number | string }>();
+        if (Number(existingCount?.total || 0) > 0 && body.acknowledgeManual !== true) {
+          return Response.json({ error: "Esta data já possui uma escala. Revise a prévia e confirme explicitamente a substituição.", requiresReview: true, scheduleId: existingSchedule.id, status: existingSchedule.status, assignmentCount: Number(existingCount?.total || 0) }, { status: 409 });
+        }
+      }
       await env.DB.prepare(
         "INSERT OR IGNORE INTO schedules (date,status) VALUES (?,'draft')",
       )

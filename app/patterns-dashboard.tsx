@@ -29,6 +29,16 @@ type Data = {
   operationalGroups: Rec[];
   operationalGroupMembers: Rec[];
   patternOperationalGroupMembers: Rec[];
+  currentSchedule?: {
+    exists: boolean;
+    id?: number;
+    status?: string | null;
+    assignmentCount: number;
+    protectedCount: number;
+    appliedDayCode?: string | null;
+    appliedNightCode?: string | null;
+    protectedAssignments?: Rec[];
+  };
 };
 type Resource = {
   key: string;
@@ -79,6 +89,9 @@ export function PatternsDashboard() {
   const [showEmpty, setShowEmpty] = useState(false);
   const [compare, setCompare] = useState(true);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [periodFocus, setPeriodFocus] = useState<"day" | "night">("day");
+  const [lastUndo, setLastUndo] = useState<{ id: number; label: string } | null>(null);
+  const [undoBusy, setUndoBusy] = useState(false);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -127,9 +140,13 @@ export function PatternsDashboard() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       });
-      const json = (await response.json()) as { error?: string; message?: string };
+      const json = (await response.json()) as { error?: string; message?: string; auditId?: number; undoable?: boolean };
       setMessage(response.ok ? json.message || "Padrão atualizado." : json.error || "Não foi possível salvar.");
-      if (response.ok) await load(true);
+      if (response.ok) {
+        if (json.undoable && json.auditId) setLastUndo({ id: Number(json.auditId), label: "Desfazer última alteração" });
+        else if (body.action !== "apply") setLastUndo(null);
+        await load(true);
+      }
       return response.ok;
     } catch {
       setMessage("A alteração não foi salva. Tente novamente.");
@@ -199,9 +216,31 @@ export function PatternsDashboard() {
     }
   }
 
-  async function applyPreview() {
-    if (await action({ action: "apply", date, dayCode, nightCode, confirm: true })) {
+  async function applyPreview(acknowledgeManual = false) {
+    if (await action({ action: "apply", date, dayCode, nightCode, confirm: true, acknowledgeManual })) {
       setPreviewOpen(false);
+    }
+  }
+
+  async function undoLastPatternChange() {
+    if (!lastUndo || undoBusy) return;
+    setUndoBusy(true);
+    try {
+      const response = await fetch("/api/history", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "undo", id: lastUndo.id }),
+      });
+      const json = (await response.json()) as { error?: string; message?: string };
+      setMessage(response.ok ? json.message || "Alteração desfeita." : json.error || "Não foi possível desfazer.");
+      if (response.ok) {
+        setLastUndo(null);
+        await load(true);
+      }
+    } catch {
+      setMessage("Não foi possível desfazer a alteração. Tente novamente.");
+    } finally {
+      setUndoBusy(false);
     }
   }
 
@@ -218,10 +257,13 @@ export function PatternsDashboard() {
     );
   }
 
-  const current = data.patterns.find((pattern) => Number(pattern.id) === selected) || data.patterns[0];
-  const samePeriod = data.patterns
-    .filter((pattern) => pattern.period === current?.period)
+  const periodPatterns = data.patterns
+    .filter((pattern) => pattern.period === periodFocus)
     .sort((a, b) => Number(a.parity) - Number(b.parity));
+  const current = data.patterns.find((pattern) => Number(pattern.id) === selected && pattern.period === periodFocus) || periodPatterns[0] || data.patterns[0];
+  const samePeriod = periodPatterns.length
+    ? periodPatterns
+    : data.patterns.filter((pattern) => pattern.period === current?.period).sort((a, b) => Number(a.parity) - Number(b.parity));
   const visiblePatterns = compare ? samePeriod : [current];
   const assignedShiftGuardIds = new Set(data.slots.map((slot) => Number(slot.guard_id)));
   const unassignedGuards = shiftGuards(data.guards).filter(
@@ -261,7 +303,7 @@ export function PatternsDashboard() {
         <button disabled={busy} onClick={() => setPreviewOpen(true)}>Pré-visualizar e aplicar</button>
       </section>
 
-      {message && <p className="pattern-message" role="status">{message} <Link href={hrefFor("/")}>Abrir escala →</Link></p>}
+      {message && <p className="pattern-message" role="status">{message}{lastUndo && <button type="button" className="pattern-undo" disabled={undoBusy} onClick={() => void undoLastPatternChange()}>{undoBusy ? "Desfazendo…" : "Desfazer"}</button>} <Link href={hrefFor("/")}>Abrir escala →</Link></p>}
 
       <nav className="pattern-workspaces" aria-label="Tipo de padrão">
         <button className={workspace === "shift" ? "active" : ""} onClick={() => setWorkspace("shift")}><b>Padrões 12x36</b><small>Equipes D1, D2, N1 e N2</small></button>
@@ -274,8 +316,12 @@ export function PatternsDashboard() {
             <div><span>PRIORIDADE DA ESCALA</span><h2>Padrões convencionais 12x36</h2><p>Edite aqui a composição-base que será aplicada aos quatro turnos da escala diária.</p></div>
             <strong>D1 · D2 · N1 · N2</strong>
           </header>
-          <section className="pattern-tabs" aria-label="Equipes-base">
-            {data.patterns.map((pattern) => <button className={selected === Number(pattern.id) ? "active" : ""} key={String(pattern.id)} onClick={() => { setSelected(Number(pattern.id)); setMemberEditing(null); setAddDestination(""); }}><span className={`pattern-code ${pattern.period}`}>{pattern.code}</span><b>{pattern.name}</b><small>{pattern.member_count} posições</small></button>)}
+          <section className="pattern-period-switcher" aria-label="Período dos padrões">
+            <div><span>VISUALIZAÇÃO DA EQUIPE</span><b>{periodFocus === "day" ? "Diurno · D1 e D2" : "Noturno · N1 e N2"}</b><small>Escolha o período para comparar os dois padrões lado a lado.</small></div>
+            <div className="pattern-period-buttons"><button type="button" className={periodFocus === "day" ? "active day" : "day"} onClick={() => { setPeriodFocus("day"); const first = data.patterns.find((pattern) => pattern.period === "day"); if (first) setSelected(Number(first.id)); setMemberEditing(null); }}>☀ Diurno <small>D1 × D2</small></button><button type="button" className={periodFocus === "night" ? "active night" : "night"} onClick={() => { setPeriodFocus("night"); const first = data.patterns.find((pattern) => pattern.period === "night"); if (first) setSelected(Number(first.id)); setMemberEditing(null); }}>☾ Noturno <small>N1 × N2</small></button></div>
+          </section>
+          <section className="pattern-tabs" aria-label={`Equipes-base ${periodFocus === "day" ? "diurnas" : "noturnas"}`}>
+            {periodPatterns.map((pattern) => <button className={selected === Number(pattern.id) ? "active" : ""} key={String(pattern.id)} onClick={() => { setSelected(Number(pattern.id)); setPeriodFocus(pattern.period === "night" ? "night" : "day"); setMemberEditing(null); setAddDestination(""); }}><span className={`pattern-code ${pattern.period}`}>{pattern.code}</span><b>{pattern.name}</b><small>{pattern.member_count} posições · edição ideal</small></button>)}
           </section>
 
           <section className="pattern-editor pattern-ideal-editor">
@@ -454,6 +500,15 @@ function PatternGroupsPanel({ data, busy, onAction }: { data: Data; busy: boolea
          <label>Padrão que receberá o grupamento<select value={activePatternId} onChange={(event) => { const next = data.patterns.find((pattern) => String(pattern.id) === event.target.value); setPatternId(event.target.value); setGroupStartAt(defaultOperationalGroupStart(next?.period)); }}>{data.patterns.map((pattern) => <option key={String(pattern.id)} value={String(pattern.id)}>{pattern.code} · {pattern.name}</option>)}</select></label>
         <p>Vínculos feitos no padrão selecionado aparecem automaticamente nos dias em que ele for aplicado. O vínculo global serve apenas como identificação comum a todos os padrões.</p>
       </div>
+      <section className="pattern-group-board" aria-label="Grade de grupamentos do padrão">
+        <header><div><span>VISÃO DA ESCALA IDEAL</span><b>{selectedPattern?.code || "Padrão"} · grupamentos e equipes</b><small>Destino, VTR, equipe e jornada aparecem juntos para conferência rápida.</small></div><strong>{patternMembers.filter((member) => String(member.resource_kind) === "guard").length} GMs</strong></header>
+        <div className="pattern-group-board-grid">{data.operationalGroups.map((group) => {
+          const members = patternMembers.filter((member) => Number(member.group_id) === Number(group.id));
+          const teams = Array.from(members.reduce((map, member) => { const team = String(member.team_label || "EQUIPE GERAL").trim().toUpperCase() || "EQUIPE GERAL"; const list = map.get(team) || []; list.push(member); map.set(team, list); return map; }, new Map<string, Rec[]>()).entries());
+          if (!members.length) return null;
+          return <article key={String(group.id)} className="pattern-group-board-card" style={{ borderLeftColor: String(group.color || "#1769aa") }}><header><b>{group.short_name || group.name}</b><span>{members.length} vínculo(s)</span></header>{teams.map(([team, teamMembers]) => <div className="pattern-group-board-team" key={team}><b>{team}</b>{teamMembers.map((member) => <div className="pattern-group-board-member" key={String(member.id)}><strong>{resourceLabel(member)}</strong><small>{member.resource_kind === "guard" ? "GM" : member.resource_kind === "post" ? "Posto" : "Viatura"}</small></div>)}</div>)}</article>;
+        })}</div>
+      </section>
       <div className="pattern-groups-forms">
         <form className="pattern-group-create" onSubmit={(event) => { event.preventDefault(); void onAction({ ...Object.fromEntries(new FormData(event.currentTarget)), action: "operational_group_create" }); }}>
           <h3>Novo grupamento</h3>
@@ -524,7 +579,7 @@ function PatternResourceForm({ kind, defaultGroup, busy, onCancel, onSubmit }: {
   </form>;
 }
 
-function PatternPreview({ data, date, dayCode, nightCode, busy, onClose, onApply }: { data: Data; date: string; dayCode: string; nightCode: string; busy: boolean; onClose: () => void; onApply: () => void }) {
+function PatternPreviewLegacy({ data, date, dayCode, nightCode, busy, onClose, onApply }: { data: Data; date: string; dayCode: string; nightCode: string; busy: boolean; onClose: () => void; onApply: (acknowledgeManual?: boolean) => void }) {
   const dayPattern = data.patterns.find((pattern) => pattern.code === dayCode);
   const nightPattern = data.patterns.find((pattern) => pattern.code === nightCode);
   const daySlots = data.slots.filter((slot) => Number(slot.pattern_id) === Number(dayPattern?.id));
@@ -533,6 +588,35 @@ function PatternPreview({ data, date, dayCode, nightCode, busy, onClose, onApply
   const issues = [...validatePattern(daySlots, data.vehicles), ...validatePattern(nightSlots, data.vehicles)];
   const formatted = new Date(`${date}T12:00:00`).toLocaleDateString("pt-BR");
   return <AppDialog className="pattern-preview-backdrop" onClose={onClose}><section className="pattern-preview" role="dialog" aria-modal="true" aria-labelledby="pattern-preview-title" tabIndex={-1}><header><div><small>PRÉVIA ANTES DE SUBSTITUIR A ESCALA</small><h2 id="pattern-preview-title">Escala de {formatted}</h2><p>{dayCode} no diurno · {nightCode} no noturno · {data.weeklySlots.length} posições semanais também serão consideradas</p></div><button onClick={onClose} aria-label="Fechar prévia">×</button></header><div className="pattern-preview-summary"><span><b>{daySlots.length}</b> diurno</span><span><b>{nightSlots.length}</b> noturno</span><span className={issues.length ? "warn" : "ok"}><b>{issues.length}</b> pendências</span></div><div className="pattern-preview-table"><div className="preview-row preview-head"><b>Posto / VTR</b><b>2º · 07–13</b><b>3º · 13–19</b><b>4º · 19–01</b><b>1º · 01–07</b></div>{allResources.map((resource) => { const day = daySlots.filter((slot) => resourceKey(slot) === resource.key); const night = nightSlots.filter((slot) => resourceKey(slot) === resource.key); return <div className="preview-row" key={resource.key}><div><b>{resource.label}</b><small>{resource.detail}</small></div><PreviewMembers members={membersForShift(day, "2")} /><PreviewMembers members={membersForShift(day, "3")} /><PreviewMembers members={membersForShift(night, "4")} /><PreviewMembers members={membersForShift(night, "1")} /></div>; })}</div><footer><p>{issues.length ? "Existem pendências visuais. Você pode voltar e corrigi-las antes de aplicar." : "A composição está pronta para gerar a escala diária."}</p><button onClick={onClose}>Voltar ao editor</button><button className="save" disabled={busy} onClick={onApply}>{busy ? "Aplicando…" : `Aplicar ${dayCode} + ${nightCode}`}</button></footer></section></AppDialog>;
+}
+
+function PatternPreviewDiff({ current }: { current?: Data["currentSchedule"] }) {
+  const rows = current?.protectedAssignments || [];
+  if (!rows.length) return null;
+  return <details className="pattern-preview-diff"><summary>Ver {rows.length} ajuste(s) que exigem conferência</summary><div>{rows.map((row) => <span key={String(row.id)}><b>{row.guard_name}</b><small>{row.post_name || row.vehicle_prefix || "À disposição"} · {row.starts_at ? String(row.starts_at).slice(11, 16) : "horário"}–{row.ends_at ? String(row.ends_at).slice(11, 16) : ""}{row.request_ref ? ` · Req. ${row.request_ref}` : ""}</small></span>)}</div></details>;
+}
+
+function PatternPreview({ data, date, dayCode, nightCode, busy, onClose, onApply }: { data: Data; date: string; dayCode: string; nightCode: string; busy: boolean; onClose: () => void; onApply: (acknowledgeManual?: boolean) => void }) {
+  const [acknowledged, setAcknowledged] = useState(false);
+  if (!data.patterns.length) return <PatternPreviewLegacy data={data} date={date} dayCode={dayCode} nightCode={nightCode} busy={busy} onClose={onClose} onApply={onApply} />;
+  const dayPattern = data.patterns.find((pattern) => pattern.code === dayCode);
+  const nightPattern = data.patterns.find((pattern) => pattern.code === nightCode);
+  const daySlots = data.slots.filter((slot) => Number(slot.pattern_id) === Number(dayPattern?.id));
+  const nightSlots = data.slots.filter((slot) => Number(slot.pattern_id) === Number(nightPattern?.id));
+  const allResources = buildResources(data, [...daySlots, ...nightSlots], "", false);
+  const issues = [...validatePattern(daySlots, data.vehicles), ...validatePattern(nightSlots, data.vehicles)];
+  const current = data.currentSchedule;
+  const requiresAcknowledgement = Boolean(current?.exists && current.assignmentCount > 0);
+  const expectedPositions = daySlots.length + nightSlots.length;
+  const formatted = new Date(`${date}T12:00:00`).toLocaleDateString("pt-BR");
+  return <AppDialog className="pattern-preview-backdrop" onClose={onClose}><section className="pattern-preview" role="dialog" aria-modal="true" aria-labelledby="pattern-preview-title" tabIndex={-1}>
+    <PatternPreviewDiff current={current} />
+    <header><div><small>PRÉVIA ANTES DE SUBSTITUIR A ESCALA</small><h2 id="pattern-preview-title">Escala de {formatted}</h2><p>{dayCode} no diurno · {nightCode} no noturno · {data.weeklySlots.length} posições semanais também serão consideradas</p></div><button onClick={onClose} aria-label="Fechar prévia">×</button></header>
+    <div className="pattern-preview-summary"><span><b>{daySlots.length}</b> diurno</span><span><b>{nightSlots.length}</b> noturno</span><span className={issues.length ? "warn" : "ok"}><b>{issues.length}</b> pendências</span>{current?.exists && <span className="existing"><b>{current.assignmentCount}</b> posições já na escala</span>}{current?.protectedCount ? <span className="protected"><b>{current.protectedCount}</b> ajustes protegidos</span> : null}</div>
+    {requiresAcknowledgement && <aside className="pattern-preview-warning"><b>Esta data já possui uma escala.</b><span>{current?.status === "published" ? "Ela está publicada. " : ""}O padrão substituirá a composição atual; confira os ajustes destacados antes de confirmar.</span><small>Composição prevista: {expectedPositions} posições · aplicada atualmente: {current?.assignmentCount}.</small></aside>}
+    <div className="pattern-preview-table"><div className="preview-row preview-head"><b>Posto / VTR</b><b>2º · 07–13</b><b>3º · 13–19</b><b>4º · 19–01</b><b>1º · 01–07</b></div>{allResources.map((resource) => { const day = daySlots.filter((slot) => resourceKey(slot) === resource.key); const night = nightSlots.filter((slot) => resourceKey(slot) === resource.key); return <div className="preview-row" key={resource.key}><div><b>{resource.label}</b><small>{resource.detail}</small></div><PreviewMembers members={membersForShift(day, "2")} /><PreviewMembers members={membersForShift(day, "3")} /><PreviewMembers members={membersForShift(night, "4")} /><PreviewMembers members={membersForShift(night, "1")} /></div>; })}</div>
+    <footer><div className="pattern-preview-confirmation">{requiresAcknowledgement ? <label><input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} /> Li e conferi a escala atual e autorizo a substituição explícita pelo padrão.</label> : <small>Nenhuma escala preenchida nesta data; a aplicação poderá ser feita diretamente.</small>}<p>{issues.length ? "Existem pendências visuais. Você pode voltar e corrigi-las antes de aplicar." : "A composição está pronta para gerar a escala diária."}</p></div><button onClick={onClose}>Voltar ao editor</button><button className="save" disabled={busy || (requiresAcknowledgement && !acknowledged)} onClick={() => onApply(acknowledged)}>{busy ? "Aplicando…" : `Aplicar ${dayCode} + ${nightCode}`}</button></footer>
+  </section></AppDialog>;
 }
 
 function WeeklyEditor({ data, busy, onSave, onDelete }: { data: Data; busy: boolean; onSave: (event: FormEvent<HTMLFormElement>, id?: number) => void; onDelete: (slot: Rec) => void }) {

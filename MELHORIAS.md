@@ -88,12 +88,15 @@ Este arquivo transforma a revisao de UX em trabalho executavel. Nenhuma etapa de
 ### Concluido
 
 - D1/D2/N1/N2, comparacao por periodo, arraste, validacao, previa, escala semanal, grupamentos, equipes e operacoes com VTR, sugestoes, confirmacao e PDF.
+- Seletor dedicado de diurno/noturno com D1 x D2 e N1 x N2 lado a lado; o editor mostra somente o par do periodo escolhido.
+- Grade-resumo de grupamentos e equipes com GM, destino, VTR, equipe interna e jornada visiveis sem abrir formularios.
+- Desfazer contextual para data-base e posicoes do padrao, usando o historico auditavel e bloqueando desfazer fora de ordem.
+- Previa consulta a escala existente, mostra quantidade de posicoes e ajustes protegidos e exige confirmacao explicita para substituicao.
 
 ### Pendente
 
-- Mostrar D1/D2 e N1/N2 de modo mais claro, com seletor de periodo e diferencas visuais.
-- Fazer grupamentos parecerem secoes da escala, com destino, VTR, equipe e horario claros.
-- Adicionar desfazer nos padroes e proteger substituicao de escala editada.
+- Revisar a composicao de grupamentos com dados reais e validar a grade em telas estreitas; a estrutura visual e o seletor ja estao implementados.
+- Aplicar a mesma politica de confirmacao explicita a eventuais novos fluxos que substituam operacoes, sem reabrir automaticamente uma operacao confirmada.
 - Permitir editar dados basicos de operacao e mostrar impactos/remanejamentos antes da confirmacao. Concluido para identificacao, responsavel, referencia e orientacoes, sem alterar por engano o periodo, as VTRs ou as vagas.
 
 ## 7. Cadastros

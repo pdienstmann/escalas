@@ -1654,3 +1654,21 @@ test("operational group GM cards keep contextual actions and offer same-group HE
   assert.match(schedule, /onDelete\(actionAssignment, shift\.id\)/);
   assert.match(styles, /\.group-he-suggestions/);
 });
+
+test("pattern editor separates day and night comparison and protects replacement", () => {
+  const dashboard = readFileSync(resolve("app/patterns-dashboard.tsx"), "utf8");
+  const api = readFileSync(resolve("app/api/patterns/route.ts"), "utf8");
+  const styles = readFileSync(resolve("app/patterns-enhanced.css"), "utf8");
+  assert.match(dashboard, /pattern-period-switcher/);
+  assert.match(dashboard, /D1 × D2/);
+  assert.match(dashboard, /N1 × N2/);
+  assert.match(dashboard, /pattern-group-board/);
+  assert.match(dashboard, /pattern-preview-confirmation/);
+  assert.match(dashboard, /\/api\/history/);
+  assert.match(api, /currentSchedule/);
+  assert.match(api, /acknowledgeManual/);
+  assert.match(api, /requiresReview/);
+  assert.match(styles, /\.pattern-period-switcher/);
+  assert.match(styles, /\.pattern-group-board/);
+  assert.match(styles, /\.pattern-preview-warning/);
+});
