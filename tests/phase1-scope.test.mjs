@@ -1268,7 +1268,7 @@ test("publication validation respects FA resources and reports actionable critic
   assert.match(dashboard, /pendências críticas/);
   assert.match(dashboard, /Abrir escala/);
   assert.match(dashboard, /validation-issue/);
-  assert.match(dashboard, /issues\.slice\(0, visibleIssues\)/);
+  assert.match(dashboard, /issuesForPeriod\.slice\(0, visibleIssues\)/);
   assert.match(dashboard, /Mostrar mais pendências/);
   assert.match(dashboard, /hrefFor\("\/escala"\)/);
   assert.match(styles, /validation-severity-summary/);
@@ -1640,4 +1640,17 @@ test("validation separates day and night issues before publication", () => {
   assert.match(validation, /☀ Diurno/);
   assert.match(validation, /☾ Noturno/);
   assert.match(styles, /\.validation-period-tabs/);
+});
+
+test("operational group GM cards keep contextual actions and offer same-group HE suggestions", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/simple-ux.css"), "utf8");
+  assert.match(schedule, /onSuggestHe: \(assignment: Rec, shift: string, member: Rec\)/);
+  assert.match(schedule, /HE do grupamento/);
+  assert.match(schedule, /pick\.groupId/);
+  assert.match(schedule, /integrante do mesmo grupamento em dia\/equipe oposta/);
+  assert.match(schedule, /onAdjust\(actionAssignment, shift\.id\)/);
+  assert.match(schedule, /onQuickStatus\(actionAssignment/);
+  assert.match(schedule, /onDelete\(actionAssignment, shift\.id\)/);
+  assert.match(styles, /\.group-he-suggestions/);
 });

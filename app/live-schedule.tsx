@@ -70,6 +70,7 @@ type Pick = {
   assignment?: Rec;
   manualAdd?: boolean;
   extension?: boolean;
+  groupId?: number;
 };
 type HolePick = {
   kind: "post" | "vehicle";
@@ -111,6 +112,7 @@ type OperationalGroupGridProps = {
   onSwap: (assignment: Rec, shift: string) => void;
   onQuickStatus: (assignment: Rec, status: string) => void;
   onCopy: (assignment: Rec) => void;
+  onSuggestHe: (assignment: Rec, shift: string, member: Rec) => void;
   onDetails: (assignment: Rec, shift: string) => void;
   onDelete: (assignment: Rec, shift: string) => void;
   onCloseActions: () => void;
@@ -1457,6 +1459,11 @@ export function LiveSchedule() {
                  }}
                  onQuickStatus={quickStatus}
                  onCopy={copyAssignment}
+                 onSuggestHe={(assignment, shift, member) => {
+                   const kind = assignment.vehicle_id != null ? "vehicle" : "post";
+                   const resource = (kind === "vehicle" ? data.vehicles : data.posts).find((item) => Number(item.id) === Number(kind === "vehicle" ? assignment.vehicle_id : assignment.post_id));
+                   if (resource) setPick({ kind, resource, shift, manualAdd: true, groupId: Number(member.group_id) });
+                 }}
                  onDetails={(assignment, shift) => {
                    const kind = assignment.vehicle_id != null ? "vehicle" : "post";
                    const resource = (kind === "vehicle" ? data.vehicles : data.posts).find((item) => Number(item.id) === Number(kind === "vehicle" ? assignment.vehicle_id : assignment.post_id));
@@ -2097,7 +2104,7 @@ function shiftLabel(shift: string) {
   return ({ "1": "01:00–07:00", "2": "07:00–13:00", "3": "13:00–19:00", "4": "19:00–01:00" } as Record<string, string>)[shift] || "horário do período";
 }
 
-function OperationalGroupsGrid({ date, groups, members, guards, posts, vehicles, assignments, movements = [], serviceAdjustments = [], shifts: visibleShifts, selectedGroup, selectedId, onOpenAssignment, onExtend, onAdjust, onSwap, onQuickStatus, onCopy, onDetails, onDelete, onCloseActions }: OperationalGroupGridProps) {
+function OperationalGroupsGrid({ date, groups, members, guards, posts, vehicles, assignments, movements = [], serviceAdjustments = [], shifts: visibleShifts, selectedGroup, selectedId, onOpenAssignment, onExtend, onAdjust, onSwap, onQuickStatus, onCopy, onSuggestHe, onDetails, onDelete, onCloseActions }: OperationalGroupGridProps) {
   const guardById = useMemo(() => new Map(guards.map((guard) => [Number(guard.id), guard])), [guards]);
   const postById = useMemo(() => new Map(posts.map((post) => [Number(post.id), post])), [posts]);
   const vehicleById = useMemo(() => new Map(vehicles.map((vehicle) => [Number(vehicle.id), vehicle])), [vehicles]);
@@ -2192,6 +2199,7 @@ function OperationalGroupsGrid({ date, groups, members, guards, posts, vehicles,
                 <button type="button" onClick={() => onSwap(actionAssignment, shift.id)}><span aria-hidden="true">⇄</span>Trocar</button>
                 <button type="button" className={actionAssignment.status === "time_bank" ? "active" : ""} onClick={() => onQuickStatus(actionAssignment, actionAssignment.status === "time_bank" ? "normal" : "time_bank")}><span aria-hidden="true">◷</span>BH</button>
                 <button type="button" onClick={() => onCopy(actionAssignment)}><span aria-hidden="true">▣</span>Copiar</button>
+                <button type="button" className="group-he-suggestions" onClick={() => onSuggestHe(actionAssignment, shift.id, member)}><span aria-hidden="true">＋</span>HE do grupamento</button>
                 <button type="button" onClick={() => onDetails(actionAssignment, shift.id)}><span aria-hidden="true">⋯</span>Detalhes</button>
                 <button type="button" className="danger" onClick={() => onDelete(actionAssignment, shift.id)}><span aria-hidden="true">×</span>Remover</button>
               </div>}
@@ -2947,14 +2955,18 @@ function Editor({
   const eligibleGuards = useMemo(() => {
     const q = guardQuery.toLowerCase().trim();
     const smartIds = new Set(smartCandidates.map((candidate) => candidate.guardId));
+    const groupGuardIds = pick.groupId
+      ? new Set((data.operationalGroupMembers || []).filter((member) => Number(member.group_id) === pick.groupId && String(member.resource_kind) === "guard").map((member) => Number(member.resource_id)))
+      : null;
     return data.guards.filter((g) => {
       if ((manualAdd || fillingHole) && !smartIds.has(Number(g.id))) return false;
+      if (groupGuardIds && !groupGuardIds.has(Number(g.id))) return false;
       if (!q) return true;
       return `${g.name || ""} ${g.registration || ""} ${g.platoon || ""}`
         .toLowerCase()
         .includes(q);
     });
-  }, [data.guards, fillingHole, guardQuery, manualAdd, smartCandidates]);
+  }, [data.guards, data.operationalGroupMembers, fillingHole, guardQuery, manualAdd, pick.groupId, smartCandidates]);
   return (
     <form onSubmit={onSave}>
       <div className="editor-head">
@@ -2988,7 +3000,7 @@ function Editor({
       {manualAdd && (
         <div className="editing-alert manual-add-alert">
           <b>Novo lançamento:</b>
-          <span>Escolha somente um GM à disposição ou da equipe oposta para HE.</span>
+          <span>{pick.groupId ? "Escolha um integrante do mesmo grupamento em dia/equipe oposta para HE." : "Escolha somente um GM à disposição ou da equipe oposta para HE."}</span>
         </div>
       )}
       <input type="hidden" name="saveMode" value={extensionMode ? "split" : "single"}/>
@@ -3022,8 +3034,8 @@ function Editor({
               ))}
             </select>
           </label>
-          {(manualAdd || fillingHole) && !smartCandidates.length && (
-            <p className="full-period-note">Nenhum GM à disposição ou da equipe oposta está elegível para este período.</p>
+          {(manualAdd || fillingHole) && !eligibleGuards.length && (
+            <p className="full-period-note">{pick.groupId ? "Nenhum integrante do mesmo grupamento em dia/equipe oposta está elegível para HE neste período." : "Nenhum GM à disposição ou da equipe oposta está elegível para este período."}</p>
           )}
       <label>
         Destino

@@ -55,5 +55,6 @@
 .schedule .live-hole{min-height:38px;border:2px solid #d51f32!important;border-radius:6px;background:linear-gradient(135deg,#ffdadd,#ffc9ce)!important;color:#8e101c!important;font-weight:900;box-shadow:0 2px 7px #9d15252b;transition:background .12s ease,box-shadow .12s ease,transform .12s ease}
 .schedule .live-hole span{display:inline-block;margin-right:6px;padding:3px 6px;border-radius:4px;background:#b91829;color:#fff;font-size:9px;letter-spacing:.04em}
 .schedule .live-hole:hover,.schedule .live-hole:focus-visible{background:linear-gradient(135deg,#ffcbd0,#ffb9c1)!important;box-shadow:0 0 0 3px #d51f3230,0 3px 9px #9d152538;transform:translateY(-1px)}
+.operational-group-quick-actions .group-he-suggestions{grid-column:span 2;background:#eef8f1;color:#17643b;border-color:#78b993}.operational-group-quick-actions .group-he-suggestions:hover{background:#ddf1e4;border-color:#238252}
 .app.compact .schedule .live-hole{min-height:31px;padding:4px;font-size:9px}
 @media(max-width:700px){.redeployment-pool.redeployment-pool-top{margin:8px 8px 10px}.redeployment-pool.redeployment-pool-top>div{max-height:190px}.schedule .live-hole span{padding:2px 4px}}

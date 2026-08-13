@@ -52,6 +52,11 @@ Este arquivo transforma a revisao de UX em trabalho executavel. Nenhuma etapa de
 - Melhorar indicacao de insercao no arraste, cancelamento por Esc e confirmacao curta apos mover.
 - Revisar conflitos entre horario regular, HE independente, remanejamento parcial e copia convertida em HE.
 
+### GMs de grupamentos na escala diaria
+
+- Os cartoes de grupamentos usam as mesmas acoes contextuais da escala: ajustar, trocar, BH, copiar, detalhes, remover segmento e extensao de HE.
+- O menu contextual inclui `HE do grupamento`: limita as sugestoes inteligentes aos integrantes do mesmo grupamento e preserva a regra de equipe/dia oposto.
+
 ## 4. Pendencias e afastamentos
 
 ### Concluido
