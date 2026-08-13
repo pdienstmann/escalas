@@ -1,3 +1,5 @@
+import { defaultOperationalGroupStart, operationalGroupAnchorShift, operationalGroupInterval, timeAfterHours } from "./operational-group-schedule";
+
 export const patternDefs = [
   { code: "D1", name: "Diurno · Padrão 1", period: "day", parity: 0 },
   { code: "D2", name: "Diurno · Padrão 2", period: "day", parity: 1 },
@@ -47,15 +49,17 @@ export async function ensurePatterns(db: D1Database) {
   ).results;
   const vehicles = (
     await db
-      .prepare("SELECT id FROM vehicles WHERE active=1 ORDER BY prefix")
-      .all<{ id: number }>()
+      .prepare("SELECT id,type FROM vehicles WHERE active=1 ORDER BY prefix")
+      .all<{ id: number; type: string | null }>()
   ).results;
   const available = [
     ...posts.map((p) => ({ postId: p.id, vehicleId: null, role: "guard" })),
-    ...vehicles.flatMap((v) => [
-      { postId: null, vehicleId: v.id, role: "driver" },
-      { postId: null, vehicleId: v.id, role: "patrol" },
-    ]),
+    ...vehicles.flatMap((v) => String(v.type || "").toLowerCase() === "moto"
+      ? [{ postId: null, vehicleId: v.id, role: "driver" }]
+      : [
+          { postId: null, vehicleId: v.id, role: "driver" },
+          { postId: null, vehicleId: v.id, role: "patrol" },
+        ]),
   ];
   for (const pattern of patterns) {
     const count = await db
@@ -142,15 +146,19 @@ export async function applyPatternsToSchedule(
   // section of the scale.  Carry the selected turn/VTR into the generated
   // assignment so the daily view does not duplicate the person in the
   // conventional post list.
-  const groupAssignments = new Map<string, Record<string, unknown>>();
+  const groupAssignmentsByPattern = new Map<number, Record<string, unknown>[]>();
   for (const pattern of patterns) {
     const rows = (
       await db.prepare("SELECT resource_id,shift,vehicle_id,starts_at,ends_at FROM pattern_operational_group_members WHERE pattern_id=? AND resource_kind='guard'")
         .bind(pattern.id)
         .all<Record<string, unknown>>()
     ).results;
-    for (const row of rows) groupAssignments.set(`${pattern.id}:${row.resource_id}`, row);
+    groupAssignmentsByPattern.set(Number(pattern.id), rows);
   }
+  const vehicleTypes = new Map(
+    (await db.prepare("SELECT id,type FROM vehicles WHERE active=1").all<{ id: number; type: string | null }>()).results
+      .map((vehicle) => [Number(vehicle.id), String(vehicle.type || "")]),
+  );
   const commands: D1PreparedStatement[] = [];
   for (const pattern of patterns) {
     const slots = (
@@ -159,34 +167,22 @@ export async function applyPatternsToSchedule(
           .bind(pattern.id)
           .all<Record<string, unknown>>()
       ).results,
-      shifts = pattern.period === "day" ? ["2", "3"] : ["4", "1"];
-    for (const slot of slots) {
-      const groupAssignment = groupAssignments.get(`${pattern.id}:${slot.guard_id}`);
+      shifts = pattern.period === "day" ? ["2", "3"] : ["4", "1"],
+      groupRows = groupAssignmentsByPattern.get(Number(pattern.id)) || [],
+      groupGuardIds = new Set(groupRows.map((row) => Number(row.resource_id)));
+
+    // Conventional positions remain split into the two visible six-hour
+    // quadrants. A GM owned by a grupamento is generated below as one
+    // continuous 12-hour assignment, so it can cross any quadrant cleanly.
+    for (const slot of slots.filter((item) => !groupGuardIds.has(Number(item.guard_id)))) {
       // A null shift means the position repeats in both turns of the period.
       // Imported pattern sheets can override it with a single turn (for
       // example, Rodoviária has a different GM in the 2º and 3º turns).
-      const groupShift = String(groupAssignment?.shift || "");
-      const targetShifts = groupShift && shifts.includes(groupShift)
-        ? [groupShift]
-        : slot.shift && shifts.includes(String(slot.shift))
+      const targetShifts = slot.shift && shifts.includes(String(slot.shift))
         ? [String(slot.shift)]
         : shifts;
       for (const shift of targetShifts) {
         const t = times(date, shift);
-        const customStart = String(groupAssignment?.starts_at || "").trim();
-        const customEnd = String(groupAssignment?.ends_at || "").trim();
-        const startsAt = customStart ? `${date}T${customStart}` : t.start;
-        const endsAt = customEnd ? `${shift === "4" && customEnd < customStart ? new Date(`${date}T12:00:00Z`).toISOString().slice(0, 10) : date}T${customEnd}` : t.end;
-        // Group-owned guards live only in the group section of the daily
-        // scale.  Even when the group member has not received a VTR yet,
-        // do not leave the conventional pattern assignment behind (that
-        // would render the same GM twice).  The unassigned record remains in
-        // the redeployment pool until a destination is chosen.
-        const groupOwnsGuard = Boolean(groupAssignment);
-        const assignedVehicleId = groupOwnsGuard
-          ? (groupAssignment?.vehicle_id != null ? Number(groupAssignment.vehicle_id) : null)
-          : slot.vehicle_id;
-        const assignedPostId = groupOwnsGuard ? null : slot.post_id;
         commands.push(
           db
             .prepare(
@@ -195,16 +191,40 @@ export async function applyPatternsToSchedule(
             .bind(
               scheduleId,
               slot.guard_id,
-              assignedPostId,
-              assignedVehicleId,
+              slot.post_id,
+              slot.vehicle_id,
               shift,
               slot.role,
-              startsAt,
-              endsAt,
+              t.start,
+              t.end,
               "normal",
             ),
         );
       }
+    }
+
+    const slotByGuard = new Map(slots.map((slot) => [Number(slot.guard_id), slot]));
+    const usedVehicleRoles = new Map<number, Set<string>>();
+    for (const groupAssignment of groupRows) {
+      const guardId = Number(groupAssignment.resource_id);
+      if (!guardId) continue;
+      const slot = slotByGuard.get(guardId);
+      const vehicleId = groupAssignment.vehicle_id != null ? Number(groupAssignment.vehicle_id) : null;
+      let role = vehicleId ? String(slot?.role || "") : "guard";
+      if (vehicleId) {
+        const used = usedVehicleRoles.get(vehicleId) || new Set<string>();
+        if (vehicleTypes.get(vehicleId) === "moto") role = "driver";
+        else if (!["driver", "patrol", "third"].includes(role) || used.has(role)) role = !used.has("driver") ? "driver" : !used.has("patrol") ? "patrol" : "third";
+        used.add(role);
+        usedVehicleRoles.set(vehicleId, used);
+      }
+      const startsAt = String(groupAssignment.starts_at || defaultOperationalGroupStart(pattern.period));
+      const endsAt = String(groupAssignment.ends_at || timeAfterHours(startsAt, 12));
+      const interval = operationalGroupInterval(date, pattern.period, startsAt, endsAt);
+      if (!interval) continue;
+      commands.push(db.prepare(
+        "INSERT OR IGNORE INTO assignments (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,status) VALUES (?,?,?,?,?,?,?,?,?)",
+      ).bind(scheduleId, guardId, null, vehicleId, operationalGroupAnchorShift(startsAt), role, interval.start, interval.end, "normal"));
     }
   }
   if (commands.length) await db.batch(commands);

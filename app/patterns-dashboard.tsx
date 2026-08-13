@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import { issuesForResource, validatePattern } from "../lib/pattern-validation";
+import { defaultOperationalGroupStart, operationalGroupAnchorShift, timeAfterHours } from "../lib/operational-group-schedule";
 import { FullPageLink as Link } from "./full-page-link";
 import { ModuleLoading } from "./module-loading";
 import { BackToSchedule } from "./schedule-nav";
@@ -369,10 +370,6 @@ function patternVehicleIcon(type: string) {
   return type === "moto" ? "🏍️" : type === "pickup" ? "🛻" : type === "van" ? "🚐" : type === "suv" ? "🚙" : type === "sedan" ? "🚓" : "🚘";
 }
 
-function patternGroupShiftLabel(shift: string) {
-  return ({ "1": "1º · 01:00–07:00", "2": "2º · 07:00–13:00", "3": "3º · 13:00–19:00", "4": "4º · 19:00–01:00" } as Record<string, string>)[shift] || "todos os turnos";
-}
-
 function PatternGroupsPanel({ data, busy, onAction }: { data: Data; busy: boolean; onAction: (body: Record<string, unknown>) => Promise<boolean> }) {
   const [patternId, setPatternId] = useState(String(data.patterns[0]?.id || ""));
   const [resourceKind, setResourceKind] = useState<"guard" | "post" | "vehicle">("guard");
@@ -380,11 +377,12 @@ function PatternGroupsPanel({ data, busy, onAction }: { data: Data; busy: boolea
   const [groupId, setGroupId] = useState("");
   const [teamLabel, setTeamLabel] = useState("");
   const [groupVehicleId, setGroupVehicleId] = useState("");
-  const [groupShift, setGroupShift] = useState("");
+  const [groupStartAt, setGroupStartAt] = useState(defaultOperationalGroupStart(data.patterns[0]?.period));
   const [scope, setScope] = useState<"pattern" | "global">("pattern");
   const [expanded, setExpanded] = useState(true);
   const activePatternId = data.patterns.some((pattern) => String(pattern.id) === patternId) ? patternId : String(data.patterns[0]?.id || "");
   const selectedPattern = data.patterns.find((pattern) => String(pattern.id) === activePatternId);
+  const groupEndsAt = timeAfterHours(groupStartAt, 12);
   const patternMembers = data.patternOperationalGroupMembers.filter((member) => String(member.pattern_id) === activePatternId);
   const resourceOptions = resourceKind === "guard"
     ? data.guards.map((item) => ({ id: item.id, label: `${item.name}${item.registration ? ` · ${item.registration}` : ""}` }))
@@ -396,9 +394,11 @@ function PatternGroupsPanel({ data, busy, onAction }: { data: Data; busy: boolea
     const item = source.find((candidate) => Number(candidate.id) === Number(member.resource_id));
     if (!item) return `Recurso ${member.resource_id}`;
     const base = String(item.name || item.prefix);
-    if (member.resource_kind === "guard" && member.vehicle_id) {
-      const vehicle = data.vehicles.find((candidate) => Number(candidate.id) === Number(member.vehicle_id));
-      return `${base} · ${patternVehicleIcon(String(vehicle?.type || "other"))} ${String(vehicle?.prefix || "VTR")} · ${patternGroupShiftLabel(String(member.shift || ""))}`;
+    if (member.resource_kind === "guard") {
+      const vehicle = member.vehicle_id ? data.vehicles.find((candidate) => Number(candidate.id) === Number(member.vehicle_id)) : null;
+      const destination = vehicle ? `${patternVehicleIcon(String(vehicle.type || "other"))} ${String(vehicle.prefix || "VTR")}` : "À disposição";
+      const schedule = member.starts_at && member.ends_at ? `${String(member.starts_at).slice(0, 5)}–${String(member.ends_at).slice(0, 5)} · 12h` : "jornada integral do padrão";
+      return `${base} · ${destination} · ${schedule}`;
     }
     return base;
   };
@@ -411,9 +411,11 @@ function PatternGroupsPanel({ data, busy, onAction }: { data: Data; busy: boolea
        patternId: scope === "pattern" ? activePatternId : null,
       resourceKind,
       vehicleId: scope === "pattern" && resourceKind === "guard" ? groupVehicleId || null : null,
-      shift: scope === "pattern" && resourceKind === "guard" ? groupShift || null : null,
+      shift: scope === "pattern" && resourceKind === "guard" ? operationalGroupAnchorShift(groupStartAt) : null,
+      startsAt: scope === "pattern" && resourceKind === "guard" ? groupStartAt : null,
+      endsAt: scope === "pattern" && resourceKind === "guard" ? groupEndsAt : null,
     });
-    if (ok) { setResourceId(""); setTeamLabel(""); setGroupVehicleId(""); setGroupShift(""); }
+    if (ok) { setResourceId(""); setTeamLabel(""); setGroupVehicleId(""); setGroupStartAt(defaultOperationalGroupStart(selectedPattern?.period)); }
   };
   const prepareQuickGuard = (groupIdValue: number, team = "") => {
     setScope("pattern");
@@ -421,8 +423,20 @@ function PatternGroupsPanel({ data, busy, onAction }: { data: Data; busy: boolea
     setResourceKind("guard");
     setResourceId("");
     setGroupVehicleId("");
-    setGroupShift("");
+    setGroupStartAt(defaultOperationalGroupStart(selectedPattern?.period));
     setTeamLabel(team === "EQUIPE GERAL" ? "" : team);
+    window.setTimeout(() => document.querySelector(".pattern-group-link")?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
+  };
+  const editPatternMember = (member: Rec) => {
+    const pattern = data.patterns.find((item) => Number(item.id) === Number(member.pattern_id));
+    setPatternId(String(member.pattern_id || activePatternId));
+    setScope("pattern");
+    setGroupId(String(member.group_id || ""));
+    setResourceKind(String(member.resource_kind) as "guard" | "post" | "vehicle");
+    setResourceId(String(member.resource_id || ""));
+    setTeamLabel(String(member.team_label || ""));
+    setGroupVehicleId(String(member.vehicle_id || ""));
+    setGroupStartAt(String(member.starts_at || defaultOperationalGroupStart(pattern?.period)).slice(0, 5));
     window.setTimeout(() => document.querySelector(".pattern-group-link")?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
   };
   return <section className={`pattern-groups-panel ${expanded ? "expanded" : "collapsed"}`}>
@@ -434,7 +448,7 @@ function PatternGroupsPanel({ data, busy, onAction }: { data: Data; busy: boolea
     </header>
     {expanded && <>
       <div className="pattern-groups-scope">
-         <label>Padrão que receberá o grupamento<select value={activePatternId} onChange={(event) => setPatternId(event.target.value)}>{data.patterns.map((pattern) => <option key={String(pattern.id)} value={String(pattern.id)}>{pattern.code} · {pattern.name}</option>)}</select></label>
+         <label>Padrão que receberá o grupamento<select value={activePatternId} onChange={(event) => { const next = data.patterns.find((pattern) => String(pattern.id) === event.target.value); setPatternId(event.target.value); setGroupStartAt(defaultOperationalGroupStart(next?.period)); }}>{data.patterns.map((pattern) => <option key={String(pattern.id)} value={String(pattern.id)}>{pattern.code} · {pattern.name}</option>)}</select></label>
         <p>Vínculos feitos no padrão selecionado aparecem automaticamente nos dias em que ele for aplicado. O vínculo global serve apenas como identificação comum a todos os padrões.</p>
       </div>
       <div className="pattern-groups-forms">
@@ -449,13 +463,15 @@ function PatternGroupsPanel({ data, busy, onAction }: { data: Data; busy: boolea
           <h3>Compor o padrão</h3>
           <label>Escopo<select value={scope} onChange={(event) => setScope(event.target.value as "pattern" | "global")}><option value="pattern">Somente {selectedPattern?.code || "padrão selecionado"}</option><option value="global">Todos os padrões</option></select></label>
           <label>Grupamento<select name="groupId" value={groupId} onChange={(event) => setGroupId(event.target.value)} required><option value="">Selecione</option>{data.operationalGroups.map((group) => <option key={String(group.id)} value={String(group.id)}>{group.name}</option>)}</select></label>
-          <label>Tipo<select value={resourceKind} onChange={(event) => { setResourceKind(event.target.value as typeof resourceKind); setResourceId(""); setGroupVehicleId(""); setGroupShift(""); }}><option value="guard">GM</option><option value="vehicle">Viatura</option><option value="post">Posto</option></select></label>
+          <label>Tipo<select value={resourceKind} onChange={(event) => { setResourceKind(event.target.value as typeof resourceKind); setResourceId(""); setGroupVehicleId(""); }}><option value="guard">GM</option><option value="vehicle">Viatura</option><option value="post">Posto</option></select></label>
           <label>Recurso<select name="resourceId" value={resourceId} onChange={(event) => setResourceId(event.target.value)} required><option value="">Selecione</option>{resourceOptions.map((option) => <option key={String(option.id)} value={String(option.id)}>{option.label}</option>)}</select></label>
           {scope === "pattern" && resourceKind === "guard" && <div className="pattern-group-guard-placement">
             <span className="pattern-group-field-caption">Destino operacional do GM</span>
             <label>VTR do grupamento<select name="vehicleId" value={groupVehicleId} onChange={(event) => setGroupVehicleId(event.target.value)}><option value="">À disposição / selecionar depois</option>{data.vehicles.map((vehicle) => <option key={String(vehicle.id)} value={String(vehicle.id)}>{patternVehicleIcon(String(vehicle.type))} {vehicle.prefix} · {vehicle.zone || "Zona não definida"}</option>)}</select></label>
-            <label>Turno do GM<select name="shift" value={groupShift} onChange={(event) => setGroupShift(event.target.value)}><option value="">Todos os turnos do período</option>{selectedPattern?.period === "night" ? <><option value="4">4º · 19:00–01:00</option><option value="1">1º · 01:00–07:00</option></> : <><option value="2">2º · 07:00–13:00</option><option value="3">3º · 13:00–19:00</option></>}</select></label>
-            <small>O turno limita em qual quadrante o GM será criado; a VTR substitui o destino convencional do padrão.</small>
+            <label>Início da jornada de 12h<input name="startsAt" type="time" value={groupStartAt} onChange={(event) => setGroupStartAt(event.target.value)} required /></label>
+            <div className="pattern-group-workday-preview"><span>Jornada completa</span><b>{groupStartAt || "—"}–{groupEndsAt || "—"}</b><small>O sistema posiciona o GM em todos os quadrantes alcançados pelo horário, inclusive ao atravessar dia e noite.</small></div>
+            <input type="hidden" name="endsAt" value={groupEndsAt} />
+            <small>A VTR substitui o destino convencional do padrão. O horário pode começar em qualquer momento e sempre gera uma jornada contínua de 12 horas.</small>
           </div>}
           <label>Equipe interna (opcional)<input name="teamLabel" value={teamLabel} onChange={(event) => setTeamLabel(event.target.value.toUpperCase())} list="pattern-team-options" placeholder="Alfa, Bravo, Charlie…" /><datalist id="pattern-team-options"><option value="ALFA"/><option value="BRAVO"/><option value="CHARLIE"/><option value="DELTA"/><option value="ECHO"/><option value="FOXTROT"/></datalist></label>
           <button className="save" disabled={busy || !resourceId || !groupId}>Vincular ao {scope === "pattern" ? "padrão" : "cadastro geral"}</button>
@@ -481,7 +497,7 @@ function PatternGroupsPanel({ data, busy, onAction }: { data: Data; busy: boolea
             </form>
             <div className="pattern-group-composition"><header><div><b>Composicao interna</b><small>{teamBuckets.length} equipe(s) · {groupGuardCount} GM(s) neste padrao</small></div><button type="button" onClick={() => prepareQuickGuard(Number(group.id))}>+ GM</button></header>{teamBuckets.length > 0 ? <div className="pattern-group-team-summary">{teamBuckets.map(([team, teamMembers]) => <div key={team}><span><strong>{team}</strong><small>{teamMembers.filter((member) => String(member.resource_kind) === "guard").length} GM(s) · {teamMembers.filter((member) => String(member.resource_kind) !== "guard").length} recurso(s)</small></span><p>{teamMembers.map((member) => resourceLabel(member)).join(" · ")}</p><button type="button" aria-label={`Adicionar GM a equipe ${team}`} onClick={() => prepareQuickGuard(Number(group.id), team)}>+ GM nesta equipe</button></div>)}</div> : <p>Nenhuma equipe interna definida. Use + GM para comecar.</p>}</div>
             <div className="pattern-group-members">
-              {contextualMembers.length > 0 && <div className="pattern-group-members-scope"><b>{selectedPattern?.code || "Padrão"}</b>{contextualMembers.map((member) => <span key={`p-${member.id}`}><strong>{resourceLabel(member)}</strong><small>{member.resource_kind === "guard" ? "GM" : member.resource_kind === "post" ? "Posto" : "VTR"}{member.team_label ? ` · Equipe ${member.team_label}` : ""}</small><button type="button" aria-label={`Remover ${resourceLabel(member)} do padrão`} disabled={busy} onClick={() => void onAction({ action: "pattern_operational_group_member_remove", id: member.id })}>×</button></span>)}</div>}
+              {contextualMembers.length > 0 && <div className="pattern-group-members-scope"><b>{selectedPattern?.code || "Padrão"}</b>{contextualMembers.map((member) => <span key={`p-${member.id}`}><strong>{resourceLabel(member)}</strong><small>{member.resource_kind === "guard" ? "GM" : member.resource_kind === "post" ? "Posto" : "VTR"}{member.team_label ? ` · Equipe ${member.team_label}` : ""}</small>{member.resource_kind === "guard" && <button type="button" className="edit-member" aria-label={`Editar ${resourceLabel(member)}`} disabled={busy} onClick={() => editPatternMember(member)}>Editar</button>}<button type="button" aria-label={`Remover ${resourceLabel(member)} do padrão`} disabled={busy} onClick={() => void onAction({ action: "pattern_operational_group_member_remove", id: member.id })}>×</button></span>)}</div>}
               {globalMembers.length > 0 && <div className="pattern-group-members-scope global"><b>Todos os padrões</b>{globalMembers.map((member) => <span key={`g-${member.id}`}><strong>{resourceLabel(member)}</strong><small>{member.resource_kind === "guard" ? "GM" : member.resource_kind === "post" ? "Posto" : "VTR"}{member.team_label ? ` · Equipe ${member.team_label}` : ""}</small><button type="button" aria-label={`Remover ${resourceLabel(member)} do cadastro geral`} disabled={busy} onClick={() => void onAction({ action: "operational_group_member_remove", resourceKind: member.resource_kind, resourceId: member.resource_id })}>×</button></span>)}</div>}
               {!globalMembers.length && !contextualMembers.length && <p>Nenhum recurso vinculado ainda.</p>}
             </div>

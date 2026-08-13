@@ -7,6 +7,7 @@ import { orderScheduleResources } from "../lib/schedule-sections";
 import { compactRequestReference } from "../lib/request-reference";
 import { assignmentOverlapsShift, operationalShiftWindow } from "../lib/shift-rules";
 import { isMotorcycleType } from "../lib/crew-rules";
+import { operationalGroupMemberCoversShift } from "../lib/operational-group-schedule";
 type Rec = Record<string, string | number | null>;
 type OperationSlot = Rec & { id:number; role:string; guard_name?:string|null; source_type?:string|null };
 type OperationVehicle = Rec & { id:number; prefix:string; type:string; zone?:string|null; slots:OperationSlot[] };
@@ -77,8 +78,7 @@ function OperationSlotCell({slot}:{slot?:OperationSlot}){return <td>{slot?<Print
 function PrintOperationGuard({slot}:{slot:OperationSlot}){return <span className="print-operation-guard"><b>{slot.guard_name||"VAGA"}</b>{slot.guard_name&&<em>{operationSource(String(slot.source_type||"pending"))}</em>}</span>}
 const operationSource=(source:string)=>source==="available"?"DISP.":source==="extension"?"EXT. HE":source==="overtime"?"HE":source==="redeployment"?"REM.":"—";
 function groupMemberForShift(data: State, guardId: number, shift: string) {
-  const period = shift === "2" || shift === "3" ? "day" : "night";
-  return (data.operationalGroupMembers || []).find((member) => String(member.resource_kind) === "guard" && Number(member.resource_id) === guardId && member.pattern_id != null && (String(member.shift || "") === shift || (!member.shift && String(member.pattern_period || "") === period)));
+  return (data.operationalGroupMembers || []).find((member) => String(member.resource_kind) === "guard" && Number(member.resource_id) === guardId && member.pattern_id != null && operationalGroupMemberCoversShift(member, data.date, shift));
 }
 
 function isGroupOwnedAssignment(data: State, assignment: Rec, shift: string) {
@@ -240,11 +240,9 @@ function PrintOperationalGroupRows({ data, period }: { data: State; period: "day
   const guards = new Map((data.guards || []).map((guard) => [Number(guard.id), String(guard.name || `GM ${guard.id}`)]));
   const relevant = members.filter((member) => {
     if (String(member.resource_kind) !== "guard" || member.pattern_id == null) return false;
-    const memberPeriod = String(member.pattern_period || "");
-    return memberPeriod === period;
+    return periodShifts.some((shift) => operationalGroupMemberCoversShift(member, data.date, shift.id));
   });
   if (!relevant.length) return null;
-  const shiftLabel = (shift: string) => ({ "1": "01:00–07:00", "2": "07:00–13:00", "3": "13:00–19:00", "4": "19:00–01:00" } as Record<string, string>)[shift] || "";
   return <>
     <tr className="print-section print-operational-group-section"><td colSpan={1 + periodShifts.length}><b>GRUPAMENTOS E EQUIPES</b></td></tr>
     {groups.map((group) => {
@@ -257,11 +255,11 @@ function PrintOperationalGroupRows({ data, period }: { data: State; period: "day
           const teamMembers = groupMembers.filter((member) => String(member.team_label || "EQUIPE GERAL").trim().toUpperCase() === team);
           return <tr className="print-operational-group-team" key={`print-team-${group.id}-${team}`}>
             <td><b>{team}</b><small>{teamMembers.length} GM(s)</small></td>
-            {periodShifts.map((shift) => <td key={shift.id}>{teamMembers.filter((member) => !member.shift || String(member.shift) === shift.id).map((member) => {
+            {periodShifts.map((shift) => <td key={shift.id}>{teamMembers.filter((member) => operationalGroupMemberCoversShift(member, data.date, shift.id)).map((member) => {
               const assignment = data.assignments.find((item) => Number(item.guard_id) === Number(member.resource_id) && String(item.work_kind || "shift") !== "overtime_extension" && assignmentOverlapsShift(item, data.date, shift.id) && (member.vehicle_id == null || Number(item.vehicle_id) === Number(member.vehicle_id)));
               const vehicle = member.vehicle_id ? data.vehicles.find((item) => Number(item.id) === Number(member.vehicle_id)) : assignment?.vehicle_id ? data.vehicles.find((item) => Number(item.id) === Number(assignment.vehicle_id)) : null;
               const destination = vehicle ? `${vehicleIcon(String(vehicle.type))} ${String(vehicle.prefix)}` : assignment?.post_id ? String(data.posts.find((post) => Number(post.id) === Number(assignment.post_id))?.name || "Posto") : "À disposição";
-              const time = member.starts_at && member.ends_at ? `${String(member.starts_at).slice(0, 5)}–${String(member.ends_at).slice(0, 5)}` : shiftLabel(shift.id);
+              const time = member.starts_at && member.ends_at ? `${String(member.starts_at).slice(0, 5)}–${String(member.ends_at).slice(0, 5)} · 12h` : String(member.pattern_period) === "night" ? "19:00–07:00 · 12h" : "07:00–19:00 · 12h";
               const movement = data.movements.find((item) => Number(item.guard_id) === Number(member.resource_id) && String(item.starts_at || "") < `${data.date}T23:59` && String(item.ends_at || "") > `${data.date}T00:00`);
               const visualStatus = assignment ? statusInShift(assignment, data.date, shift.id) : movement ? "away" : "normal";
               const role = vehicle && isMotorcycleType(vehicle.type) ? "M" : assignment?.role === "driver" ? "M" : assignment?.role === "patrol" ? "P" : "GM";

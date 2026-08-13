@@ -18,7 +18,32 @@ import { suggestionPosition } from "../lib/suggestion-position.ts";
 import { compactRequestReference } from "../lib/request-reference.ts";
 import { copiedBlockStatus } from "../lib/copy-rules.ts";
 import { operationalGroupLabel, operationalGroupOrder, operationalTeamLabel } from "../lib/operational-groups.ts";
+import { operationalGroupAnchorShift, operationalGroupDurationHours, operationalGroupInterval, operationalGroupMemberCoversShift, timeAfterHours } from "../lib/operational-group-schedule.ts";
 import { normalizeLeaveDisplayName, normalizeLeaveName, preferredLeaveNameMatch } from "../lib/leave-name.ts";
+
+test("operational group workdays can start at any time and always span 12 hours", () => {
+  assert.equal(timeAfterHours("13:00", 12), "01:00");
+  assert.equal(timeAfterHours("22:30", 12), "10:30");
+  assert.equal(operationalGroupDurationHours("13:00", "01:00"), 12);
+  assert.equal(operationalGroupAnchorShift("13:00"), "3");
+  assert.deepEqual(operationalGroupInterval("2026-08-12", "day", "13:00", "01:00"), {
+    start: "2026-08-12T13:00",
+    end: "2026-08-13T01:00",
+  });
+  const member = { pattern_period: "day", starts_at: "13:00", ends_at: "01:00" };
+  assert.equal(operationalGroupMemberCoversShift(member, "2026-08-12", "2"), false);
+  assert.equal(operationalGroupMemberCoversShift(member, "2026-08-12", "3"), true);
+  assert.equal(operationalGroupMemberCoversShift(member, "2026-08-12", "4"), true);
+  assert.equal(operationalGroupMemberCoversShift(member, "2026-08-12", "1"), false);
+  assert.deepEqual(operationalGroupInterval("2026-08-12", "night", "01:00", "13:00"), {
+    start: "2026-08-13T01:00",
+    end: "2026-08-13T13:00",
+  });
+  const lateMember = { pattern_period: "night", starts_at: "22:30", ends_at: "10:30" };
+  assert.equal(operationalGroupMemberCoversShift(lateMember, "2026-08-12", "4"), true);
+  assert.equal(operationalGroupMemberCoversShift(lateMember, "2026-08-12", "1"), true);
+  assert.equal(operationalGroupMemberCoversShift(lateMember, "2026-08-12", "2"), false);
+});
 
 test("request references stay compact and visible in the schedule and PDF", () => {
   const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
@@ -1295,9 +1320,9 @@ test("pattern grupamento members can own a turn and VTR without duplicating the 
   assert.match(db, /ALTER TABLE pattern_operational_group_members ADD COLUMN \$\{name\} \$\{definition\}/);
   assert.match(db, /\["shift", "TEXT"\]/);
   assert.match(engine, /groupAssignments/);
-  assert.match(engine, /groupOwnsGuard/);
-  assert.match(engine, /assignedPostId = groupOwnsGuard \? null/);
-  assert.match(engine, /assignedVehicleId/);
+  assert.match(engine, /groupAssignmentsByPattern/);
+  assert.match(engine, /operationalGroupInterval/);
+  assert.match(engine, /const vehicleId = groupAssignment\.vehicle_id/);
   assert.match(patternsApi, /m\.shift,m\.vehicle_id,m\.starts_at,m\.ends_at/);
   assert.match(patternsApi, /pattern_operational_group_members \(pattern_id,group_id,resource_kind,resource_id,team_label,shift,vehicle_id/);
   assert.match(patternsApi, /requestedVehicleId/);
@@ -1308,7 +1333,7 @@ test("pattern grupamento members can own a turn and VTR without duplicating the 
   assert.match(print, /isGroupOwnedAssignment/);
   assert.match(print, /PrintOperationalGroupRows/);
   assert.match(dashboard, /VTR do grupamento/);
-  assert.match(dashboard, /Turno do GM/);
+  assert.match(dashboard, /Início da jornada de 12h/);
 });
 
 test("management dashboard is the home page and combines monthly staffing with daily notes", () => {

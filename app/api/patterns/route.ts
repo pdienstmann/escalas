@@ -8,6 +8,8 @@ import {
 import { writeAudit } from "../../../lib/audit";
 import { permitted } from "../../../lib/access";
 import { ensureOperationalGroups } from "../../../lib/operational-groups-db";
+import { operationalGroupAnchorShift, operationalGroupDurationHours } from "../../../lib/operational-group-schedule";
+import { isMotorcycleType } from "../../../lib/crew-rules";
 export const dynamic = "force-dynamic";
 
 function destination(body: Record<string, string | number | boolean | null>) {
@@ -152,15 +154,19 @@ export async function POST(request: Request) {
       if (!resource) return Response.json({ error: "Recurso não encontrado ou inativo." }, { status: 404 });
       const teamLabel = String(body.teamLabel || "").trim() || null;
       const requestedShift = String(body.shift || "").trim();
-      const shift = resourceKind === "guard" && ["1", "2", "3", "4"].includes(requestedShift) ? requestedShift : null;
+      let shift = resourceKind === "guard" && ["1", "2", "3", "4"].includes(requestedShift) ? requestedShift : null;
       const requestedVehicleId = resourceKind === "guard" && body.vehicleId != null && String(body.vehicleId).trim() !== ""
         ? Number(body.vehicleId)
         : 0;
       let vehicleId: number | null = null;
       if (requestedVehicleId) {
-        const vehicle = await env.DB.prepare("SELECT id FROM vehicles WHERE id=? AND active=1").bind(requestedVehicleId).first<{ id: number }>();
-        if (!vehicle) return Response.json({ error: "A viatura escolhida nÃ£o estÃ¡ disponÃ­vel no cadastro." }, { status: 400 });
-        if (resourceKind !== "guard" || !patternId) return Response.json({ error: "A viatura do grupamento sÃ³ pode ser definida para um GM dentro de um padrÃ£o." }, { status: 400 });
+        const vehicle = await env.DB.prepare("SELECT id,type FROM vehicles WHERE id=? AND active=1").bind(requestedVehicleId).first<{ id: number; type: string | null }>();
+        if (!vehicle) return Response.json({ error: "A viatura escolhida não está disponível no cadastro." }, { status: 400 });
+        if (resourceKind !== "guard" || !patternId) return Response.json({ error: "A viatura do grupamento só pode ser definida para um GM dentro de um padrão." }, { status: 400 });
+        if (isMotorcycleType(vehicle.type)) {
+          const occupied = await env.DB.prepare("SELECT id FROM pattern_operational_group_members WHERE pattern_id=? AND vehicle_id=? AND NOT (resource_kind='guard' AND resource_id=?) LIMIT 1").bind(patternId, requestedVehicleId, resourceId).first();
+          if (occupied) return Response.json({ error: "Esta moto já possui um condutor neste grupamento e padrão." }, { status: 409 });
+        }
         vehicleId = vehicle.id;
       }
       const startsAtValue = String(body.startsAt || "").trim();
@@ -169,13 +175,17 @@ export async function POST(request: Request) {
       const startsAt = startsAtValue && timePattern.test(startsAtValue) ? startsAtValue : null;
       const endsAt = endsAtValue && timePattern.test(endsAtValue) ? endsAtValue : null;
       if ((startsAtValue && !startsAt) || (endsAtValue && !endsAt) || Boolean(startsAt) !== Boolean(endsAt)) {
-        return Response.json({ error: "Informe o horÃ¡rio personalizado no formato HH:MM, com inÃ­cio e fim." }, { status: 400 });
-      }
-      if ((startsAt || endsAt) && !shift) {
-        return Response.json({ error: "Selecione um turno antes de informar horÃ¡rio personalizado." }, { status: 400 });
+        return Response.json({ error: "Informe o horário no formato HH:MM, com início e fim." }, { status: 400 });
       }
       if ((startsAt || endsAt) && !patternId) {
-        return Response.json({ error: "O horÃ¡rio personalizado sÃ³ pode ser definido dentro de um padrÃ£o." }, { status: 400 });
+        return Response.json({ error: "O horário do grupamento só pode ser definido dentro de um padrão." }, { status: 400 });
+      }
+      if (startsAt && endsAt) {
+        const duration = operationalGroupDurationHours(startsAt, endsAt);
+        if (duration !== 12) {
+          return Response.json({ error: "A jornada do grupamento deve ter 12 horas contínuas." }, { status: 400 });
+        }
+        shift = operationalGroupAnchorShift(startsAt);
       }
       if (patternId) {
         await env.DB.batch([
