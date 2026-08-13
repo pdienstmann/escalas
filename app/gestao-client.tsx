@@ -1,7 +1,7 @@
 "use client";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { ModuleBusyOverlay, ModuleLoading } from "./module-loading";
-import { BackToSchedule } from "./schedule-nav";
+import { BackToSchedule, ScheduleNav } from "./schedule-nav";
 import { normalizeLeaveDisplayName, normalizeLeaveName, preferredLeaveNameMatch } from "../lib/leave-name";
 import { useScheduleDate } from "./use-schedule-date";
 type Item = Record<string, string | number | null>;
@@ -458,6 +458,7 @@ export function GestaoClient({
         date={date}
         title="Cadastros operacionais"
         subtitle="Pessoas, postos e viaturas alimentam a mesma escala diária."
+        active="/cadastros"
         busy={saving}
        busyArea={saving&&mode==="folgas"?"importação das folgas":modeLabel[mode]}
       >
@@ -553,6 +554,7 @@ export function GestaoClient({
         date={date}
         title="Viaturas"
         subtitle={`Panorama operacional da frota em ${new Date(`${date}T12:00:00`).toLocaleDateString("pt-BR")}.`}
+        active="/viaturas"
         busy={saving}
         busyArea={modeLabel[mode]}
       >
@@ -616,6 +618,7 @@ export function GestaoClient({
         date={date}
         title="Movimentações do efetivo"
         subtitle="Afastamentos aprovados retiram o GM da escala e abrem o furo correspondente."
+        active="/movimentacoes"
         busy={saving}
         busyArea={modeLabel[mode]}
       >
@@ -658,6 +661,7 @@ export function GestaoClient({
         date={date}
         title="Banco de horas e trocas"
         subtitle="Registre o requerimento uma vez e aplique o ajuste automaticamente na escala da data."
+        active="/bancos"
         busy={saving}
         busyArea={modeLabel[mode]}
       >
@@ -740,6 +744,7 @@ export function GestaoClient({
       date={date}
       title={String(campaign?.title || "Folgas mensais")}
       subtitle="Cada GM escolhe uma data útil e uma data de fim de semana. A capacidade é atualizada automaticamente."
+      active="/folgas"
       busy={saving}
       busyArea={modeLabel[mode]}
     >
@@ -1045,6 +1050,7 @@ function Module({
   date,
   title,
   subtitle,
+  active,
   children,
   busy = false,
   busyArea = "módulo",
@@ -1052,6 +1058,7 @@ function Module({
   date: string;
   title: string;
   subtitle: string;
+  active: string;
   children: React.ReactNode;
   busy?: boolean;
   busyArea?: string;
@@ -1066,6 +1073,7 @@ function Module({
           <p>{subtitle}</p>
         </div>
       </header>
+      <ScheduleNav date={date} active={active} />
       {children}
     </main>
   );

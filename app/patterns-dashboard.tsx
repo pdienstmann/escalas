@@ -11,7 +11,7 @@ import { issuesForResource, validatePattern } from "../lib/pattern-validation";
 import { defaultOperationalGroupStart, operationalGroupAnchorShift, timeAfterHours } from "../lib/operational-group-schedule";
 import { FullPageLink as Link } from "./full-page-link";
 import { ModuleLoading } from "./module-loading";
-import { BackToSchedule } from "./schedule-nav";
+import { BackToSchedule, ScheduleNav } from "./schedule-nav";
 import { useScheduleDate } from "./use-schedule-date";
 
 type Rec = Record<string, string | number | null>;
@@ -237,6 +237,8 @@ export function PatternsDashboard() {
           <p>Monte a escala ideal, compare equipes e confira o resultado antes de aplicar.</p>
         </div>
       </header>
+
+      <ScheduleNav date={date} active="/padroes" />
 
       <section className="pattern-config">
         <div>

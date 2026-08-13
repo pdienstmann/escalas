@@ -89,6 +89,22 @@ test("the More navigation stays visible above the responsive tab bar", () => {
   assert.match(styles, /max-height:calc\(100dvh - 130px\)/);
 });
 
+test("every operational module shares date-preserving navigation with discreet feedback", () => {
+  const navigation = readFileSync(resolve("app/schedule-nav.tsx"), "utf8");
+  const management = readFileSync(resolve("app/gestao-client.tsx"), "utf8");
+  const transition = readFileSync(resolve("app/full-page-link.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/unified-navigation.css"), "utf8");
+  assert.match(navigation, /\/validacao.*Validar \/ publicar/);
+  assert.match(management, /<ScheduleNav date=\{date\} active=\{active\}/);
+  for (const file of ["overtime-dashboard", "patterns-dashboard", "notices-dashboard", "history-dashboard", "validate-schedule"]) {
+    const source = readFileSync(resolve(`app/${file}.tsx`), "utf8");
+    assert.match(source, /<ScheduleNav date=\{date\}/);
+  }
+  assert.match(transition, /Abrindo \$\{destinationName\(href\)\}/);
+  assert.match(styles, /inset: auto 14px 14px auto/);
+  assert.doesNotMatch(styles, /inset:\s*0/);
+});
+
 test("orderScheduleResources uses shared section order for schedule and PDF", () => {
   const ordered = orderScheduleResources(
     [

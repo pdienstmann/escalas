@@ -3,7 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { formatHoursDuration } from "../lib/shift-rules";
 import { ModuleLoading } from "./module-loading";
-import { BackToSchedule } from "./schedule-nav";
+import { BackToSchedule, ScheduleNav } from "./schedule-nav";
 import { useScheduleDate } from "./use-schedule-date";
 
 type Rec = Record<string, string | number | null>;
@@ -223,6 +223,7 @@ export function OvertimeDashboard() {
 
   return <main className="overtime-page manual-he-page" aria-busy={isRefreshing}>
     <header><BackToSchedule date={date}/><div><span>CONTROLE MANUAL E DISTRIBUIÇÃO</span><h1>Horas extras</h1><p>O saldo só muda quando a equipe responsável registra ou ajusta as horas.</p></div><span className={`he-month-state ${monthClosed?"closed":"open"}`}>{monthClosed?"Mês fechado":"Mês aberto"}</span>{isRefreshing&&<span className="he-refreshing" role="status">Atualizando {month}…</span>}<label>Mês<input type="month" value={month} onChange={(event)=>setSelectedMonth(event.target.value)}/></label><button disabled={monthClosed||isRefreshing} title={monthClosed?"Reabra o mês para lançar horas extras":""} onClick={()=>setManualOpen("blank")}>+ Lançar HE</button><button disabled={isRefreshing} onClick={()=>setClosureDialog(monthClosed?"reopen":"close")}>{monthClosed?"Reabrir mês":"Fechar mês"}</button><button disabled={isRefreshing} onClick={exportCsv}>Exportar CSV</button><button type="button" disabled={isRefreshing} onClick={printReport}>PDF / imprimir</button></header>
+    <ScheduleNav date={date} active="/horas-extras" />
     {isRefreshing&&<div className="he-refresh-banner" role="status">Aguarde: carregando os dados de {month}. As ações ficam bloqueadas até a atualização terminar.</div>}
     {message&&<p className="he-message" role="status">{message}</p>}
     {monthClosed&&<section className="he-closed-banner" role="status"><b>Livro mensal fechado</b><span>Os totais estão protegidos contra alterações. Reabra com justificativa se precisar corrigir.</span>{data.closure.closed_at&&<small>Fechado em {new Date(String(data.closure.closed_at).replace(" ","T")+"Z").toLocaleString("pt-BR")}{data.closure.closure_note?` · ${data.closure.closure_note}`:""}</small>}</section>}

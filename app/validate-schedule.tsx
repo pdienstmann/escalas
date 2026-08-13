@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { FullPageLink as Link } from "./full-page-link";
 import { ModuleLoading } from "./module-loading";
+import { ScheduleNav } from "./schedule-nav";
 import { useScheduleDate } from "./use-schedule-date";
 import { formatScheduleDate } from "../lib/schedule-date";
 import { isMotorcycleType } from "../lib/crew-rules";
@@ -131,6 +132,7 @@ export function ValidateSchedule() {
         <h1>Conferência antes da publicação</h1>
         <p>{formatScheduleDate(currentData.date)} · escala {String(currentData.schedule.status || "rascunho")}</p>
       </header>
+      <ScheduleNav date={date} active="/validacao" />
       <div className="validation-stats">
         <article>
           <b>{filled}</b>

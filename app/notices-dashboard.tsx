@@ -3,7 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { ModuleLoading } from "./module-loading";
 import { readClientCache, writeClientCache } from "./client-cache";
-import { BackToSchedule } from "./schedule-nav";
+import { BackToSchedule, ScheduleNav } from "./schedule-nav";
 import { useScheduleDate } from "./use-schedule-date";
 
 type Item = Record<string, string | number | null>;
@@ -91,6 +91,7 @@ export function NoticesDashboard() {
 
   return <main className="notices-page">
     <header><BackToSchedule date={date}/><div><span>LEMBRETES OPERACIONAIS</span><h1>Alterações diversas</h1><p>Registre uma mudança e ela será lembrada automaticamente na escala da data.</p></div></header>
+    <ScheduleNav date={date} active="/alteracoes" />
     <section className="notices-summary"><b>{pending.length}</b><span>alterações pendentes de conferência</span></section>
     <div className="notices-layout">
       <form className="notice-form" onSubmit={create}>

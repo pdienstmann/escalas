@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ModuleBusyOverlay, ModuleLoading } from "./module-loading";
-import { BackToSchedule } from "./schedule-nav";
+import { BackToSchedule, ScheduleNav } from "./schedule-nav";
 import { useScheduleDate } from "./use-schedule-date";
 import { readClientCache, writeClientCache } from "./client-cache";
 
@@ -121,6 +121,7 @@ export function HistoryDashboard() {
   return <main className="history-page">
     <ModuleBusyOverlay area="histórico" active={syncing || (loading && Boolean(data))} />
     <header><BackToSchedule date={date}/><div><span>RASTREABILIDADE OPERACIONAL</span><h1>Histórico de alterações</h1><p>{`Responsável atual: ${data.actor.name || data.actor.email}`}</p></div></header>
+    <ScheduleNav date={date} active="/historico" />
     <section className="history-tools"><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar ação ou responsável..."/><select value={entity} onChange={(event) => setEntity(event.target.value)}><option value="">Todos os módulos</option>{Object.entries(entityLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><button onClick={() => void load()}>Atualizar</button></section>
     {message && <p className="history-message" role="status">{message}</p>}
     {loadError && <p className="history-message" role="alert">{loadError}</p>}

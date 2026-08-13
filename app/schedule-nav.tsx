@@ -12,6 +12,7 @@ const primaryItems = [
   { href: "/horas-extras", label: "Horas extras" },
 ] as const;
 const moreItems = [
+  { href: "/validacao", label: "Validar / publicar" },
   { href: "/bancos", label: "BH / trocas" },
   { href: "/padroes", label: "Padrões 12x36" },
   { href: "/alteracoes", label: "Alterações diversas" },
