@@ -104,8 +104,16 @@ type OperationalGroupGridProps = {
   serviceAdjustments?: Rec[];
   shifts: typeof SHIFT_DEFS;
   selectedGroup: string;
+  selectedId: number;
   onOpenAssignment: (assignment: Rec, shift: string) => void;
   onExtend: (assignment: Rec, shift: string, mode: "after" | "before") => void;
+  onAdjust: (assignment: Rec, shift: string) => void;
+  onSwap: (assignment: Rec, shift: string) => void;
+  onQuickStatus: (assignment: Rec, status: string) => void;
+  onCopy: (assignment: Rec) => void;
+  onDetails: (assignment: Rec, shift: string) => void;
+  onDelete: (assignment: Rec, shift: string) => void;
+  onCloseActions: () => void;
 };
 type SmartEditorCandidate = {
   guardId: number;
@@ -1423,9 +1431,10 @@ export function LiveSchedule() {
                    vehicles={data.vehicles}
                    assignments={[...data.assignments, ...data.availableForRedeployment]}
                    movements={data.movements}
-                   serviceAdjustments={data.serviceAdjustments}
-                   shifts={visibleShifts}
+                  serviceAdjustments={data.serviceAdjustments}
+                  shifts={visibleShifts}
                   selectedGroup={activeGroupFilter}
+                  selectedId={Number(contextPick?.assignment?.id || pick?.assignment?.id || 0)}
                    onOpenAssignment={(assignment, shift) => {
                     const kind = assignment.vehicle_id != null ? "vehicle" : "post";
                     const resource = (kind === "vehicle" ? data.vehicles : data.posts).find((item) => Number(item.id) === Number(kind === "vehicle" ? assignment.vehicle_id : assignment.post_id));
@@ -1436,6 +1445,25 @@ export function LiveSchedule() {
                    const resource = (kind === "vehicle" ? data.vehicles : data.posts).find((item) => Number(item.id) === Number(kind === "vehicle" ? assignment.vehicle_id : assignment.post_id));
                    if (resource) startExtension(assignment, kind, resource, shift, mode);
                  }}
+                 onAdjust={(assignment, shift) => {
+                   const kind = assignment.vehicle_id != null ? "vehicle" : "post";
+                   const resource = (kind === "vehicle" ? data.vehicles : data.posts).find((item) => Number(item.id) === Number(kind === "vehicle" ? assignment.vehicle_id : assignment.post_id));
+                   if (resource) setQuickEdit({ kind, resource, shift, assignment });
+                 }}
+                 onSwap={(assignment, shift) => {
+                   const kind = assignment.vehicle_id != null ? "vehicle" : "post";
+                   const resource = (kind === "vehicle" ? data.vehicles : data.posts).find((item) => Number(item.id) === Number(kind === "vehicle" ? assignment.vehicle_id : assignment.post_id));
+                   if (resource) openQuickSwap(assignment, kind, resource, shift);
+                 }}
+                 onQuickStatus={quickStatus}
+                 onCopy={copyAssignment}
+                 onDetails={(assignment, shift) => {
+                   const kind = assignment.vehicle_id != null ? "vehicle" : "post";
+                   const resource = (kind === "vehicle" ? data.vehicles : data.posts).find((item) => Number(item.id) === Number(kind === "vehicle" ? assignment.vehicle_id : assignment.post_id));
+                   if (resource) setPick({ kind, resource, shift, assignment });
+                 }}
+                 onDelete={removeAssignmentSegment}
+                 onCloseActions={() => setContextPick(null)}
                 />;
                 const first = index === 0 || gridResources[index - 1].displaySection !== displaySection;
                 const last = index === gridResources.length - 1 || gridResources[index + 1].displaySection !== displaySection;
@@ -1568,6 +1596,7 @@ export function LiveSchedule() {
                 serviceAdjustments={data.serviceAdjustments}
                 shifts={visibleShifts}
                 selectedGroup={activeGroupFilter}
+                selectedId={Number(contextPick?.assignment?.id || pick?.assignment?.id || 0)}
                  onOpenAssignment={(assignment, shift) => {
                   const kind = assignment.vehicle_id != null ? "vehicle" : "post";
                   const resource = (kind === "vehicle" ? data.vehicles : data.posts).find((item) => Number(item.id) === Number(kind === "vehicle" ? assignment.vehicle_id : assignment.post_id));
@@ -1578,7 +1607,26 @@ export function LiveSchedule() {
                  const resource = (kind === "vehicle" ? data.vehicles : data.posts).find((item) => Number(item.id) === Number(kind === "vehicle" ? assignment.vehicle_id : assignment.post_id));
                  if (resource) startExtension(assignment, kind, resource, shift, mode);
                }}
-              />}
+               onAdjust={(assignment, shift) => {
+                 const kind = assignment.vehicle_id != null ? "vehicle" : "post";
+                 const resource = (kind === "vehicle" ? data.vehicles : data.posts).find((item) => Number(item.id) === Number(kind === "vehicle" ? assignment.vehicle_id : assignment.post_id));
+                 if (resource) setQuickEdit({ kind, resource, shift, assignment });
+               }}
+               onSwap={(assignment, shift) => {
+                 const kind = assignment.vehicle_id != null ? "vehicle" : "post";
+                 const resource = (kind === "vehicle" ? data.vehicles : data.posts).find((item) => Number(item.id) === Number(kind === "vehicle" ? assignment.vehicle_id : assignment.post_id));
+                 if (resource) openQuickSwap(assignment, kind, resource, shift);
+               }}
+               onQuickStatus={quickStatus}
+               onCopy={copyAssignment}
+               onDetails={(assignment, shift) => {
+                 const kind = assignment.vehicle_id != null ? "vehicle" : "post";
+                 const resource = (kind === "vehicle" ? data.vehicles : data.posts).find((item) => Number(item.id) === Number(kind === "vehicle" ? assignment.vehicle_id : assignment.post_id));
+                 if (resource) setPick({ kind, resource, shift, assignment });
+               }}
+               onDelete={removeAssignmentSegment}
+               onCloseActions={() => setContextPick(null)}
+               />}
             </tbody>
           </table>
           )}
@@ -2049,7 +2097,7 @@ function shiftLabel(shift: string) {
   return ({ "1": "01:00–07:00", "2": "07:00–13:00", "3": "13:00–19:00", "4": "19:00–01:00" } as Record<string, string>)[shift] || "horário do período";
 }
 
-function OperationalGroupsGrid({ date, groups, members, guards, posts, vehicles, assignments, movements = [], serviceAdjustments = [], shifts: visibleShifts, selectedGroup, onOpenAssignment, onExtend }: OperationalGroupGridProps) {
+function OperationalGroupsGrid({ date, groups, members, guards, posts, vehicles, assignments, movements = [], serviceAdjustments = [], shifts: visibleShifts, selectedGroup, selectedId, onOpenAssignment, onExtend, onAdjust, onSwap, onQuickStatus, onCopy, onDetails, onDelete, onCloseActions }: OperationalGroupGridProps) {
   const guardById = useMemo(() => new Map(guards.map((guard) => [Number(guard.id), guard])), [guards]);
   const postById = useMemo(() => new Map(posts.map((post) => [Number(post.id), post])), [posts]);
   const vehicleById = useMemo(() => new Map(vehicles.map((vehicle) => [Number(vehicle.id), vehicle])), [vehicles]);
@@ -2130,12 +2178,23 @@ function OperationalGroupsGrid({ date, groups, members, guards, posts, vehicles,
             const roleBadge = vehicle && isMotorcycleType(vehicle.type) ? "M" : assignment ? String(assignment.role || "GM").toUpperCase() : "GM";
             const guard = guardById.get(Number(member.resource_id));
             const configuredTime = member.starts_at && member.ends_at ? `${String(member.starts_at).slice(0, 5)}–${String(member.ends_at).slice(0, 5)} · 12h` : String(member.pattern_period) === "night" ? "19:00–07:00 · 12h" : String(member.pattern_period) === "day" ? "07:00–19:00 · 12h" : shiftLabel(shift.id);
+            const actionAssignment = assignment ? { ...assignment, vehicle_id: assignment.vehicle_id ?? member.vehicle_id ?? null, post_id: assignment.post_id ?? member.post_id ?? null } : null;
             return <div className="operational-groups-grid-gm-wrap" key={`${member.id}-${shift.id}`}>
-              <button type="button" className={`operational-groups-grid-gm ${assignment ? "assigned" : "unassigned"} ${visualStatus}`} onClick={() => assignment && onOpenAssignment(assignment, shift.id)} disabled={!assignment} title={assignment ? "Abrir edição deste GM" : "Sem viatura/posto neste turno"}>
+              {actionAssignment && <button type="button" className="operational-group-remove-segment" aria-label={`Remover ${String(guard?.name || "GM")} somente deste horário`} title="Remover somente este horário" onClick={(event) => { event.stopPropagation(); onDelete(actionAssignment, shift.id); }}>×</button>}
+              <button type="button" className={`operational-groups-grid-gm ${assignment ? "assigned" : "unassigned"} ${visualStatus}`} onClick={() => actionAssignment && onOpenAssignment(actionAssignment, shift.id)} disabled={!assignment} title={assignment ? "Abrir edição deste GM" : "Sem viatura/posto neste turno"}>
                 <strong>{String(guard?.name || `GM ${member.resource_id}`)}{hasVisualBadge && <span className={`group-status-badge ${visualStatus === "overtime" ? "he" : visualStatus === "time_bank" ? "bh" : visualStatus === "swap" ? "swap" : "away"}`}>{adjustmentBadge || (visualStatus === "overtime" && assignment?.regular_ends_at ? `HE · após ${String(assignment.regular_ends_at).slice(11, 16)}` : visualStatus === "away" ? String(movement?.type || "AFASTADO").replace("medical_leave", "ATESTADO").replace("day_off", "FOLGA").replace("vacation", "FÉRIAS").toUpperCase() : statusShort(visualStatus))}</span>}</strong><span>{assignment ? locationLabel(assignment, member) : movement ? "Fora da escala neste período" : "+ VTR / dupla"}</span><em>{assignment ? roleBadge : movement ? "INDISPONÍVEL" : "Selecionar destino"}</em><small className="operational-groups-grid-time">{configuredTime}{extension ? ` · +HE ${overtimeHoursLabel(extension)}` : ""}</small>
               </button>
-              {assignment && showExtensionShortcut(assignment, shift.id) && <button type="button" className="operational-group-inline-he" title="Estender este GM em hora extra" onClick={() => onExtend(assignment, shift.id, "after")}>+HE</button>}
-              {assignment && showEarlyExtensionShortcut(assignment, shift.id) && <button type="button" className="operational-group-inline-he early" title="Antecipar este GM em hora extra" onClick={() => onExtend(assignment, shift.id, "before")}>+HE antes</button>}
+              {actionAssignment && showExtensionShortcut(actionAssignment, shift.id) && <button type="button" className="operational-group-inline-he" title="Estender este GM em hora extra" onClick={() => onExtend(actionAssignment, shift.id, "after")}>+HE</button>}
+              {actionAssignment && showEarlyExtensionShortcut(actionAssignment, shift.id) && <button type="button" className="operational-group-inline-he early" title="Antecipar este GM em hora extra" onClick={() => onExtend(actionAssignment, shift.id, "before")}>+HE antes</button>}
+              {actionAssignment && Number(actionAssignment.id) === selectedId && <div className="operational-group-quick-actions" role="group" aria-label={`Ações rápidas de ${String(guard?.name || "GM")}`}>
+                <header><b>{String(guard?.name || "GM")}</b><button type="button" aria-label="Fechar ações" onClick={onCloseActions}>×</button></header>
+                <button type="button" onClick={() => onAdjust(actionAssignment, shift.id)}><span aria-hidden="true">✎</span>Ajustar</button>
+                <button type="button" onClick={() => onSwap(actionAssignment, shift.id)}><span aria-hidden="true">⇄</span>Trocar</button>
+                <button type="button" className={actionAssignment.status === "time_bank" ? "active" : ""} onClick={() => onQuickStatus(actionAssignment, actionAssignment.status === "time_bank" ? "normal" : "time_bank")}><span aria-hidden="true">◷</span>BH</button>
+                <button type="button" onClick={() => onCopy(actionAssignment)}><span aria-hidden="true">▣</span>Copiar</button>
+                <button type="button" onClick={() => onDetails(actionAssignment, shift.id)}><span aria-hidden="true">⋯</span>Detalhes</button>
+                <button type="button" className="danger" onClick={() => onDelete(actionAssignment, shift.id)}><span aria-hidden="true">×</span>Remover</button>
+              </div>}
             </div>;
           })}
           {!team.members.some((member) => allowedShift(member, shift.id)) && <span className="operational-groups-grid-empty">—</span>}

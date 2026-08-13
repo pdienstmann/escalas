@@ -892,6 +892,25 @@ test("monthly operations distinguish absences, vehicle coverage and rapid sequen
   assert.match(styles, /\.he-suggestions-toggle/);
 });
 
+test("movement records keep a stable single-column flow and group guards expose the regular quick actions", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const management = readFileSync(resolve("app/gestao-client.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/operational-clarity.css"), "utf8");
+  assert.match(management, /movement-record-summary/);
+  assert.match(management, /movement-record-groups/);
+  assert.match(styles, /\.record-list\.movement-records > \.movement-record-groups/);
+  assert.match(styles, /content-visibility: visible/);
+  assert.match(styles, /grid-template-columns: minmax\(0, 1fr\)/);
+  assert.match(schedule, /operational-group-quick-actions/);
+  assert.match(schedule, />Ajustar</);
+  assert.match(schedule, />Trocar</);
+  assert.match(schedule, />BH</);
+  assert.match(schedule, />Detalhes</);
+  assert.match(schedule, /operational-group-remove-segment/);
+  assert.match(styles, /\.dashboard-absence-mini/);
+  assert.match(styles, /grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
+});
+
 test("long post and vehicle names wrap instead of being clipped", () => {
   const density = readFileSync(resolve("app/schedule-density.css"), "utf8");
   assert.match(density, /overflow-wrap:anywhere/);
