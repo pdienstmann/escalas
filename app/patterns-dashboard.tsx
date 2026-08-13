@@ -503,7 +503,9 @@ function PatternGroupsPanel({ data, busy, onAction }: { data: Data; busy: boolea
       <section className="pattern-group-board" aria-label="Grade de grupamentos do padrão">
         <header><div><span>VISÃO DA ESCALA IDEAL</span><b>{selectedPattern?.code || "Padrão"} · grupamentos e equipes</b><small>Destino, VTR, equipe e jornada aparecem juntos para conferência rápida.</small></div><strong>{patternMembers.filter((member) => String(member.resource_kind) === "guard").length} GMs</strong></header>
         <div className="pattern-group-board-grid">{data.operationalGroups.map((group) => {
-          const members = patternMembers.filter((member) => Number(member.group_id) === Number(group.id));
+          const contextualMembers = patternMembers.filter((member) => Number(member.group_id) === Number(group.id));
+          const contextualKeys = new Set(contextualMembers.map((member) => `${member.resource_kind}:${member.resource_id}`));
+          const members = [...contextualMembers, ...data.operationalGroupMembers.filter((member) => Number(member.group_id) === Number(group.id) && !contextualKeys.has(`${member.resource_kind}:${member.resource_id}`))];
           const teams = Array.from(members.reduce((map, member) => { const team = String(member.team_label || "EQUIPE GERAL").trim().toUpperCase() || "EQUIPE GERAL"; const list = map.get(team) || []; list.push(member); map.set(team, list); return map; }, new Map<string, Rec[]>()).entries());
           if (!members.length) return null;
           return <article key={String(group.id)} className="pattern-group-board-card" style={{ borderLeftColor: String(group.color || "#1769aa") }}><header><b>{group.short_name || group.name}</b><span>{members.length} vínculo(s)</span></header>{teams.map(([team, teamMembers]) => <div className="pattern-group-board-team" key={team}><b>{team}</b>{teamMembers.map((member) => <div className="pattern-group-board-member" key={String(member.id)}><strong>{resourceLabel(member)}</strong><small>{member.resource_kind === "guard" ? "GM" : member.resource_kind === "post" ? "Posto" : "Viatura"}</small></div>)}</div>)}</article>;
