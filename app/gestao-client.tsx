@@ -1198,12 +1198,18 @@ function MovementRecords({
 }) {
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
+  const [page, setPage] = useState(1);
+  const pageSize = 50;
   const normalizedQuery = query.trim().toLocaleLowerCase("pt-BR");
   const visible = useMemo(() => items.filter((item) => {
     const text = `${item.guard_name || ""} ${item.registration || ""} ${item.request_ref || ""} ${item.notes || ""}`.toLocaleLowerCase("pt-BR");
     return (typeFilter === "all" || String(item.type) === typeFilter) && (!normalizedQuery || text.includes(normalizedQuery));
   }).sort((left,right)=>String(left.starts_at||"").localeCompare(String(right.starts_at||""))||String(left.guard_name||"").localeCompare(String(right.guard_name||""),"pt-BR")), [items, normalizedQuery, typeFilter]);
-  const groups = movementTypeOptions.filter((option) => visible.some((item) => String(item.type) === option.value));
+  const totalPages = Math.max(1, Math.ceil(visible.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const pageStart = (safePage - 1) * pageSize;
+  const pageItems = visible.slice(pageStart, pageStart + pageSize);
+  const groups = movementTypeOptions.filter((option) => pageItems.some((item) => String(item.type) === option.value));
   const counts = movementTypeOptions.reduce<Record<string, number>>((result, option) => {
     result[option.value] = items.filter((item) => String(item.type) === option.value).length;
     return result;
@@ -1215,16 +1221,16 @@ function MovementRecords({
         <p>Registros ativos retiram o GM automaticamente do período informado e mostram o furo na escala.</p>
       </header>
       <div className="movement-record-summary" role="status">
-        <button type="button" className={typeFilter==="all"?"active":""} onClick={()=>setTypeFilter("all")}><b>{items.length}</b><span>Todos</span></button>
-        {movementTypeOptions.map(option=><button type="button" key={option.value} className={typeFilter===option.value?"active":""} disabled={!counts[option.value]} onClick={()=>setTypeFilter(typeFilter===option.value?"all":option.value)}><b>{counts[option.value]||0}</b><span>{option.label}</span></button>)}
+        <button type="button" className={typeFilter==="all"?"active":""} onClick={()=>{setTypeFilter("all");setPage(1)}}><b>{items.length}</b><span>Todos</span></button>
+        {movementTypeOptions.map(option=><button type="button" key={option.value} className={typeFilter===option.value?"active":""} disabled={!counts[option.value]} onClick={()=>{setTypeFilter(typeFilter===option.value?"all":option.value);setPage(1)}}><b>{counts[option.value]||0}</b><span>{option.label}</span></button>)}
       </div>
       <div className="movement-filters">
-        <label>Buscar GM, matrícula ou requerimento<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Digite para filtrar…" /></label>
-        <label>Tipo<select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}><option value="all">Todos ({items.length})</option>{movementTypeOptions.map((option) => <option key={option.value} value={option.value}>{option.label} ({counts[option.value] || 0})</option>)}</select></label>
+        <label>Buscar GM, matrícula ou requerimento<input value={query} onChange={(event) => {setQuery(event.target.value);setPage(1)}} placeholder="Digite para filtrar…" /></label>
+        <label>Tipo<select value={typeFilter} onChange={(event) => {setTypeFilter(event.target.value);setPage(1)}}><option value="all">Todos ({items.length})</option>{movementTypeOptions.map((option) => <option key={option.value} value={option.value}>{option.label} ({counts[option.value] || 0})</option>)}</select></label>
       </div>
       {!visible.length ? <p className="movement-empty">Nenhum registro corresponde aos filtros.</p> : <div className="movement-record-groups">
         {groups.map((group) => {
-          const groupItems = visible.filter((item) => String(item.type) === group.value);
+          const groupItems = pageItems.filter((item) => String(item.type) === group.value);
           return <section key={group.value} className="movement-record-group">
             <header><strong>{group.label}</strong><span>{groupItems.length}</span></header>
             <div>{groupItems.map((item, index) => <article key={String(item.id ?? index)}>
@@ -1235,6 +1241,14 @@ function MovementRecords({
           </section>;
         })}
       </div>}
+      {visible.length > pageSize && <nav className="movement-pagination" aria-label="Paginação dos afastamentos">
+        <span>Exibindo {pageStart + 1}–{Math.min(pageStart + pageSize, visible.length)} de {visible.length}</span>
+        <div>
+          <button type="button" disabled={safePage <= 1} onClick={()=>setPage(Math.max(1, safePage - 1))}>← Anterior</button>
+          <b>{safePage} / {totalPages}</b>
+          <button type="button" disabled={safePage >= totalPages} onClick={()=>setPage(Math.min(totalPages, safePage + 1))}>Próxima →</button>
+        </div>
+      </nav>}
     </section>
   );
 }

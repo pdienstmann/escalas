@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, type AnchorHTMLAttributes, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
+import { startTransition, useEffect, useRef, useState, type AnchorHTMLAttributes, type ReactNode } from "react";
 
 type FullPageLinkProps = Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href"> & {
   href: string;
@@ -25,14 +26,10 @@ const routeNames: Record<string, string> = {
   "/validacao": "Validação",
 };
 
-function prefetchPage(href: string) {
+function prefetchPage(href: string, prefetch: (href: string) => void) {
   if (prefetchedPages.has(href)) return;
   prefetchedPages.add(href);
-  const link = document.createElement("link");
-  link.rel = "prefetch";
-  link.href = href;
-  link.dataset.prefetch = href;
-  document.head.appendChild(link);
+  try { prefetch(href); } catch { prefetchedPages.delete(href); }
 }
 
 function destinationName(href: string) {
@@ -41,33 +38,33 @@ function destinationName(href: string) {
 }
 
 export function FullPageLink({ href, children, ...props }: FullPageLinkProps) {
+  const router = useRouter();
+  const [showFeedback, setShowFeedback] = useState(false);
+  const feedbackTimer = useRef<number | null>(null);
+  const fallbackTimer = useRef<number | null>(null);
   useEffect(() => {
-    const schedule = () => prefetchPage(href);
+    const schedule = () => prefetchPage(href, router.prefetch);
     const idle = "requestIdleCallback" in window
       ? window.requestIdleCallback(schedule, { timeout: 1800 })
       : window.setTimeout(schedule, 700);
     return () => {
       if ("cancelIdleCallback" in window) window.cancelIdleCallback(idle);
       else window.clearTimeout(idle);
+      if (feedbackTimer.current !== null) window.clearTimeout(feedbackTimer.current);
+      if (fallbackTimer.current !== null) window.clearTimeout(fallbackTimer.current);
     };
-  }, [href]);
+  }, [href, router]);
 
-  const prefetch = () => prefetchPage(href);
-  return <a href={href} {...props} onClick={(event) => {
-    props.onClick?.(event);
-    if (event.defaultPrevented) return;
-    event.preventDefault();
-    const overlay = document.createElement("div");
-    overlay.className = "route-transition";
-    overlay.setAttribute("role", "status");
-    overlay.setAttribute("aria-live", "polite");
-    const spinner = document.createElement("span");
-    spinner.className = "route-transition-spinner";
-    spinner.setAttribute("aria-hidden", "true");
-    const label = document.createElement("b");
-    label.textContent = `Abrindo ${destinationName(href)}…`;
-    overlay.append(spinner, label);
-    document.body.appendChild(overlay);
-    requestAnimationFrame(() => window.location.assign(href));
-  }} onPointerEnter={(event) => { props.onPointerEnter?.(event); prefetch(); }} onFocus={(event) => { props.onFocus?.(event); prefetch(); }}>{children}</a>;
+  const prefetch = () => prefetchPage(href, router.prefetch);
+  return <>
+    <a href={href} {...props} onClick={(event) => {
+      props.onClick?.(event);
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || props.target === "_blank" || props.download) return;
+      event.preventDefault();
+      feedbackTimer.current = window.setTimeout(() => setShowFeedback(true), 180);
+      fallbackTimer.current = window.setTimeout(() => window.location.assign(href), 8000);
+      startTransition(() => router.push(href));
+    }} onPointerEnter={(event) => { props.onPointerEnter?.(event); prefetch(); }} onFocus={(event) => { props.onFocus?.(event); prefetch(); }}>{children}</a>
+    {showFeedback && <div className="route-transition" role="status" aria-live="polite"><span className="route-transition-spinner" aria-hidden="true"/><b>{`Abrindo ${destinationName(href)}…`}</b></div>}
+  </>;
 }

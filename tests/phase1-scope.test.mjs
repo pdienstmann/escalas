@@ -79,7 +79,7 @@ test("the More navigation stays visible above the responsive tab bar", () => {
   const nav = readFileSync(resolve("app/schedule-nav.tsx"), "utf8");
   const styles = readFileSync(resolve("app/simple-ux.css"), "utf8");
   assert.match(nav, /<details className=\{`nav-more/);
-  assert.match(nav, /moreItems\.map/);
+  assert.match(nav, /moreGroups\.map/);
   assert.match(nav, /activeMoreItem/);
   assert.match(nav, /aria-label=\{activeMoreItem/);
   assert.match(styles, /\.tabs\{position:relative;z-index:60;overflow:visible!important\}/);
@@ -87,6 +87,29 @@ test("the More navigation stays visible above the responsive tab bar", () => {
   assert.match(styles, /\.nav-more\.has-active summary/);
   assert.match(styles, /flex-wrap:wrap/);
   assert.match(styles, /max-height:calc\(100dvh - 130px\)/);
+});
+
+test("operational navigation is grouped on desktop and uses a compact mobile bar", () => {
+  const nav = readFileSync(resolve("app/schedule-nav.tsx"), "utf8");
+  const link = readFileSync(resolve("app/full-page-link.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/interaction-system.css"), "utf8");
+  assert.match(nav, /Gestão do efetivo/);
+  assert.match(nav, /Preparação da escala/);
+  assert.match(nav, /Conferência/);
+  assert.match(nav, /mobile-module-nav/);
+  assert.match(link, /useRouter/);
+  assert.match(link, /router\.push\(href\)/);
+  assert.match(styles, /grid-template-columns: repeat\(5/);
+  assert.match(styles, /body \{ padding-bottom:/);
+});
+
+test("large movement lists paginate without mounting every record at once", () => {
+  const dashboard = readFileSync(resolve("app/gestao-client.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/interaction-system.css"), "utf8");
+  assert.match(dashboard, /const pageSize = 50/);
+  assert.match(dashboard, /pageItems = visible\.slice/);
+  assert.match(dashboard, /movement-pagination/);
+  assert.match(styles, /\.movement-pagination/);
 });
 
 test("every operational module shares date-preserving navigation with discreet feedback", () => {
