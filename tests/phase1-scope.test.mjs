@@ -1600,3 +1600,18 @@ test("fleet views group vehicle types and expose date-specific available and FA 
   assert.match(managementStyles, /\.fleet-type-group/);
   assert.match(dashboardStyles, /\.dashboard-fleet-types/);
 });
+
+test("operations allow safe basic edits and expose their impact before confirmation", () => {
+  const api = readFileSync(resolve("app/api/operations/route.ts"), "utf8");
+  const dashboard = readFileSync(resolve("app/operations-dashboard.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/operations-refinements.css"), "utf8");
+  assert.match(api, /body\.action==="update_details"/);
+  assert.match(api, /Reabra a operação antes de editar seus dados/);
+  assert.match(api, /UPDATE operations SET title=\?,location=\?,commander=\?,reference=\?,notes=\?/);
+  assert.match(dashboard, /function EditOperationDialog/);
+  assert.match(dashboard, /function OperationImpact/);
+  assert.match(dashboard, /Antes de confirmar/);
+  assert.match(dashboard, /Editar dados/);
+  assert.match(styles, /\.operation-impact/);
+  assert.match(styles, /\.operation-edit-protection/);
+});

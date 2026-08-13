@@ -194,6 +194,18 @@ export async function POST(request:Request){
     const operation=await env.DB.prepare("SELECT s.date FROM operations o JOIN schedules s ON s.id=o.schedule_id WHERE o.id=?").bind(operationId).first<{date:string}>();
     return Response.json({ok:true,message:"Vaga liberada.",operations:await loadOperations(String(operation?.date))});
   }
+  if(body.action==="update_details"){
+    const operationId=Number(body.operationId);
+    const title=String(body.title||"").trim();
+    if(!title)return Response.json({error:"Informe o nome da operação."},{status:400});
+    const before=await env.DB.prepare("SELECT o.*,s.date FROM operations o JOIN schedules s ON s.id=o.schedule_id WHERE o.id=? AND o.status='draft'").bind(operationId).first<Row>();
+    if(!before)return Response.json({error:"Reabra a operação antes de editar seus dados."},{status:409});
+    await env.DB.prepare("UPDATE operations SET title=?,location=?,commander=?,reference=?,notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='draft'")
+      .bind(title,String(body.location||"").trim()||null,String(body.commander||"").trim()||null,String(body.reference||"").trim()||null,String(body.notes||"").trim()||null,operationId).run();
+    const after=await env.DB.prepare("SELECT * FROM operations WHERE id=?").bind(operationId).first<Row>();
+    await writeAudit(request,{action:"update",entityType:"operation",entityId:operationId,summary:`Editou os dados da operação ${title}`,before,after,undoable:false});
+    return Response.json({ok:true,message:"Dados da operação atualizados.",operations:await loadOperations(String(before.date))});
+  }
   if(body.action==="confirm"){
     const operationId=Number(body.operationId);
     const vacant=await env.DB.prepare("SELECT COUNT(*) total FROM operation_slots WHERE operation_id=? AND guard_id IS NULL").bind(operationId).first<{total:number}>();

@@ -89,7 +89,7 @@ Este arquivo transforma a revisao de UX em trabalho executavel. Nenhuma etapa de
 - Mostrar D1/D2 e N1/N2 de modo mais claro, com seletor de periodo e diferencas visuais.
 - Fazer grupamentos parecerem secoes da escala, com destino, VTR, equipe e horario claros.
 - Adicionar desfazer nos padroes e proteger substituicao de escala editada.
-- Permitir editar dados basicos de operacao e mostrar impactos/remanejamentos antes da confirmacao.
+- Permitir editar dados basicos de operacao e mostrar impactos/remanejamentos antes da confirmacao. Concluido para identificacao, responsavel, referencia e orientacoes, sem alterar por engano o periodo, as VTRs ou as vagas.
 
 ## 7. Cadastros
 
