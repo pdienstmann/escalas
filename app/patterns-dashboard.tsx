@@ -34,6 +34,7 @@ type Resource = {
   section: string;
   label: string;
   detail: string;
+  type?: string | number | null;
   members: Rec[];
 };
 
@@ -166,6 +167,10 @@ export function PatternsDashboard() {
     );
     let role = String(slot.role || "guard");
     if (destination.startsWith("post:")) role = "guard";
+    const targetVehicle = destination.startsWith("vehicle:")
+      ? data!.vehicles.find((vehicle) => Number(vehicle.id) === Number(destination.split(":")[1]))
+      : null;
+    if (String(targetVehicle?.type || "").toLowerCase() === "moto") role = "driver";
     if (destination.startsWith("vehicle:") && !["driver", "patrol", "third"].includes(role)) {
       role = !targetMembers.some((item) => item.role === "driver")
         ? "driver"
@@ -333,7 +338,7 @@ function PatternBoard({ pattern, data, search, showEmpty, busy, memberEditing, a
   const patternId = Number(pattern.id);
   const members = data.slots.filter((slot) => Number(slot.pattern_id) === patternId);
   const resources = buildResources(data, members, search, showEmpty);
-  const issues = validatePattern(members);
+  const issues = validatePattern(members, data.vehicles);
   const addKeyPrefix = `${patternId}|`;
   const sections = [...new Set(resources.map((resource) => resource.section))];
 
@@ -506,7 +511,7 @@ function PatternPreview({ data, date, dayCode, nightCode, busy, onClose, onApply
   const daySlots = data.slots.filter((slot) => Number(slot.pattern_id) === Number(dayPattern?.id));
   const nightSlots = data.slots.filter((slot) => Number(slot.pattern_id) === Number(nightPattern?.id));
   const allResources = buildResources(data, [...daySlots, ...nightSlots], "", false);
-  const issues = [...validatePattern(daySlots), ...validatePattern(nightSlots)];
+  const issues = [...validatePattern(daySlots, data.vehicles), ...validatePattern(nightSlots, data.vehicles)];
   const formatted = new Date(`${date}T12:00:00`).toLocaleDateString("pt-BR");
   return <div className="pattern-preview-backdrop"><section className="pattern-preview" role="dialog" aria-modal="true" aria-labelledby="pattern-preview-title"><header><div><small>PRÉVIA ANTES DE SUBSTITUIR A ESCALA</small><h2 id="pattern-preview-title">Escala de {formatted}</h2><p>{dayCode} no diurno · {nightCode} no noturno · {data.weeklySlots.length} posições semanais também serão consideradas</p></div><button onClick={onClose} aria-label="Fechar prévia">×</button></header><div className="pattern-preview-summary"><span><b>{daySlots.length}</b> diurno</span><span><b>{nightSlots.length}</b> noturno</span><span className={issues.length ? "warn" : "ok"}><b>{issues.length}</b> pendências</span></div><div className="pattern-preview-table"><div className="preview-row preview-head"><b>Posto / VTR</b><b>2º · 07–13</b><b>3º · 13–19</b><b>4º · 19–01</b><b>1º · 01–07</b></div>{allResources.map((resource) => { const day = daySlots.filter((slot) => resourceKey(slot) === resource.key); const night = nightSlots.filter((slot) => resourceKey(slot) === resource.key); return <div className="preview-row" key={resource.key}><div><b>{resource.label}</b><small>{resource.detail}</small></div><PreviewMembers members={membersForShift(day, "2")} /><PreviewMembers members={membersForShift(day, "3")} /><PreviewMembers members={membersForShift(night, "4")} /><PreviewMembers members={membersForShift(night, "1")} /></div>; })}</div><footer><p>{issues.length ? "Existem pendências visuais. Você pode voltar e corrigi-las antes de aplicar." : "A composição está pronta para gerar a escala diária."}</p><button onClick={onClose}>Voltar ao editor</button><button className="save" disabled={busy} onClick={onApply}>{busy ? "Aplicando…" : `Aplicar ${dayCode} + ${nightCode}`}</button></footer></section></div>;
 }
@@ -584,6 +589,7 @@ function buildResources(data: Data, members: Rec[], search: string, showEmpty: b
     kind: "vehicle",
     section: "VIATURAS E ZONAS",
     label: String(vehicle.prefix),
+    type: vehicle.type,
     detail: String(vehicle.zone || "Zona não definida"),
     members: members.filter((member) => Number(member.vehicle_id) === Number(vehicle.id)),
   }));
@@ -607,6 +613,7 @@ function resourceKey(slot: Rec) {
 
 function suggestRole(resource: Resource) {
   if (resource.kind === "post") return "guard";
+  if (String(resource.type || "").toLowerCase() === "moto") return "driver";
   if (!resource.members.some((member) => member.role === "driver")) return "driver";
   if (!resource.members.some((member) => member.role === "patrol")) return "patrol";
   return "third";

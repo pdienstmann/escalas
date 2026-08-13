@@ -10,7 +10,7 @@ import { permitted } from "../../../lib/access";
 import { isScheduleDate, todayScheduleDate } from "../../../lib/schedule-date";
 import { fullPeriodShifts, fullPeriodWindow, shiftTimes as periodShiftTimes, operationalShiftWindow, isDayShift, splitExtensionWindow } from "../../../lib/shift-rules";
 import { rankGuardSuggestions, describeReasons } from "../../../lib/suggest-gm";
-import { hasRequiredVehicleCrew, hasUniqueCrewMembers } from "../../../lib/crew-rules";
+import { hasRequiredVehicleCrew, hasUniqueCrewMembers, isMotorcycleType } from "../../../lib/crew-rules";
 import { orderedResourceGuardIds } from "../../../lib/schedule-lanes";
 import { copiedBlockStatus } from "../../../lib/copy-rules";
 import { ensureOperationalGroups } from "../../../lib/operational-groups-db";
@@ -704,6 +704,20 @@ async function upsertAssignment(
     if (!Number.isFinite(regularMs) || regularMs < startMs || regularMs > endMs)
       return { error: "O fim do horário normal deve ficar entre a entrada e a saída.", status: 400 as const };
   }
+  let normalizedRole = String(b.role || "guard");
+  if (b.vehicleId) {
+    const vehicle = await env.DB.prepare("SELECT id,type FROM vehicles WHERE id=? AND active=1").bind(Number(b.vehicleId)).first<{ id: number; type: string | null }>();
+    if (!vehicle) return { error: "A viatura não foi encontrada ou está desativada.", status: 404 as const };
+    if (isMotorcycleType(vehicle.type)) {
+      const occupied = await env.DB.prepare(
+        "SELECT guard_id FROM assignments WHERE schedule_id=? AND vehicle_id=? AND id!=? AND starts_at<? AND ends_at>? AND COALESCE(work_kind,'shift')!='overtime_extension'",
+      ).bind(opts.scheduleId, Number(b.vehicleId), id, opts.end, opts.start).all<{ guard_id: number }>();
+      if (occupied.results.some((row) => Number(row.guard_id) !== Number(opts.guardId))) {
+        return { error: "Esta moto já possui um GM no mesmo horário. Motos comportam somente um condutor.", status: 409 as const };
+      }
+      normalizedRole = "driver";
+    }
+  }
   const blocked = await assertAssignable(opts.scheduleId, opts.guardId, opts.start, opts.end, id);
   if (blocked) return blocked;
   let assignmentId = id;
@@ -718,7 +732,7 @@ async function upsertAssignment(
         b.postId || null,
         b.vehicleId || null,
         opts.shift,
-        b.role,
+        normalizedRole,
         opts.start,
         opts.end,
         b.regularEndsAt || null,
@@ -742,7 +756,7 @@ async function upsertAssignment(
         b.postId || null,
         b.vehicleId || null,
         opts.shift,
-        b.role,
+        normalizedRole,
         opts.start,
         opts.end,
         b.regularEndsAt || null,
@@ -1124,7 +1138,7 @@ export async function POST(request: Request) {
     if((postId?1:0)+(vehicleId?1:0)!==1)return Response.json({error:"Escolha um único destino para colar."},{status:400});
     const resource=postId
       ? await env.DB.prepare("SELECT id FROM posts WHERE id=? AND active=1").bind(postId).first()
-      : await env.DB.prepare("SELECT id FROM vehicles WHERE id=? AND active=1").bind(vehicleId).first();
+      : await env.DB.prepare("SELECT id,type FROM vehicles WHERE id=? AND active=1").bind(vehicleId).first<{ id: number; type: string | null }>();
     if(!resource)return Response.json({error:"O destino não existe mais ou foi desativado."},{status:404});
     const excluded=await env.DB.prepare("SELECT id FROM schedule_resource_exclusions WHERE schedule_id=? AND resource_kind=? AND resource_id=? LIMIT 1").bind(scheduleId,postId?"post":"vehicle",postId||vehicleId).first();
     if(excluded)return Response.json({error:"Este local foi retirado da escala e não pode receber o GM."},{status:409});
@@ -1142,8 +1156,11 @@ export async function POST(request: Request) {
     let role=postId?"guard":String(source.role||"third");
     if(vehicleId){
       const occupied=(await env.DB.prepare("SELECT role FROM assignments WHERE schedule_id=? AND vehicle_id=? AND starts_at<? AND ends_at>?").bind(scheduleId,vehicleId,interval.end,interval.start).all<{role:string}>()).results;
+      if (isMotorcycleType((resource as { type?: string | null }).type) && occupied.length) {
+        return Response.json({ error: "Esta moto já possui um GM no mesmo horário. Motos comportam somente um condutor." }, { status: 409 });
+      }
       const roles=new Set(occupied.map(item=>String(item.role)));
-      role=!roles.has("driver")?"driver":!roles.has("patrol")?"patrol":"third";
+      role=isMotorcycleType((resource as { type?: string | null }).type) ? "driver" : !roles.has("driver")?"driver":!roles.has("patrol")?"patrol":"third";
     }
     const created=await env.DB.prepare(`INSERT INTO assignments
       (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,work_kind,status,request_ref,is_reassigned,reassignment_note)
@@ -1259,10 +1276,14 @@ export async function POST(request: Request) {
     const schedule = await env.DB.prepare("SELECT date FROM schedules WHERE id=?").bind(scheduleId).first<{ date: string }>();
     if (!schedule)
       return Response.json({ error: "Escala não encontrada." }, { status: 404 });
+    let vehicleType: string | null = null;
     if (vehicleId) {
-      const vehicle = await env.DB.prepare("SELECT id FROM vehicles WHERE id=? AND active=1").bind(vehicleId).first();
+      const vehicle = await env.DB.prepare("SELECT id,type FROM vehicles WHERE id=? AND active=1").bind(vehicleId).first<{ id: number; type: string | null }>();
       if (!vehicle)
         return Response.json({ error: "Viatura não encontrada ou desativada." }, { status: 404 });
+      vehicleType = vehicle.type;
+      if (isMotorcycleType(vehicle.type) && members.length > 1)
+        return Response.json({ error: "Motos comportam somente um GM condutor. Remova os integrantes extras antes de salvar." }, { status: 400 });
       const outage = await env.DB.prepare(
         "SELECT id FROM vehicle_outages WHERE vehicle_id=? AND active=1 AND starts_on<=? AND (ends_on IS NULL OR ends_on>=?) LIMIT 1",
       ).bind(vehicleId, schedule.date, schedule.date).first();
@@ -1312,7 +1333,7 @@ export async function POST(request: Request) {
     if (vehicleId) {
       for (const shift of periodShifts) {
         const existingRoles = (await env.DB.prepare("SELECT role FROM assignments WHERE schedule_id=? AND vehicle_id=? AND shift=?").bind(scheduleId, vehicleId, shift).all<{ role: string }>()).results.map((item) => item.role);
-        if (!hasRequiredVehicleCrew(existingRoles, members.map((member) => member.role)))
+        if (!hasRequiredVehicleCrew(existingRoles, members.map((member) => member.role), vehicleType))
           return Response.json({ error: "Toda viatura precisa ter motorista e patrulheiro. Selecione as duas funções antes de salvar." }, { status: 400 });
       }
     }
@@ -1325,14 +1346,14 @@ export async function POST(request: Request) {
         changedIds.push(id);
         statements.push(env.DB.prepare(
           "UPDATE assignments SET post_id=?,vehicle_id=?,role=?,status='normal',request_ref=NULL,is_reassigned=1,reassignment_note=?,lane_order=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-        ).bind(postId, vehicleId, vehicleId ? member.role : "guard", `Remanejamento rápido para ${vehicleId ? "viatura" : "posto"}`, id));
+        ).bind(postId, vehicleId, vehicleId ? (isMotorcycleType(vehicleType) ? "driver" : member.role) : "guard", `Remanejamento rápido para ${vehicleId ? "viatura" : "posto"}`, id));
       }
     }
     for (const member of members.filter((item) => item.source !== "redeploy")) {
       for (const shift of periodShifts) {
         const interval = periodShiftTimes(schedule.date, shift);
         const isOvertime = member.source === "overtime";
-        statements.push(env.DB.prepare("INSERT INTO assignments (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,work_kind,status,request_ref) VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(scheduleId, member.guardId, postId, vehicleId, shift, vehicleId ? member.role : "guard", interval.start, interval.end, "shift", isOvertime ? "overtime" : "normal", isOvertime ? "Sugestão inteligente · equipe oposta" : null));
+        statements.push(env.DB.prepare("INSERT INTO assignments (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,work_kind,status,request_ref) VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(scheduleId, member.guardId, postId, vehicleId, shift, vehicleId ? (isMotorcycleType(vehicleType) ? "driver" : member.role) : "guard", interval.start, interval.end, "shift", isOvertime ? "overtime" : "normal", isOvertime ? "Sugestão inteligente · equipe oposta" : null));
       }
     }
     const results = await env.DB.batch(statements);
@@ -1383,9 +1404,16 @@ export async function POST(request: Request) {
       return Response.json({ error: "Escala não encontrada." }, { status: 404 });
     const destination = postId
       ? await env.DB.prepare("SELECT id,name label FROM posts WHERE id=? AND active=1").bind(postId).first<Record<string, unknown>>()
-      : await env.DB.prepare("SELECT id,prefix label FROM vehicles WHERE id=? AND active=1").bind(vehicleId).first<Record<string, unknown>>();
+      : await env.DB.prepare("SELECT id,prefix label,type FROM vehicles WHERE id=? AND active=1").bind(vehicleId).first<Record<string, unknown>>();
     if (!destination)
       return Response.json({ error: "Destino não encontrado ou desativado." }, { status: 404 });
+    if (vehicleId && isMotorcycleType(destination.type)) {
+      if (guardIds.size > 1)
+        return Response.json({ error: "Motos comportam somente um GM condutor. Mova apenas um quadradinho para esta viatura." }, { status: 409 });
+      const targetOccupied = await env.DB.prepare("SELECT id FROM assignments WHERE schedule_id=? AND vehicle_id=? AND id NOT IN (" + assignmentIds.map(() => "?").join(",") + ") LIMIT 1").bind(scheduleId, vehicleId, ...assignmentIds).first();
+      if (targetOccupied)
+        return Response.json({ error: "Esta moto já possui um GM nesta escala." }, { status: 409 });
+    }
     if (vehicleId) {
       const outage = await env.DB.prepare(
         "SELECT id FROM vehicle_outages WHERE vehicle_id=? AND active=1 AND starts_on<=? AND (ends_on IS NULL OR ends_on>=?) LIMIT 1",
@@ -1400,8 +1428,10 @@ export async function POST(request: Request) {
     // integrantes. A validação relevante aqui é a disponibilidade do próprio GM,
     // não uma capacidade fixa do destino.
 
-    const requestedRole = vehicleId && ["driver", "patrol", "third"].includes(String(b.role))
-      ? String(b.role)
+    const requestedRole = vehicleId && isMotorcycleType(destination.type)
+      ? "driver"
+      : vehicleId && ["driver", "patrol", "third"].includes(String(b.role))
+        ? String(b.role)
       : null;
     const reassignmentNote = String(
       b.reassignmentNote || "Avisar o GM: remanejamento para cobrir furo de escala",
@@ -1578,10 +1608,22 @@ export async function POST(request: Request) {
       return Response.json({error:"Escolha o local da extensão."},{status:400});
     const conflict=await assertAssignable(scheduleId,Number(base.guard_id),startsAt,endsAt,0);
     if(conflict)return Response.json({error:conflict.error},{status:conflict.status});
+    let extensionRole = String(b.role || (vehicleId ? "third" : "guard"));
+    if (vehicleId) {
+      const vehicle = await env.DB.prepare("SELECT type FROM vehicles WHERE id=? AND active=1").bind(vehicleId).first<{ type: string | null }>();
+      if (!vehicle) return Response.json({ error: "A viatura não foi encontrada ou está desativada." }, { status: 404 });
+      if (isMotorcycleType(vehicle.type)) {
+        const occupied = await env.DB.prepare(
+          "SELECT id FROM assignments WHERE schedule_id=? AND vehicle_id=? AND starts_at<? AND ends_at>? AND COALESCE(work_kind,'shift')!='overtime_extension' LIMIT 1",
+        ).bind(scheduleId, vehicleId, endsAt, startsAt).first();
+        if (occupied) return Response.json({ error: "Esta moto já possui uma pessoa no intervalo informado." }, { status: 409 });
+        extensionRole = "driver";
+      }
+    }
     const created=await env.DB.prepare(`INSERT INTO assignments
       (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,regular_ends_at,work_kind,status,request_ref,is_reassigned,reassignment_note)
       VALUES (?,?,?,?,?,?,?,?,?,'overtime_extension','overtime',?,0,?)`)
-      .bind(scheduleId,base.guard_id,postId,vehicleId,b.shift||(direction==="before"?"3":"4"),b.role||(vehicleId?"third":"guard"),startsAt,endsAt,startsAt,b.requestRef||null,direction==="before"?"Antecipação independente em hora extra":"Extensão independente do expediente").run();
+      .bind(scheduleId,base.guard_id,postId,vehicleId,b.shift||(direction==="before"?"3":"4"),extensionRole,startsAt,endsAt,startsAt,b.requestRef||null,direction==="before"?"Antecipação independente em hora extra":"Extensão independente do expediente").run();
     const assignment=await env.DB.prepare("SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id=?").bind(created.meta.last_row_id).first<Record<string,unknown>>();
     const auditEventId=await writeAudit(request,{action:"create",entityType:"assignment",entityId:Number(created.meta.last_row_id),summary:direction==="before"?`Antecipou ${base.guard_name} em HE desde ${startsAt.slice(11,16)}`:`Estendeu ${base.guard_name} em HE até ${endsAt.slice(11,16)}`,after:assignment,undoable:true});
     return Response.json({ok:true,assignment,auditEventId,message:`HE de ${base.guard_name} adicionada como bloco independente.`});

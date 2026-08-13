@@ -5,6 +5,7 @@ import { FullPageLink as Link } from "./full-page-link";
 import { ModuleLoading } from "./module-loading";
 import { useScheduleDate } from "./use-schedule-date";
 import { formatScheduleDate } from "../lib/schedule-date";
+import { isMotorcycleType } from "../lib/crew-rules";
 
 type Rec = Record<string, string | number | null>;
 type ValidationIssue = {
@@ -119,7 +120,7 @@ export function ValidateSchedule() {
     );
   }
 
-  const expected = (currentData.posts.length + currentData.vehicles.length * 2) * 4;
+  const expected = (currentData.posts.length * 4) + currentData.vehicles.reduce((total, vehicle) => total + (isMotorcycleType(vehicle.type) ? 1 : 2) * 4, 0);
   const filled = currentData.assignments.length;
 
   return (
@@ -154,7 +155,7 @@ export function ValidateSchedule() {
         <ul>
           <li>Conflitos de horário são bloqueados ao salvar e também na publicação.</li>
           <li>Guardas afastados, postos excluídos e viaturas em FA não entram como pendência.</li>
-          <li>Viaturas ativas exigem motorista e patrulheiro em cada turno.</li>
+          <li>Viaturas ativas exigem motorista e patrulheiro em cada turno; motos exigem apenas um condutor.</li>
           <li>Postos ativos exigem ao menos um GM em cada turno.</li>
         </ul>
       </section>

@@ -1295,6 +1295,8 @@ test("pattern grupamento members can own a turn and VTR without duplicating the 
   assert.match(db, /ALTER TABLE pattern_operational_group_members ADD COLUMN \$\{name\} \$\{definition\}/);
   assert.match(db, /\["shift", "TEXT"\]/);
   assert.match(engine, /groupAssignments/);
+  assert.match(engine, /groupOwnsGuard/);
+  assert.match(engine, /assignedPostId = groupOwnsGuard \? null/);
   assert.match(engine, /assignedVehicleId/);
   assert.match(patternsApi, /m\.shift,m\.vehicle_id,m\.starts_at,m\.ends_at/);
   assert.match(patternsApi, /pattern_operational_group_members \(pattern_id,group_id,resource_kind,resource_id,team_label,shift,vehicle_id/);

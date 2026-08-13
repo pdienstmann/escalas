@@ -6,6 +6,7 @@ import { formatScheduleDate, withScheduleDate } from "../lib/schedule-date";
 import { orderScheduleResources } from "../lib/schedule-sections";
 import { compactRequestReference } from "../lib/request-reference";
 import { assignmentOverlapsShift, operationalShiftWindow } from "../lib/shift-rules";
+import { isMotorcycleType } from "../lib/crew-rules";
 type Rec = Record<string, string | number | null>;
 type OperationSlot = Rec & { id:number; role:string; guard_name?:string|null; source_type?:string|null };
 type OperationVehicle = Rec & { id:number; prefix:string; type:string; zone?:string|null; slots:OperationSlot[] };
@@ -145,14 +146,16 @@ function PrintPage({
                           : a.post_id === r.id) && assignmentOverlapsShift(a,data.date,s.id) && !isGroupOwnedAssignment(data,a,s.id),
                     ),
                     missingRoles = kind === "vehicle"
-                      ? ["driver", "patrol"].filter((role) => !list.some((assignment) => String(assignment.role) === role && !isOvertimeExtensionCell(assignment,data.date,s.id)))
+                      ? isMotorcycleType(r.type)
+                        ? (list.some((assignment) => !isOvertimeExtensionCell(assignment,data.date,s.id)) ? [] : ["driver"])
+                        : ["driver", "patrol"].filter((role) => !list.some((assignment) => String(assignment.role) === role && !isOvertimeExtensionCell(assignment,data.date,s.id)))
                       : list.length ? [] : ["guard"];
                   return (
                     <td key={s.id}>
                       {list.map((a) => {const visualStatus=statusInShift(a,data.date,s.id);return (
                         <div className={`print-person ${visualStatus}`} key={a.id}>
                           {kind === "vehicle" && (
-                            <span>{isOvertimeExtensionCell(a,data.date,s.id)?"R":a.role === "driver" ? "M" : a.role === "patrol" ? "P" : "R"}</span>
+                             <span>{isOvertimeExtensionCell(a,data.date,s.id)?"R":isMotorcycleType(r.type)?"M":a.role === "driver" ? "M" : a.role === "patrol" ? "P" : "R"}</span>
                           )}
                           <b>{a.guard_name}</b>
                           {visualStatus !== "normal" && (
@@ -259,7 +262,11 @@ function PrintOperationalGroupRows({ data, period }: { data: State; period: "day
               const vehicle = member.vehicle_id ? data.vehicles.find((item) => Number(item.id) === Number(member.vehicle_id)) : assignment?.vehicle_id ? data.vehicles.find((item) => Number(item.id) === Number(assignment.vehicle_id)) : null;
               const destination = vehicle ? `${vehicleIcon(String(vehicle.type))} ${String(vehicle.prefix)}` : assignment?.post_id ? String(data.posts.find((post) => Number(post.id) === Number(assignment.post_id))?.name || "Posto") : "À disposição";
               const time = member.starts_at && member.ends_at ? `${String(member.starts_at).slice(0, 5)}–${String(member.ends_at).slice(0, 5)}` : shiftLabel(shift.id);
-              return <span className={`print-person print-group-person ${assignment ? "normal" : "print-group-unassigned"}`} key={`${member.id}-${shift.id}`}><b>{guards.get(Number(member.resource_id)) || `GM ${member.resource_id}`}</b><small>{destination} · {time}</small>{assignment?.request_ref && <em>Req. {compactRequestReference(assignment.request_ref)}</em>}</span>;
+              const movement = data.movements.find((item) => Number(item.guard_id) === Number(member.resource_id) && String(item.starts_at || "") < `${data.date}T23:59` && String(item.ends_at || "") > `${data.date}T00:00`);
+              const visualStatus = assignment ? statusInShift(assignment, data.date, shift.id) : movement ? "away" : "normal";
+              const role = vehicle && isMotorcycleType(vehicle.type) ? "M" : assignment?.role === "driver" ? "M" : assignment?.role === "patrol" ? "P" : "GM";
+              const statusLabel = visualStatus === "overtime" ? "HE" : visualStatus === "time_bank" ? "BH" : visualStatus === "swap" ? "TROCA" : visualStatus === "away" ? String(movement?.type || "AFASTADO").toUpperCase() : "";
+              return <span className={`print-person print-group-person ${assignment ? visualStatus : "print-group-unassigned"}`} key={`${member.id}-${shift.id}`}><b><i className="print-group-role">{role}</i>{guards.get(Number(member.resource_id)) || `GM ${member.resource_id}`}{statusLabel && <em className={`print-group-status ${visualStatus}`}>{statusLabel}</em>}</b><small>{destination} · {time}</small>{assignment?.request_ref && <em>Req. {compactRequestReference(assignment.request_ref)}</em>}</span>;
             })}</td>)}
           </tr>;
         })}

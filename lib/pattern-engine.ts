@@ -177,8 +177,16 @@ export async function applyPatternsToSchedule(
         const customEnd = String(groupAssignment?.ends_at || "").trim();
         const startsAt = customStart ? `${date}T${customStart}` : t.start;
         const endsAt = customEnd ? `${shift === "4" && customEnd < customStart ? new Date(`${date}T12:00:00Z`).toISOString().slice(0, 10) : date}T${customEnd}` : t.end;
-        const assignedVehicleId = groupAssignment?.vehicle_id != null ? Number(groupAssignment.vehicle_id) : slot.vehicle_id;
-        const assignedPostId = groupAssignment?.vehicle_id != null ? null : slot.post_id;
+        // Group-owned guards live only in the group section of the daily
+        // scale.  Even when the group member has not received a VTR yet,
+        // do not leave the conventional pattern assignment behind (that
+        // would render the same GM twice).  The unassigned record remains in
+        // the redeployment pool until a destination is chosen.
+        const groupOwnsGuard = Boolean(groupAssignment);
+        const assignedVehicleId = groupOwnsGuard
+          ? (groupAssignment?.vehicle_id != null ? Number(groupAssignment.vehicle_id) : null)
+          : slot.vehicle_id;
+        const assignedPostId = groupOwnsGuard ? null : slot.post_id;
         commands.push(
           db
             .prepare(

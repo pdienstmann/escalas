@@ -12,10 +12,15 @@ export function patternResourceKey(slot: PatternValue) {
   return "unassigned";
 }
 
-export function validatePattern(slots: PatternValue[]) {
+function isMotorcycle(vehicleType: unknown) {
+  return String(vehicleType || "").trim().toLowerCase() === "moto";
+}
+
+export function validatePattern(slots: PatternValue[], vehicles: PatternValue[] = []) {
   const issues: PatternIssue[] = [];
   const guardCount = new Map<number, number>();
   const resources = new Map<string, PatternValue[]>();
+  const vehicleTypes = new Map(vehicles.map((vehicle) => [Number(vehicle.id), vehicle.type]));
 
   for (const slot of slots) {
     const guardId = Number(slot.guard_id);
@@ -37,6 +42,13 @@ export function validatePattern(slots: PatternValue[]) {
 
   for (const [key, members] of resources) {
     if (!key.startsWith("vehicle:")) continue;
+    const vehicleId = Number(key.slice("vehicle:".length));
+    if (isMotorcycle(vehicleTypes.get(vehicleId))) {
+      if (members.length > 1) {
+        issues.push({ kind: "role", resourceKey: key, message: "Moto comporta somente um condutor." });
+      }
+      continue;
+    }
     const drivers = members.filter((member) => member.role === "driver").length;
     const patrols = members.filter((member) => member.role === "patrol").length;
     if (!drivers) issues.push({ kind: "hole", resourceKey: key, message: "Motorista ausente." });

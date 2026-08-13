@@ -20,6 +20,14 @@ test("pattern validation accepts a complete vehicle crew", () => {
   assert.equal(issues.length, 0);
 });
 
+test("pattern validation accepts a single motorcycle driver", () => {
+  const issues = validatePattern(
+    [{ id: 1, guard_id: 10, guard_name: "GM Moto", vehicle_id: 8, post_id: null, role: "driver" }],
+    [{ id: 8, type: "moto" }],
+  );
+  assert.equal(issues.length, 0);
+});
+
 test("pattern validation reports duplicate guards and missing destinations", () => {
   const issues = validatePattern([
     { id: 1, guard_id: 10, guard_name: "GM A", vehicle_id: null, post_id: 2, role: "guard" },

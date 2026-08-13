@@ -25,6 +25,14 @@ async function guardUsesRegime(guardId: number, regime: "12x36" | "weekly") {
   ).bind(guardId, regime).first();
   return Boolean(guard);
 }
+
+async function patternVehicleError(patternId: number, vehicleId: number, ignoreSlotId = 0) {
+  const vehicle = await env.DB.prepare("SELECT id,type FROM vehicles WHERE id=? AND active=1").bind(vehicleId).first<{ id: number; type: string | null }>();
+  if (!vehicle) return "A viatura não foi encontrada ou está inativa.";
+  if (String(vehicle.type || "").toLowerCase() !== "moto") return null;
+  const occupied = await env.DB.prepare("SELECT id FROM pattern_slots WHERE pattern_id=? AND vehicle_id=? AND id!=? LIMIT 1").bind(patternId, vehicleId, ignoreSlotId).first();
+  return occupied ? "Motos comportam somente um GM condutor no padrão." : null;
+}
 export async function GET(request: Request) {
   if (!permitted(request))
     return Response.json({ error: "Não autorizado" }, { status: 401 });
@@ -208,6 +216,10 @@ export async function POST(request: Request) {
     if (body.action === "update_slot") {
       const d = destination(body);
       const guardId = Number(body.guardId);
+      if (d.vehicleId) {
+        const vehicleError = await patternVehicleError(Number(body.patternId || 0), d.vehicleId, Number(body.id || 0));
+        if (vehicleError) return Response.json({ error: vehicleError }, { status: 409 });
+      }
       if (!(await guardUsesRegime(guardId, "12x36")))
         return Response.json({ error: "Este GM não pertence ao efetivo 12x36. Ajuste o regime em Cadastros antes de incluí-lo no padrão." }, { status: 409 });
       const before = await env.DB.prepare("SELECT * FROM pattern_slots WHERE id=?").bind(body.id).first<Record<string,unknown>>();
@@ -223,6 +235,10 @@ export async function POST(request: Request) {
     if (body.action === "add_slot") {
       const d = destination(body);
       const guardId = Number(body.guardId);
+      if (d.vehicleId) {
+        const vehicleError = await patternVehicleError(Number(body.patternId || 0), d.vehicleId);
+        if (vehicleError) return Response.json({ error: vehicleError }, { status: 409 });
+      }
       if (!(await guardUsesRegime(guardId, "12x36")))
         return Response.json({ error: "Este GM não pertence ao efetivo 12x36. Ajuste o regime em Cadastros antes de incluí-lo no padrão." }, { status: 409 });
       const created = await env.DB.prepare(

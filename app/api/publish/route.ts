@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { writeAudit } from "../../../lib/audit";
 import { permitted } from "../../../lib/access";
+import { isMotorcycleType } from "../../../lib/crew-rules";
 
 const shifts = ["2", "3", "4", "1"] as const;
 
@@ -125,9 +126,12 @@ function buildIssues(posts: Row[], vehicles: Row[], assignments: Row[]): Issue[]
     const vehicleId = numberValue(vehicle.id);
     for (const shift of shifts) {
       const members = byResource("vehicle", vehicleId, shift);
-      const missingRoles = ["driver", "patrol"].filter((role) => !members.some((member) => textValue(member.role) === role));
-      if (members.length < 2 || missingRoles.length > 0) {
-        const countText = `${members.length}/2 integrantes`;
+      const motorcycle = isMotorcycleType(vehicle.type);
+      const missingRoles = motorcycle
+        ? (members.length ? [] : ["driver"])
+        : ["driver", "patrol"].filter((role) => !members.some((member) => textValue(member.role) === role));
+      if ((motorcycle ? members.length < 1 : members.length < 2) || missingRoles.length > 0) {
+        const countText = motorcycle ? `${members.length}/1 condutor` : `${members.length}/2 integrantes`;
         const roleText = missingRoles.length ? `Funções ausentes: ${missingRoles.map((role) => role === "driver" ? "motorista" : "patrulheiro").join(" e ")}.` : "";
         issues.push({
           id: `vehicle-${vehicleId}-${shift}`,
