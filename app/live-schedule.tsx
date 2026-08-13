@@ -115,6 +115,8 @@ type OperationalGroupGridProps = {
   onSuggestHe: (assignment: Rec, shift: string, member: Rec) => void;
   onDetails: (assignment: Rec, shift: string) => void;
   onDelete: (assignment: Rec, shift: string) => void;
+  onDragStart: (assignment: Rec) => void;
+  onDragEnd: () => void;
   onCloseActions: () => void;
 };
 type SmartEditorCandidate = {
@@ -1470,6 +1472,8 @@ export function LiveSchedule() {
                    if (resource) setPick({ kind, resource, shift, assignment });
                  }}
                  onDelete={removeAssignmentSegment}
+                 onDragStart={(assignment) => setDraggingAssignmentId(Number(assignment.id))}
+                 onDragEnd={() => setDraggingAssignmentId(null)}
                  onCloseActions={() => setContextPick(null)}
                 />;
                 const first = index === 0 || gridResources[index - 1].displaySection !== displaySection;
@@ -2104,7 +2108,7 @@ function shiftLabel(shift: string) {
   return ({ "1": "01:00–07:00", "2": "07:00–13:00", "3": "13:00–19:00", "4": "19:00–01:00" } as Record<string, string>)[shift] || "horário do período";
 }
 
-function OperationalGroupsGrid({ date, groups, members, guards, posts, vehicles, assignments, movements = [], serviceAdjustments = [], shifts: visibleShifts, selectedGroup, selectedId, onOpenAssignment, onExtend, onAdjust, onSwap, onQuickStatus, onCopy, onSuggestHe, onDetails, onDelete, onCloseActions }: OperationalGroupGridProps) {
+function OperationalGroupsGrid({ date, groups, members, guards, posts, vehicles, assignments, movements = [], serviceAdjustments = [], shifts: visibleShifts, selectedGroup, selectedId, onOpenAssignment, onExtend, onAdjust, onSwap, onQuickStatus, onCopy, onSuggestHe, onDetails, onDelete, onDragStart, onDragEnd, onCloseActions }: OperationalGroupGridProps) {
   const guardById = useMemo(() => new Map(guards.map((guard) => [Number(guard.id), guard])), [guards]);
   const postById = useMemo(() => new Map(posts.map((post) => [Number(post.id), post])), [posts]);
   const vehicleById = useMemo(() => new Map(vehicles.map((vehicle) => [Number(vehicle.id), vehicle])), [vehicles]);
@@ -2153,15 +2157,15 @@ function OperationalGroupsGrid({ date, groups, members, guards, posts, vehicles,
     return operationalGroupMemberCoversShift(member, date, shift);
   }
   function locationLabel(assignment: Rec, member?: Rec) {
+    if (assignment.vehicle_id != null) {
+      const vehicle = vehicleById.get(Number(assignment.vehicle_id));
+      return `${vehicleIcon(String(vehicle?.type || "other"))} ${String(vehicle?.prefix || "VTR")} · ${String(vehicle?.zone || "zona não definida")}`;
+    }
+    if (assignment.post_id != null) return String(postById.get(Number(assignment.post_id))?.name || "Posto");
     if (member?.vehicle_id != null) {
       const vehicle = vehicleById.get(Number(member.vehicle_id));
       return `${vehicleIcon(String(vehicle?.type || "other"))} ${String(vehicle?.prefix || "VTR")} · ${String(vehicle?.zone || "zona não definida")}`;
     }
-    if (assignment.vehicle_id != null) {
-      const vehicle = vehicleById.get(Number(assignment.vehicle_id));
-      return `${String(vehicle?.prefix || "VTR")} · ${String(vehicle?.zone || "zona não definida")}`;
-    }
-    if (assignment.post_id != null) return String(postById.get(Number(assignment.post_id))?.name || "Posto");
     return "À disposição";
   }
   if (!groupSections.length) return null;
@@ -2173,7 +2177,17 @@ function OperationalGroupsGrid({ date, groups, members, guards, posts, vehicles,
         <td className="operational-groups-grid-team-label"><b>{team.label}</b><small>{team.period === "day" ? "DIURNO · D1/D2" : team.period === "night" ? "NOTURNO · N1/N2" : "TODOS OS TURNOS"}</small>{team.resources.length > 0 && <div className="operational-groups-grid-resources">{team.resources.map((resource) => <span key={`${resource.resource_kind}-${resource.resource_id}`}>{String(resource.resource_kind) === "vehicle" ? String(vehicleById.get(Number(resource.resource_id))?.prefix || "VTR") : String(postById.get(Number(resource.resource_id))?.name || "Posto")}</span>)}</div>}</td>
         {visibleShifts.map((shift) => <td className={`operational-groups-grid-cell period-${shift.period} ${shift.id === "4" ? "period-night-start" : ""}`} key={shift.id}>
           {team.members.filter((member) => allowedShift(member, shift.id)).map((member) => {
-            const assignment = assignments.find((item) => Number(item.guard_id) === Number(member.resource_id) && String(item.work_kind || "shift") !== "overtime_extension" && assignmentOverlapsShift(item, date, shift.id) && (member.vehicle_id == null || Number(item.vehicle_id) === Number(member.vehicle_id)));
+            const memberAssignments = assignments.filter((item) => Number(item.guard_id) === Number(member.resource_id) && String(item.work_kind || "shift") !== "overtime_extension" && assignmentOverlapsShift(item, date, shift.id));
+            // O destino do padrão é apenas a origem. Depois de um remanejamento
+            // diário, a designação real pode estar em outra VTR/posto e deve
+            // continuar editável dentro da seção do grupamento.
+            const assignment = memberAssignments.find((item) =>
+              member.vehicle_id != null
+                ? Number(item.vehicle_id) === Number(member.vehicle_id)
+                : member.post_id != null
+                  ? Number(item.post_id) === Number(member.post_id)
+                  : true,
+            ) || memberAssignments[0];
             const extension = assignments.find((item) => Number(item.guard_id) === Number(member.resource_id) && String(item.work_kind || "") === "overtime_extension" && assignmentOverlapsShift(item, date, shift.id));
             const movement = movements.find((item) => Number(item.guard_id) === Number(member.resource_id) && String(item.starts_at || "") < `${date}T23:59` && String(item.ends_at || "") > `${date}T00:00`);
             const serviceAdjustment = serviceAdjustments.find((item) => Number(item.guard_id) === Number(member.resource_id) && (String(item.service_date || "") === date || String(item.counterpart_service_date || "") === date || String(item.settlement_date || "") === date));
@@ -2188,8 +2202,8 @@ function OperationalGroupsGrid({ date, groups, members, guards, posts, vehicles,
             const actionAssignment = assignment ? { ...assignment, vehicle_id: assignment.vehicle_id ?? member.vehicle_id ?? null, post_id: assignment.post_id ?? member.post_id ?? null } : null;
             return <div className="operational-groups-grid-gm-wrap" key={`${member.id}-${shift.id}`}>
               {actionAssignment && <button type="button" className="operational-group-remove-segment" aria-label={`Remover ${String(guard?.name || "GM")} somente deste horário`} title="Remover somente este horário" onClick={(event) => { event.stopPropagation(); onDelete(actionAssignment, shift.id); }}>×</button>}
-              <button type="button" className={`operational-groups-grid-gm ${assignment ? "assigned" : "unassigned"} ${visualStatus}`} onClick={() => actionAssignment && onOpenAssignment(actionAssignment, shift.id)} disabled={!assignment} title={assignment ? "Abrir edição deste GM" : "Sem viatura/posto neste turno"}>
-                <strong>{String(guard?.name || `GM ${member.resource_id}`)}{hasVisualBadge && <span className={`group-status-badge ${visualStatus === "overtime" ? "he" : visualStatus === "time_bank" ? "bh" : visualStatus === "swap" ? "swap" : "away"}`}>{adjustmentBadge || (visualStatus === "overtime" && assignment?.regular_ends_at ? `HE · após ${String(assignment.regular_ends_at).slice(11, 16)}` : visualStatus === "away" ? String(movement?.type || "AFASTADO").replace("medical_leave", "ATESTADO").replace("day_off", "FOLGA").replace("vacation", "FÉRIAS").toUpperCase() : statusShort(visualStatus))}</span>}</strong><span>{assignment ? locationLabel(assignment, member) : movement ? "Fora da escala neste período" : "+ VTR / dupla"}</span><em>{assignment ? roleBadge : movement ? "INDISPONÍVEL" : "Selecionar destino"}</em><small className="operational-groups-grid-time">{configuredTime}{extension ? ` · +HE ${overtimeHoursLabel(extension)}` : ""}</small>
+              <button type="button" draggable={Boolean(actionAssignment)} className={`operational-groups-grid-gm ${assignment ? "assigned" : "unassigned"} ${visualStatus}`} onDragStart={(event) => { if (!actionAssignment) return; event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/assignment", String(actionAssignment.id)); event.dataTransfer.setData("text/assignment-source-shift", shift.id); onDragStart(actionAssignment); }} onDragEnd={onDragEnd} onClick={() => actionAssignment && onOpenAssignment(actionAssignment, shift.id)} disabled={!assignment} title={assignment ? "Clique para editar ou arraste para mover este quadradinho" : "Sem viatura/posto neste turno"}>
+                <strong>{String(guard?.name || `GM ${member.resource_id}`)}{hasVisualBadge && <span className={`group-status-badge ${visualStatus === "overtime" ? "he" : visualStatus === "time_bank" ? "bh" : visualStatus === "swap" ? "swap" : "away"}`}>{adjustmentBadge || (visualStatus === "overtime" && assignment?.regular_ends_at ? `HE · após ${String(assignment.regular_ends_at).slice(11, 16)}` : visualStatus === "away" ? String(movement?.type || "AFASTADO").replace("medical_leave", "ATESTADO").replace("day_off", "FOLGA").replace("vacation", "FÉRIAS").toUpperCase() : statusShort(visualStatus))}</span>}</strong><span>{assignment ? locationLabel(assignment, member) : movement ? "Fora da escala neste período" : "+ VTR / dupla"}</span><em>{assignment ? roleBadge : movement ? "INDISPONÍVEL" : "Selecionar destino"}</em><small className="operational-groups-grid-time">{assignment ? assignmentDisplayInShift(assignment, date, shift.id) : configuredTime}{extension ? ` · +HE ${overtimeHoursLabel(extension)}` : ""}</small>
               </button>
               {actionAssignment && showExtensionShortcut(actionAssignment, shift.id) && <button type="button" className="operational-group-inline-he" title="Estender este GM em hora extra" onClick={() => onExtend(actionAssignment, shift.id, "after")}>+HE</button>}
               {actionAssignment && showEarlyExtensionShortcut(actionAssignment, shift.id) && <button type="button" className="operational-group-inline-he early" title="Antecipar este GM em hora extra" onClick={() => onExtend(actionAssignment, shift.id, "before")}>+HE antes</button>}

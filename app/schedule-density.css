@@ -47,6 +47,8 @@
 @media print{.operational-group-heading td{height:auto!important;padding:2px 4px!important;border-top:1px solid #9eaeba!important}.operational-group-heading td:before{width:3px;height:10px;margin-right:4px}.resource-unit-tags{gap:2px}.resource-unit-tags em{padding:0 3px;font-size:6px}}
 @media print{.operational-groups-grid-heading td,.operational-groups-grid-group td{padding:2px 4px!important;border-top:1px solid #9eaeba!important}.operational-groups-grid-heading small,.operational-groups-grid-group small,.operational-groups-grid-resources{display:none}.operational-groups-grid-team>td{min-height:0;padding:2px!important}.operational-groups-grid-gm{margin:0;padding:1px 2px;border-width:1px}.operational-groups-grid-gm span,.operational-groups-grid-gm em{font-size:7px}.operational-groups-grid-gm strong{font-size:8px}}
 
+.operational-groups-grid-gm[draggable="true"]{cursor:grab}.operational-groups-grid-gm[draggable="true"]:active{cursor:grabbing;opacity:.78}
+
 /* HE e o atalho +HE ocupam áreas próprias do card, sem se sobrepor. */
 .live-person-card.has-he-action .live-person{padding-right:54px}
 .live-person-card .inline-he-extension{top:50%;right:4px;width:44px;min-width:44px;max-width:44px;transform:translateY(-50%);white-space:nowrap}

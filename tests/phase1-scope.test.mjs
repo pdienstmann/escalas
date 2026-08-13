@@ -1652,6 +1652,11 @@ test("operational group GM cards keep contextual actions and offer same-group HE
   assert.match(schedule, /onAdjust\(actionAssignment, shift\.id\)/);
   assert.match(schedule, /onQuickStatus\(actionAssignment/);
   assert.match(schedule, /onDelete\(actionAssignment, shift\.id\)/);
+  assert.match(schedule, /const memberAssignments = assignments\.filter/);
+  assert.match(schedule, /\|\| memberAssignments\[0\]/);
+  assert.match(schedule, /draggable=\{Boolean\(actionAssignment\)\}/);
+  assert.match(schedule, /dataTransfer\.setData\("text\/assignment"/);
+  assert.match(schedule, /assignment \? assignmentDisplayInShift\(assignment, date, shift\.id\) : configuredTime/);
   assert.match(styles, /\.group-he-suggestions/);
 });
 
