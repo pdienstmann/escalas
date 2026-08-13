@@ -429,10 +429,17 @@ export async function GET(request: Request) {
   // Import/create/update actions already synchronize their affected leaves.
   // Reprocessing every confirmed leave on every read made all management tabs
   // pay a large and unnecessary D1 cost.
-  await Promise.all([ensureAdminInfrastructure(), ensureSections()]);
-  const requestedDate = new URL(request.url).searchParams.get("date") || todayScheduleDate();
+  const requestUrl = new URL(request.url);
+  const requestedView = requestUrl.searchParams.get("view") || "full";
+  const allowedViews = new Set(["full", "cadastros", "viaturas", "folgas", "movimentos", "ajustes"]);
+  const view = allowedViews.has(requestedView) ? requestedView : "full";
+  const needs = (...views: string[]) => view === "full" || views.includes(view);
+  await Promise.all([ensureAdminInfrastructure(), needs("cadastros") ? ensureSections() : Promise.resolve()]);
+  const searchParams = requestUrl.searchParams;
+  const requestedDate = searchParams.get("date") || todayScheduleDate();
+  const emptyRows = () => Promise.resolve({ results: [] as Record<string, unknown>[] });
   const requestedMonth = String(requestedDate).slice(0, 7);
-  if (/^\d{4}-(0[1-9]|1[0-2])$/.test(requestedMonth)) {
+  if (needs("folgas") && /^\d{4}-(0[1-9]|1[0-2])$/.test(requestedMonth)) {
     const [year, month] = requestedMonth.split("-").map(Number);
     const monthLabel = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(year, month - 1, 1)));
     await env.DB.prepare("INSERT OR IGNORE INTO leave_campaigns (month,title,status,access_code) VALUES (?,?,?,?)")
@@ -444,23 +451,23 @@ export async function GET(request: Request) {
   const monthEnd = nextMonth.toISOString().slice(0,10);
   const [guards, posts, vehicles, movements, campaign, days, choices, vehicleOutages, sections, vehicleCrews, vehicleReturnImpacts, leavePatternSlots, serviceAdjustments, operationalGroups, operationalGroupMembers] =
     await Promise.all([
-      env.DB.prepare(
+      needs("cadastros", "folgas", "movimentos", "ajustes") ? env.DB.prepare(
         "SELECT id,CASE WHEN registration LIKE 'SEM-MATRICULA-%' THEN NULL ELSE registration END AS registration,name,platoon,base_shift,active,created_at,updated_at,work_regime,overtime_eligible,overtime_note FROM guards WHERE active = 1 ORDER BY name",
-      ).all(),
-      env.DB.prepare(
+      ).all() : emptyRows(),
+      needs("cadastros") ? env.DB.prepare(
         "SELECT * FROM posts WHERE active = 1 ORDER BY sort_order,name",
-      ).all(),
-      env.DB.prepare(
+      ).all() : emptyRows(),
+      needs("viaturas") ? env.DB.prepare(
         "SELECT * FROM vehicles WHERE active = 1 ORDER BY prefix",
-      ).all(),
-      env.DB.prepare(
+      ).all() : emptyRows(),
+      needs("movimentos") ? env.DB.prepare(
         "SELECT m.*, g.name AS guard_name, CASE WHEN g.registration LIKE 'SEM-MATRICULA-%' THEN NULL ELSE g.registration END AS registration, g.base_shift FROM movements m JOIN guards g ON g.id=m.guard_id WHERE m.status!='rejected' ORDER BY m.starts_at DESC LIMIT 250",
-      ).all(),
-      env.DB.prepare(
+      ).all() : emptyRows(),
+      needs("folgas") ? env.DB.prepare(
         // O status é histórico; nunca deve impedir a edição das folgas.
         "SELECT * FROM leave_campaigns WHERE month=? LIMIT 1",
-      ).bind(requestedMonth).first(),
-      env.DB.prepare(
+      ).bind(requestedMonth).first() : Promise.resolve(null),
+      needs("folgas") ? env.DB.prepare(
         `SELECT l.*,
           (SELECT COUNT(*) FROM leave_choices c
            LEFT JOIN guards g ON g.id=c.guard_id
@@ -470,38 +477,38 @@ export async function GET(request: Request) {
          FROM leave_day_limits l
          WHERE l.campaign_id=(SELECT id FROM leave_campaigns WHERE month=? LIMIT 1)
          ORDER BY l.date,CASE WHEN l.platoon IS NULL OR TRIM(l.platoon)='' THEN 0 ELSE 1 END,CASE WHEN l.shift IS NULL OR TRIM(l.shift)='' THEN 0 ELSE 1 END,l.platoon,l.shift`,
-      ).bind(requestedMonth).all(),
-      env.DB.prepare(
+      ).bind(requestedMonth).all() : emptyRows(),
+      needs("folgas") ? env.DB.prepare(
         "SELECT c.*,g.name AS guard_name,CASE WHEN g.registration LIKE 'SEM-MATRICULA-%' THEN NULL ELSE g.registration END AS registration,g.platoon,g.base_shift FROM leave_choices c JOIN guards g ON g.id=c.guard_id WHERE c.status!='cancelled' AND c.campaign_id=(SELECT id FROM leave_campaigns WHERE month=? LIMIT 1) ORDER BY c.date,g.name",
-      ).bind(requestedMonth).all(),
-      env.DB.prepare("SELECT o.*,v.prefix,v.type FROM vehicle_outages o JOIN vehicles v ON v.id=o.vehicle_id WHERE o.active=1 ORDER BY o.starts_on DESC").all(),
-      env.DB.prepare("SELECT section_key,label,sort_order FROM schedule_sections ORDER BY sort_order,label").all(),
-      env.DB.prepare(
+      ).bind(requestedMonth).all() : emptyRows(),
+      needs("viaturas") ? env.DB.prepare("SELECT o.*,v.prefix,v.type FROM vehicle_outages o JOIN vehicles v ON v.id=o.vehicle_id WHERE o.active=1 ORDER BY o.starts_on DESC").all() : emptyRows(),
+      needs("cadastros") ? env.DB.prepare("SELECT section_key,label,sort_order FROM schedule_sections ORDER BY sort_order,label").all() : emptyRows(),
+      needs("viaturas") ? env.DB.prepare(
         `SELECT a.vehicle_id,GROUP_CONCAT(DISTINCT g.name) crew_names,COUNT(DISTINCT a.guard_id) crew_count
          FROM assignments a
          JOIN schedules s ON s.id=a.schedule_id
          JOIN guards g ON g.id=a.guard_id
          WHERE s.date=? AND a.vehicle_id IS NOT NULL
          GROUP BY a.vehicle_id`,
-      ).bind(requestedDate).all(),
-      env.DB.prepare(`SELECT r.*,s.date schedule_date,s.status schedule_status,v.prefix
+      ).bind(requestedDate).all() : emptyRows(),
+      needs("viaturas") ? env.DB.prepare(`SELECT r.*,s.date schedule_date,s.status schedule_status,v.prefix
         FROM vehicle_return_reconciliations r JOIN schedules s ON s.id=r.schedule_id JOIN vehicles v ON v.id=r.vehicle_id
-        WHERE r.status='pending' ORDER BY s.date,v.prefix`).all(),
-      env.DB.prepare(`SELECT ps.guard_id,ps.role pattern_role,p.code pattern_code,p.period pattern_period,p.anchor_date,
+        WHERE r.status='pending' ORDER BY s.date,v.prefix`).all() : emptyRows(),
+      needs("folgas") ? env.DB.prepare(`SELECT ps.guard_id,ps.role pattern_role,p.code pattern_code,p.period pattern_period,p.anchor_date,
           v.prefix vehicle_prefix,po.name post_name
         FROM pattern_slots ps
         JOIN shift_patterns p ON p.id=ps.pattern_id AND p.active=1
         LEFT JOIN vehicles v ON v.id=ps.vehicle_id
-        LEFT JOIN posts po ON po.id=ps.post_id`).all(),
-      env.DB.prepare(`SELECT sa.*,g.name guard_name,c.name counterpart_guard_name
+        LEFT JOIN posts po ON po.id=ps.post_id`).all() : emptyRows(),
+      needs("ajustes") ? env.DB.prepare(`SELECT sa.*,g.name guard_name,c.name counterpart_guard_name
         FROM service_adjustments sa JOIN guards g ON g.id=sa.guard_id
         LEFT JOIN guards c ON c.id=sa.counterpart_guard_id
         WHERE sa.status='active' AND ((sa.service_date>=? AND sa.service_date<?) OR (sa.counterpart_service_date>=? AND sa.counterpart_service_date<?) OR (sa.settlement_date>=? AND sa.settlement_date<?))
-        ORDER BY sa.service_date,sa.starts_at,sa.id`).bind(monthStart,monthEnd,monthStart,monthEnd,monthStart,monthEnd).all(),
-      env.DB.prepare("SELECT id,name,short_name,color,sort_order,active FROM operational_groups WHERE active=1 ORDER BY sort_order,name").all(),
-      env.DB.prepare(`SELECT m.id,m.group_id,m.resource_kind,m.resource_id,m.team_label,g.name group_name,g.short_name group_short_name,g.color group_color,g.sort_order group_sort_order
+        ORDER BY sa.service_date,sa.starts_at,sa.id`).bind(monthStart,monthEnd,monthStart,monthEnd,monthStart,monthEnd).all() : emptyRows(),
+      view === "full" ? env.DB.prepare("SELECT id,name,short_name,color,sort_order,active FROM operational_groups WHERE active=1 ORDER BY sort_order,name").all() : emptyRows(),
+      view === "full" ? env.DB.prepare(`SELECT m.id,m.group_id,m.resource_kind,m.resource_id,m.team_label,g.name group_name,g.short_name group_short_name,g.color group_color,g.sort_order group_sort_order
         FROM operational_group_members m JOIN operational_groups g ON g.id=m.group_id
-        WHERE g.active=1 ORDER BY g.sort_order,g.name,m.resource_kind,m.resource_id`).all(),
+        WHERE g.active=1 ORDER BY g.sort_order,g.name,m.resource_kind,m.resource_id`).all() : emptyRows(),
     ]);
   return Response.json({
     guards: guards.results,
@@ -518,11 +525,12 @@ export async function GET(request: Request) {
     serviceAdjustments: serviceAdjustments.results,
     operationalGroups: operationalGroups.results,
     operationalGroupMembers: operationalGroupMembers.results,
-    leaveOverview: buildLeaveOverview(
+    leaveOverview: needs("folgas") ? buildLeaveOverview(
       campaign as Record<string, unknown> | null,
       choices.results,
       leavePatternSlots.results,
-    ),
+    ) : null,
+    view,
   });
 }
 

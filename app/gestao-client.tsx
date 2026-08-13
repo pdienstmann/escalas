@@ -61,11 +61,11 @@ const empty: Data = {
   operationalGroupMembers: [],
 };
 
-const adminCachePrefix = "escala-admin-cache:";
-function readAdminCache(date: string): Data | null {
+const adminCachePrefix = "escala-admin-cache:v2:";
+function readAdminCache(date: string, mode: string): Data | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.sessionStorage.getItem(`${adminCachePrefix}${date}`);
+    const raw = window.sessionStorage.getItem(`${adminCachePrefix}${mode}:${date}`);
     if (!raw) return null;
     const cached = JSON.parse(raw) as Partial<Data>;
     if (!Array.isArray(cached.guards) || !Array.isArray(cached.posts) || !Array.isArray(cached.vehicles)) return null;
@@ -74,10 +74,10 @@ function readAdminCache(date: string): Data | null {
     return null;
   }
 }
-function writeAdminCache(date: string, value: Data) {
+function writeAdminCache(date: string, mode: string, value: Data) {
   if (typeof window === "undefined") return;
   try {
-    window.sessionStorage.setItem(`${adminCachePrefix}${date}`, JSON.stringify(value));
+    window.sessionStorage.setItem(`${adminCachePrefix}${mode}:${date}`, JSON.stringify(value));
   } catch {
     // A full or unavailable session storage must never block the operational screen.
   }
@@ -115,19 +115,19 @@ export function GestaoClient({
     } | null>(null);
   const load = useCallback(async () => {
     try {
-      const r = await fetch(`/api/admin?date=${date}&_=${Date.now()}`, { cache: "no-store" });
+      const r = await fetch(`/api/admin?date=${date}&view=${mode}&_=${Date.now()}`, { cache: "no-store" });
       const next = await r.json() as Data & { error?: string };
       if (!r.ok) throw new Error(String(next.error || "Nao foi possivel sincronizar os dados operacionais."));
       setData(next);
-      writeAdminCache(date, next);
+      writeAdminCache(date, mode, next);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Nao foi possivel sincronizar os dados operacionais.");
     } finally {
       setBusy(false);
     }
-  }, [date]);
+  }, [date, mode]);
   useEffect(() => {
-    const cached = readAdminCache(date);
+    const cached = readAdminCache(date, mode);
     if (cached) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setData(cached);
@@ -135,7 +135,7 @@ export function GestaoClient({
     }
     // The first request synchronizes this client view with the durable D1 state.
     void load();
-  }, [date, load]);
+  }, [date, mode, load]);
   async function submit(e: FormEvent<HTMLFormElement>, action: string) {
     e.preventDefault();
     if (saving) return;
@@ -185,7 +185,7 @@ export function GestaoClient({
                 next.sections = [...next.sections, { section_key: sectionKey, label: String(body.groupName), sort_order: Number(body.sortOrder || 99) }].sort((a, b) => Number(a.sort_order || 99) - Number(b.sort_order || 99));
               }
             }
-            writeAdminCache(date, next);
+            writeAdminCache(date, mode, next);
             return next;
           });
           return;

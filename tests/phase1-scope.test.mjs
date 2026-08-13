@@ -112,6 +112,19 @@ test("large movement lists paginate without mounting every record at once", () =
   assert.match(styles, /\.movement-pagination/);
 });
 
+test("management modules request only their own administrative dataset", () => {
+  const client = readFileSync(resolve("app/gestao-client.tsx"), "utf8");
+  const api = readFileSync(resolve("app/api/admin/route.ts"), "utf8");
+  assert.match(client, /view=\$\{mode\}/);
+  assert.match(client, /escala-admin-cache:v2:/);
+  assert.match(client, /\$\{adminCachePrefix\}\$\{mode\}:\$\{date\}/);
+  assert.match(api, /allowedViews = new Set\(\["full", "cadastros", "viaturas", "folgas", "movimentos", "ajustes"\]\)/);
+  assert.match(api, /needs\("cadastros", "folgas", "movimentos", "ajustes"\)/);
+  assert.match(api, /needs\("viaturas"\) \? env\.DB\.prepare/);
+  assert.match(api, /needs\("folgas"\) \? buildLeaveOverview/);
+  assert.match(api, /needs\("cadastros"\) \? ensureSections\(\)/);
+});
+
 test("every operational module shares date-preserving navigation with discreet feedback", () => {
   const navigation = readFileSync(resolve("app/schedule-nav.tsx"), "utf8");
   const management = readFileSync(resolve("app/gestao-client.tsx"), "utf8");
@@ -211,7 +224,7 @@ test("concurrent first opens can apply one pattern without duplicate-assignment 
 test("management reads reuse structural D1 initialization inside a warm worker", () => {
   const api = readFileSync(resolve("app/api/admin/route.ts"), "utf8");
   assert.match(api, /let adminInfrastructurePromise: Promise<void> \| null = null/);
-  assert.match(api, /await Promise\.all\(\[ensureAdminInfrastructure\(\), ensureSections\(\)\]\)/);
+  assert.match(api, /await Promise\.all\(\[ensureAdminInfrastructure\(\), needs\("cadastros"\) \? ensureSections\(\) : Promise\.resolve\(\)\]\)/);
   assert.match(api, /adminInfrastructurePromise = null/);
 });
 
@@ -984,7 +997,7 @@ test("management modules reuse a date-scoped cache while synchronizing D1 silent
   assert.match(source, /escala-admin-cache/);
   assert.match(source, /sessionStorage\.getItem/);
   assert.match(source, /sessionStorage\.setItem/);
-  assert.match(source, /writeAdminCache\(date, next\)/);
+  assert.match(source, /writeAdminCache\(date, mode, next\)/);
   assert.match(source, /Nao foi possivel sincronizar os dados operacionais/);
 });
 
@@ -1042,7 +1055,7 @@ test("new catalog records update the local management view without a full reload
   const dashboard = readFileSync(resolve("app/gestao-client.tsx"), "utf8");
   assert.match(dashboard, /const catalogKey = action === "guard" \? "guards"/);
   assert.match(dashboard, /if \(catalogKey && j\.entity\)/);
-  assert.match(dashboard, /writeAdminCache\(date, next\)/);
+  assert.match(dashboard, /writeAdminCache\(date, mode, next\)/);
   assert.match(dashboard, /const sectionKey = `POST:\$\{String\(body\.groupName/);
   assert.match(dashboard, /return;\n\s*}\n\s*if \(action === "movement"/);
 });
