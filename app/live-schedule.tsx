@@ -2664,8 +2664,13 @@ function Row({
           return;
         }
         void onMoveGroup(groupedAssignments, kind, resource);
+        return;
       }
-      return;
+      // Ao atravessar de diurno para noturno (ou no sentido inverso), move
+      // somente o quadradinho efetivamente arrastado. A outra metade da
+      // jornada regular permanece no turno original. Antes, o retorno
+      // incondicional acima encerrava o drop silenciosamente sempre que o
+      // card carregava o identificador da jornada completa.
     }
     const id = Number(e.dataTransfer.getData("text/assignment"));
     const sourceShift = e.dataTransfer.getData("text/assignment-source-shift") || undefined;

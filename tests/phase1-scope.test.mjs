@@ -486,6 +486,7 @@ test("dragging a card across quadrants moves only its visible segment and adjust
   const api = readFileSync(resolve("app/api/schedule/route.ts"), "utf8");
   assert.match(schedule, /action: "move_assignment_to_cell"/);
   assert.match(schedule, /sourceShift: sourceShift \|\| assignment\.shift/);
+  assert.match(schedule, /void onMoveGroup\(groupedAssignments, kind, resource\);\s*return;\s*}\s*\/\/ Ao atravessar de diurno para noturno/);
   assert.match(api, /mapAssignmentSegmentToShift/);
   assert.match(api, /Remanejado do \$\{sourceShift\}º para o \$\{targetShift\}º turno/);
 });
