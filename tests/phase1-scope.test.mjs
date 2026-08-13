@@ -128,6 +128,7 @@ test("management modules request only their own administrative dataset", () => {
 test("monthly planning sends compact days and loads only the selected detail", () => {
   const api = readFileSync(resolve("app/api/planning/route.ts"), "utf8");
   const groups = readFileSync(resolve("lib/operational-groups-db.ts"), "utf8");
+  const patterns = readFileSync(resolve("lib/pattern-engine.ts"), "utf8");
   const planning = readFileSync(resolve("app/monthly-planning.tsx"), "utf8");
   const print = readFileSync(resolve("app/monthly-planning-print.tsx"), "utf8");
   const styles = readFileSync(resolve("app/monthly-planning.css"), "utf8");
@@ -144,6 +145,9 @@ test("monthly planning sends compact days and loads only the selected detail", (
   assert.match(api, /"server-timing"/);
   assert.match(groups, /let operationalGroupsReady: Promise<void> \| null = null/);
   assert.match(groups, /operationalGroupsReady = null/);
+  assert.match(groups, /configured_count/);
+  assert.match(patterns, /let patternsReady: Promise<void> \| null = null/);
+  assert.match(patterns, /patternsReady = null/);
 });
 
 test("every operational module shares date-preserving navigation with discreet feedback", () => {

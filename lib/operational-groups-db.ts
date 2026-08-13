@@ -3,6 +3,15 @@ import { OPERATIONAL_GROUP_DEFAULTS } from "./operational-groups";
 let operationalGroupsReady: Promise<void> | null = null;
 
 async function prepareOperationalGroups(db: D1Database) {
+  try {
+    const ready = await db.prepare(`SELECT
+      (SELECT COUNT(*) FROM operational_groups) group_count,
+      (SELECT COUNT(*) FROM pattern_operational_group_members
+        WHERE shift IS NOT NULL OR vehicle_id IS NOT NULL OR starts_at IS NOT NULL OR ends_at IS NOT NULL) configured_count`).first<{ group_count: number; configured_count: number }>();
+    if (Number(ready?.group_count || 0) > 0) return;
+  } catch {
+    // A missing table or operational column falls through to the migration.
+  }
   await db.prepare(`CREATE TABLE IF NOT EXISTS operational_groups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,

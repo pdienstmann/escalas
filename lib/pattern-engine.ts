@@ -23,7 +23,9 @@ function times(date: string, shift: string) {
   };
 }
 
-export async function ensurePatterns(db: D1Database) {
+let patternsReady: Promise<void> | null = null;
+
+async function preparePatterns(db: D1Database) {
   const ready=await db.prepare("SELECT (SELECT COUNT(*) FROM shift_patterns WHERE active=1) patterns,(SELECT COUNT(DISTINCT pattern_id) FROM pattern_slots) populated").first<{patterns:number;populated:number}>();
   if(Number(ready?.patterns||0)>=4&&Number(ready?.populated||0)>=4)return;
   await db.batch(
@@ -94,6 +96,16 @@ export async function ensurePatterns(db: D1Database) {
         ),
       );
   }
+}
+
+export async function ensurePatterns(db: D1Database) {
+  if (!patternsReady) {
+    patternsReady = preparePatterns(db).catch((error) => {
+      patternsReady = null;
+      throw error;
+    });
+  }
+  await patternsReady;
 }
 
 export async function resolvePatternCodes(db: D1Database, date: string) {
