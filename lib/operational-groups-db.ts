@@ -1,6 +1,8 @@
 import { OPERATIONAL_GROUP_DEFAULTS } from "./operational-groups";
 
-export async function ensureOperationalGroups(db: D1Database) {
+let operationalGroupsReady: Promise<void> | null = null;
+
+async function prepareOperationalGroups(db: D1Database) {
   await db.prepare(`CREATE TABLE IF NOT EXISTS operational_groups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
@@ -59,4 +61,14 @@ export async function ensureOperationalGroups(db: D1Database) {
   await db.batch(OPERATIONAL_GROUP_DEFAULTS.map((group) => db.prepare(
     "INSERT OR IGNORE INTO operational_groups (name,short_name,color,sort_order) VALUES (?,?,?,?)",
   ).bind(group.name, group.short_name, group.color, group.sort_order)));
+}
+
+export async function ensureOperationalGroups(db: D1Database) {
+  if (!operationalGroupsReady) {
+    operationalGroupsReady = prepareOperationalGroups(db).catch((error) => {
+      operationalGroupsReady = null;
+      throw error;
+    });
+  }
+  await operationalGroupsReady;
 }

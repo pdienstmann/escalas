@@ -152,33 +152,35 @@ export async function GET(request: Request) {
       ? requestedDetail
       : null;
   const scenario = parseScenario(request, bounds);
-  await ensurePatterns(env.DB);
-  await ensureOperationalGroups(env.DB);
+  const preparationStarted = performance.now();
+  await Promise.all([ensurePatterns(env.DB), ensureOperationalGroups(env.DB)]);
+  const queryStarted = performance.now();
 
-  const [patterns, patternSlots, weeklySlots, guards, catalogVehicles, movements, leaves, schedules, assignments, outages, adjustments, groups, groupMembers, patternGroupMembers] = await Promise.all([
-    env.DB.prepare("SELECT id,code,name,period,parity,anchor_date FROM shift_patterns WHERE active=1 ORDER BY period,parity").all<Row>(),
+  const [patterns, patternSlots, weeklySlots, guards, catalogVehicles, movements, leaves, schedules, assignments, outages, adjustments, groups, groupMembers, patternGroupMembers] = await env.DB.batch<Row>([
+    env.DB.prepare("SELECT id,code,name,period,parity,anchor_date FROM shift_patterns WHERE active=1 ORDER BY period,parity"),
     env.DB.prepare(`SELECT s.id,s.pattern_id,s.guard_id,s.post_id,s.vehicle_id,s.shift,s.role,p.code pattern_code,p.period pattern_period,g.name guard_name,g.registration,po.name post_name,po.group_name post_group_name,v.prefix vehicle_prefix,v.zone vehicle_zone
       FROM pattern_slots s JOIN shift_patterns p ON p.id=s.pattern_id JOIN guards g ON g.id=s.guard_id
       LEFT JOIN posts po ON po.id=s.post_id LEFT JOIN vehicles v ON v.id=s.vehicle_id
-      WHERE p.active=1 AND g.active=1`).all<Row>(),
+      WHERE p.active=1 AND g.active=1`),
     env.DB.prepare(`SELECT w.id,w.guard_id,w.post_id,w.vehicle_id,w.role,w.weekdays,w.starts_at,w.regular_end,w.overtime_end,g.name guard_name,g.registration,po.name post_name,po.group_name post_group_name,v.prefix vehicle_prefix,v.zone vehicle_zone
       FROM weekly_slots w JOIN guards g ON g.id=w.guard_id AND g.active=1
-      LEFT JOIN posts po ON po.id=w.post_id LEFT JOIN vehicles v ON v.id=w.vehicle_id WHERE w.active=1`).all<Row>(),
-    env.DB.prepare("SELECT id,name,registration,platoon,base_shift,work_regime,overtime_eligible FROM guards WHERE active=1 ORDER BY name").all<Row>(),
-    env.DB.prepare("SELECT id,prefix,zone,type FROM vehicles WHERE active=1 ORDER BY prefix").all<Row>(),
-    env.DB.prepare("SELECT m.*,g.name guard_name FROM movements m JOIN guards g ON g.id=m.guard_id WHERE m.status='approved' AND m.starts_at<? AND m.ends_at>? ").bind(bounds.endAt, bounds.startAt).all<Row>(),
-    env.DB.prepare(`SELECT c.guard_id,c.date,c.category,c.status,g.name guard_name FROM leave_choices c JOIN guards g ON g.id=c.guard_id WHERE c.status='confirmed' AND c.date>=? AND c.date<?`).bind(bounds.start,bounds.end).all<Row>(),
-    env.DB.prepare("SELECT id,date,status FROM schedules WHERE date>=? AND date<?").bind(bounds.start,bounds.end).all<Row>(),
+      LEFT JOIN posts po ON po.id=w.post_id LEFT JOIN vehicles v ON v.id=w.vehicle_id WHERE w.active=1`),
+    env.DB.prepare("SELECT id,name,registration,platoon,base_shift,work_regime,overtime_eligible FROM guards WHERE active=1 ORDER BY name"),
+    env.DB.prepare("SELECT id,prefix,zone,type FROM vehicles WHERE active=1 ORDER BY prefix"),
+    env.DB.prepare("SELECT m.*,g.name guard_name FROM movements m JOIN guards g ON g.id=m.guard_id WHERE m.status='approved' AND m.starts_at<? AND m.ends_at>? ").bind(bounds.endAt, bounds.startAt),
+    env.DB.prepare(`SELECT c.guard_id,c.date,c.category,c.status,g.name guard_name FROM leave_choices c JOIN guards g ON g.id=c.guard_id WHERE c.status='confirmed' AND c.date>=? AND c.date<?`).bind(bounds.start,bounds.end),
+    env.DB.prepare("SELECT id,date,status FROM schedules WHERE date>=? AND date<?").bind(bounds.start,bounds.end),
     env.DB.prepare(`SELECT a.*,s.date schedule_date,g.name guard_name,g.registration,p.name post_name,p.group_name post_group_name,v.prefix vehicle_prefix,v.zone vehicle_zone
       FROM assignments a JOIN schedules s ON s.id=a.schedule_id JOIN guards g ON g.id=a.guard_id
       LEFT JOIN posts p ON p.id=a.post_id LEFT JOIN vehicles v ON v.id=a.vehicle_id
-      WHERE s.date>=? AND s.date<?`).bind(bounds.start,bounds.end).all<Row>(),
-    env.DB.prepare("SELECT o.*,v.prefix,v.type,v.zone FROM vehicle_outages o JOIN vehicles v ON v.id=o.vehicle_id WHERE o.active=1 AND o.starts_on<? AND (o.ends_on IS NULL OR o.ends_on>=?)").bind(bounds.end,bounds.start).all<Row>(),
-    env.DB.prepare("SELECT * FROM service_adjustments WHERE status='active' AND ((service_date>=? AND service_date<?) OR (counterpart_service_date>=? AND counterpart_service_date<?))").bind(bounds.start,bounds.end,bounds.start,bounds.end).all<Row>(),
-    env.DB.prepare("SELECT id,name,short_name,color,sort_order FROM operational_groups WHERE active=1 ORDER BY sort_order,name").all<Row>(),
-    env.DB.prepare("SELECT group_id,resource_kind,resource_id,team_label FROM operational_group_members").all<Row>(),
-    env.DB.prepare("SELECT pattern_id,group_id,resource_kind,resource_id,team_label FROM pattern_operational_group_members").all<Row>(),
+      WHERE s.date>=? AND s.date<?`).bind(bounds.start,bounds.end),
+    env.DB.prepare("SELECT o.*,v.prefix,v.type,v.zone FROM vehicle_outages o JOIN vehicles v ON v.id=o.vehicle_id WHERE o.active=1 AND o.starts_on<? AND (o.ends_on IS NULL OR o.ends_on>=?)").bind(bounds.end,bounds.start),
+    env.DB.prepare("SELECT * FROM service_adjustments WHERE status='active' AND ((service_date>=? AND service_date<?) OR (counterpart_service_date>=? AND counterpart_service_date<?))").bind(bounds.start,bounds.end,bounds.start,bounds.end),
+    env.DB.prepare("SELECT id,name,short_name,color,sort_order FROM operational_groups WHERE active=1 ORDER BY sort_order,name"),
+    env.DB.prepare("SELECT group_id,resource_kind,resource_id,team_label FROM operational_group_members"),
+    env.DB.prepare("SELECT pattern_id,group_id,resource_kind,resource_id,team_label FROM pattern_operational_group_members"),
   ]);
+  const calculationStarted = performance.now();
 
   const guardById = new Map(guards.results.map((guard) => [Number(guard.id), guard]));
   const scenarioGuardById = new Map<number, PlanningScenario[]>();
@@ -442,5 +444,6 @@ export async function GET(request: Request) {
       night: { ...(day.night as Row), sections: [] },
     };
   });
-  return Response.json({ month: requested, anchorDate: anchor, detailDate: detailDate === "all" ? null : detailDate, days: responseDays, catalog: { guards: guards.results.map(({ id, name, registration, platoon }) => ({ id, name, registration, platoon })), vehicles: catalogVehicles.results }, simulation: { active: scenarioActive, events: effectiveScenario }, summary: { days: bounds.days, totalExpected, totalAvailable, totalAway, totalHoles, criticalDays, attentionDays, absenceTotals, overtimeNeeded: totalHoles }, generatedAt: new Date().toISOString() }, { headers: { "cache-control": "no-store" } });
+  const responseStarted = performance.now();
+  return Response.json({ month: requested, anchorDate: anchor, detailDate: detailDate === "all" ? null : detailDate, days: responseDays, catalog: { guards: guards.results.map(({ id, name, registration, platoon }) => ({ id, name, registration, platoon })), vehicles: catalogVehicles.results }, simulation: { active: scenarioActive, events: effectiveScenario }, summary: { days: bounds.days, totalExpected, totalAvailable, totalAway, totalHoles, criticalDays, attentionDays, absenceTotals, overtimeNeeded: totalHoles }, generatedAt: new Date().toISOString() }, { headers: { "cache-control": "no-store", "server-timing": `prepare;dur=${(queryStarted - preparationStarted).toFixed(1)}, db;dur=${(calculationStarted - queryStarted).toFixed(1)}, calculate;dur=${(responseStarted - calculationStarted).toFixed(1)}` } });
 }
