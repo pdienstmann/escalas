@@ -722,7 +722,9 @@ export function LiveSchedule() {
     const regularCrew = list.filter((assignment) => !isOvertimeExtensionCell(assignment, data.date, shift));
     const missingRole =
       kind === "vehicle"
-        ? !regularCrew.some((assignment) => String(assignment.role) === "driver")
+        ? isMotorcycleType(resource.type)
+          ? "driver"
+          : !regularCrew.some((assignment) => String(assignment.role) === "driver")
           ? "driver"
           : !regularCrew.some((assignment) => String(assignment.role) === "patrol")
             ? "patrol"
@@ -760,7 +762,9 @@ export function LiveSchedule() {
     const regularCrew = list.filter((assignment) => !isOvertimeExtensionCell(assignment, data.date, shift));
     const role = kind === "post"
       ? "guard"
-      : !regularCrew.some((assignment) => String(assignment.role) === "driver")
+      : isMotorcycleType(resource.type)
+        ? "driver"
+        : !regularCrew.some((assignment) => String(assignment.role) === "driver")
         ? "driver"
           : !regularCrew.some((assignment) => String(assignment.role) === "patrol")
             ? "patrol"
@@ -2727,20 +2731,17 @@ function Row({
               </Fragment>)})}
               {copiedAssignment&&pasteAllowed&&<button type="button" className="cell-paste-assignment" onClick={()=>onPaste(kind,resource,s.id)}><span aria-hidden="true">▣</span> Colar aqui</button>}
               {missingRoles.length > 0 && (
-                <>
-                  <button
-                    type="button"
-                    className="live-hole"
-                    aria-expanded={addShift === s.id}
-                    onClick={toggleQuickAdd}
-                  >
-                    <span>FURO</span>＋ Selecionar{" "}
-                    {kind === "vehicle"
-                      ? missingRoles[0] === "driver" ? "motorista" : "patrulheiro"
-                      : "GM"}
-                  </button>
-                  {quickPicker(true)}
-                </>
+                <button
+                  type="button"
+                  className="live-hole"
+                  aria-haspopup="dialog"
+                  onClick={(event) => onHolePick(kind, resource, s.id, event)}
+                >
+                  <span>FURO</span>＋ Preencher{" "}
+                  {kind === "vehicle"
+                    ? missingRoles[0] === "driver" ? "motorista" : "patrulheiro"
+                    : "GM"}
+                </button>
               )}
               {missingRoles.length === 0 && (
                 <>

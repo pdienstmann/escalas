@@ -373,17 +373,23 @@ test("completed cells expose only redeployment and intelligent HE suggestions", 
   assert.match(usability, /\.quick-add-picker/);
 });
 
-test("holes use the same inline picker and redeploy available GMs without duplicating their pool rows", () => {
+test("holes open one contextual picker with the three best redeployment and HE options", () => {
   const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
   const api = readFileSync(resolve("app/api/schedule/route.ts"), "utf8");
-  const usability = readFileSync(resolve("app/usability.css"), "utf8");
-  assert.match(schedule, /quickPicker\(true\)/);
-  assert.match(schedule, /className="quick-add-smart"/);
+  const dialog = readFileSync(resolve("app/hole-suggest-box.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/workforce.css"), "utf8");
+  assert.match(schedule, /className="live-hole"[\s\S]*aria-haspopup="dialog"[\s\S]*onHolePick\(kind, resource, s\.id, event\)/);
+  assert.match(dialog, /Remanejar alguém deste dia/);
+  assert.match(dialog, /Chamar em HE/);
+  assert.match(dialog, /availableCandidates\.slice\(0, 3\)/);
+  assert.match(dialog, /filteredOvertime\.slice\(0, 3\)/);
+  assert.match(dialog, /Ver todas \(\$\{activeTotal\}\)/);
+  assert.match(styles, /\.hole-suggest-modes/);
+  assert.match(styles, /\.hole-suggest-more/);
   assert.match(schedule, /action: "redeploy_group"/);
   assert.match(schedule, /poolGroup\.map\(\(assignment\) => Number\(assignment\.id\)\)/);
   assert.match(schedule, /status: hasOtherBlock \? "overtime" : "normal"/);
   assert.match(api, /if \(b\.action === "redeploy_group"\)/);
-  assert.match(usability, /\.quick-add-smart/);
 });
 
 test("the inline X removes only the selected schedule segment", () => {
