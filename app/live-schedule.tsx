@@ -929,6 +929,19 @@ export function LiveSchedule() {
       await reorder(assignment.updated_at);
       return;
     }
+    if (!sameShift) {
+      await postAssignment({
+        action: "move_assignment_to_cell",
+        id: assignment.id,
+        expectedUpdatedAt: assignment.updated_at || null,
+        scheduleId: data.schedule.id,
+        sourceShift: sourceShift || assignment.shift,
+        shift,
+        postId: kind === "post" ? resource.id : null,
+        vehicleId: kind === "vehicle" ? resource.id : null,
+      });
+      return;
+    }
     const regularEnd = String(assignment.regular_ends_at || "");
     if (regularEnd && String(assignment.status) === "overtime") {
       const extensionMove = sourceShift

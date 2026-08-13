@@ -56,6 +56,35 @@ export function operationalShiftWindow(date: string, shift: string) {
   return windows[shift] || shiftTimes(date, shift);
 }
 
+function localDateTime(value: number) {
+  const date = new Date(value);
+  const part = (number: number) => String(number).padStart(2, "0");
+  return `${date.getFullYear()}-${part(date.getMonth() + 1)}-${part(date.getDate())}T${part(date.getHours())}:${part(date.getMinutes())}`;
+}
+
+/** Move only the visible portion of an assignment to another six-hour cell. */
+export function mapAssignmentSegmentToShift(date: string, sourceShift: string, targetShift: string, startsAt: string, endsAt: string) {
+  const source = operationalShiftWindow(date, sourceShift), target = operationalShiftWindow(date, targetShift);
+  const sourceStart = Date.parse(source.start), sourceEnd = Date.parse(source.end);
+  const assignmentStart = Date.parse(startsAt), assignmentEnd = Date.parse(endsAt);
+  const targetStart = Date.parse(target.start), targetEnd = Date.parse(target.end);
+  if (![sourceStart, sourceEnd, assignmentStart, assignmentEnd, targetStart, targetEnd].every(Number.isFinite)) return null;
+  const segmentStart = Math.max(sourceStart, assignmentStart), segmentEnd = Math.min(sourceEnd, assignmentEnd);
+  if (segmentEnd <= segmentStart) return null;
+  const duration = Math.min(segmentEnd - segmentStart, targetEnd - targetStart);
+  const sourceOffset = Math.max(0, segmentStart - sourceStart);
+  const movedStart = Math.min(targetStart + sourceOffset, targetEnd - duration);
+  const movedEnd = movedStart + duration;
+  return {
+    source: { start: localDateTime(segmentStart), end: localDateTime(segmentEnd) },
+    target: { start: localDateTime(movedStart), end: localDateTime(movedEnd) },
+    remainders: [
+      assignmentStart < segmentStart ? { start: startsAt, end: localDateTime(segmentStart) } : null,
+      assignmentEnd > segmentEnd ? { start: localDateTime(segmentEnd), end: endsAt } : null,
+    ].filter(Boolean) as Array<{ start: string; end: string }>,
+  };
+}
+
 export function assignmentOverlapsShift(
   assignment: { shift?: unknown; starts_at?: unknown; ends_at?: unknown },
   date: string,

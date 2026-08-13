@@ -8,7 +8,7 @@ import {
 import { writeAudit } from "../../../lib/audit";
 import { permitted } from "../../../lib/access";
 import { isScheduleDate, todayScheduleDate } from "../../../lib/schedule-date";
-import { fullPeriodShifts, fullPeriodWindow, shiftTimes as periodShiftTimes, operationalShiftWindow, isDayShift, splitExtensionWindow } from "../../../lib/shift-rules";
+import { fullPeriodShifts, fullPeriodWindow, shiftTimes as periodShiftTimes, operationalShiftWindow, isDayShift, mapAssignmentSegmentToShift, splitExtensionWindow } from "../../../lib/shift-rules";
 import { rankGuardSuggestions, describeReasons } from "../../../lib/suggest-gm";
 import { hasRequiredVehicleCrew, hasUniqueCrewMembers, isMotorcycleType } from "../../../lib/crew-rules";
 import { orderedResourceGuardIds } from "../../../lib/schedule-lanes";
@@ -1128,6 +1128,54 @@ export async function POST(request: Request) {
       undoable: true,
     });
     return Response.json({ ok: true, assignments: changedAssignments, auditEventId, message: "Posição dos GMs alinhada neste local." });
+  }
+  if (b.action === "move_assignment_to_cell") {
+    const id=Number(b.id||0),scheduleId=Number(b.scheduleId||0),sourceShift=String(b.sourceShift||""),targetShift=String(b.shift||"");
+    if(!id||!scheduleId||!["1","2","3","4"].includes(sourceShift)||!["1","2","3","4"].includes(targetShift))
+      return Response.json({error:"Informe o quadradinho de origem e o turno de destino."},{status:400});
+    const schedule=await env.DB.prepare("SELECT id,date FROM schedules WHERE id=?").bind(scheduleId).first<{id:number;date:string}>();
+    const before=await env.DB.prepare("SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id=? AND a.schedule_id=?").bind(id,scheduleId).first<Record<string,unknown>>();
+    if(!schedule||!before)return Response.json({error:"O quadradinho não foi encontrado nesta escala."},{status:404});
+    if(isStaleVersion((b as Record<string,unknown>).expectedUpdatedAt,before.updated_at))return staleVersionResponse(before);
+    const mapped=mapAssignmentSegmentToShift(schedule.date,sourceShift,targetShift,String(before.starts_at),String(before.ends_at));
+    if(!mapped)return Response.json({error:"O horário de origem não corresponde ao quadradinho selecionado."},{status:409});
+    if(mapped.remainders.some(piece=>piece.start<mapped.target.end&&piece.end>mapped.target.start))return Response.json({error:"Este GM já ocupa o horário de destino dentro da mesma jornada."},{status:409});
+    const postId=Number(b.postId||0)||null,vehicleId=Number(b.vehicleId||0)||null;
+    if((postId?1:0)+(vehicleId?1:0)!==1)return Response.json({error:"Escolha um único posto ou viatura de destino."},{status:400});
+    if(postId&&!await env.DB.prepare("SELECT id FROM posts WHERE id=? AND active=1").bind(postId).first())return Response.json({error:"O posto de destino não está disponível."},{status:404});
+    const excluded=await env.DB.prepare("SELECT id FROM schedule_resource_exclusions WHERE schedule_id=? AND resource_kind=? AND resource_id=? LIMIT 1").bind(scheduleId,postId?"post":"vehicle",postId||vehicleId).first();
+    if(excluded)return Response.json({error:"Este local foi retirado da escala do dia."},{status:409});
+    let role=postId?"guard":String(before.role||"third");
+    if(vehicleId){
+      const vehicle=await env.DB.prepare("SELECT id,type FROM vehicles WHERE id=? AND active=1").bind(vehicleId).first<{id:number;type:string|null}>();
+      if(!vehicle)return Response.json({error:"A viatura de destino não está disponível."},{status:404});
+      const outage=await env.DB.prepare("SELECT id FROM vehicle_outages WHERE vehicle_id=? AND active=1 AND starts_on<=? AND (ends_on IS NULL OR ends_on>=?) LIMIT 1").bind(vehicleId,schedule.date,schedule.date).first();
+      if(outage)return Response.json({error:"A viatura está em FA nesta data."},{status:409});
+      const occupied=(await env.DB.prepare("SELECT role,guard_id FROM assignments WHERE schedule_id=? AND vehicle_id=? AND id<>? AND starts_at<? AND ends_at>?").bind(scheduleId,vehicleId,id,mapped.target.end,mapped.target.start).all<{role:string;guard_id:number}>()).results;
+      if(isMotorcycleType(vehicle.type)&&occupied.some(item=>Number(item.guard_id)!==Number(before.guard_id)))return Response.json({error:"Esta moto já possui um GM no horário de destino."},{status:409});
+      const roles=new Set(occupied.map(item=>String(item.role)));
+      role=isMotorcycleType(vehicle.type)?"driver":!roles.has("driver")?"driver":!roles.has("patrol")?"patrol":"third";
+    }
+    const conflict=await assertAssignable(scheduleId,Number(before.guard_id),mapped.target.start,mapped.target.end,id);
+    if(conflict)return Response.json({error:conflict.error},{status:conflict.status});
+    const movedStatus=String(before.status||"normal");
+    const movedWorkKind=String(before.work_kind||"shift")==="overtime_extension"?"overtime_extension":"shift";
+    const statements=[];
+    if(mapped.remainders.length){
+      const first=mapped.remainders[0];
+      statements.push(env.DB.prepare("UPDATE assignments SET starts_at=?,ends_at=?,regular_ends_at=NULL,break_starts_at=NULL,break_ends_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND schedule_id=?").bind(first.start,first.end,id,scheduleId));
+      if(mapped.remainders.length>1){
+        const second=mapped.remainders[1];
+        statements.push(env.DB.prepare("INSERT INTO assignments (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,work_kind,status,request_ref,is_reassigned,reassignment_note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(scheduleId,before.guard_id,before.post_id||null,before.vehicle_id||null,before.shift,before.role,second.start,second.end,before.work_kind||"shift",before.status||"normal",before.request_ref||null,before.is_reassigned||0,before.reassignment_note||null));
+      }
+      statements.push(env.DB.prepare("INSERT INTO assignments (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,work_kind,status,request_ref,is_reassigned,reassignment_note,lane_order) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,NULL)").bind(scheduleId,before.guard_id,postId,vehicleId,targetShift,role,mapped.target.start,mapped.target.end,movedWorkKind,movedStatus,before.request_ref||null,1,before.reassignment_note||`Remanejado do ${sourceShift}º para o ${targetShift}º turno`));
+    }else{
+      statements.push(env.DB.prepare("UPDATE assignments SET post_id=?,vehicle_id=?,shift=?,role=?,starts_at=?,ends_at=?,regular_ends_at=NULL,break_starts_at=NULL,break_ends_at=NULL,work_kind=?,status=?,is_reassigned=1,reassignment_note=?,lane_order=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND schedule_id=?").bind(postId,vehicleId,targetShift,role,mapped.target.start,mapped.target.end,movedWorkKind,movedStatus,before.reassignment_note||`Remanejado do ${sourceShift}º para o ${targetShift}º turno`,id,scheduleId));
+    }
+    await env.DB.batch(statements);
+    const assignments=(await env.DB.prepare("SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.schedule_id=? AND a.guard_id=? ORDER BY a.starts_at,a.id").bind(scheduleId,before.guard_id).all<Record<string,unknown>>()).results;
+    const auditEventId=await writeAudit(request,{action:"update",entityType:"assignment_move",entityId:id,summary:`Moveu ${before.guard_name} do ${sourceShift}º para o ${targetShift}º turno`,before:{assignment:before,sourceShift},after:{assignments,targetShift,target:mapped.target},undoable:true});
+    return Response.json({ok:true,assignments,auditEventId,message:`${before.guard_name} movido para o ${targetShift}º turno · ${mapped.target.start.slice(11,16)}–${mapped.target.end.slice(11,16)}.`});
   }
   if (b.action === "copy_assignment_to_cell") {
     const sourceId=Number(b.sourceAssignmentId||0),scheduleId=Number(b.scheduleId||0),targetShift=String(b.shift||"");

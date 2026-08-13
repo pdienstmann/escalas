@@ -10,7 +10,7 @@ import {
   withScheduleDate,
 } from "../lib/schedule-date.ts";
 import { orderScheduleResources } from "../lib/schedule-sections.ts";
-import { assignmentOverlapsShift, coveredOperationalShifts, formatHoursDuration, fullPeriodWindow, fullPeriodShifts, splitExtensionWindow } from "../lib/shift-rules.ts";
+import { assignmentOverlapsShift, coveredOperationalShifts, formatHoursDuration, fullPeriodWindow, fullPeriodShifts, mapAssignmentSegmentToShift, splitExtensionWindow } from "../lib/shift-rules.ts";
 import { rankGuardSuggestions, describeReasons } from "../lib/suggest-gm.ts";
 import { groupRedeploymentAssignments, mergeScheduleAssignments } from "../lib/schedule-state.ts";
 import { orderAssignmentsInResourceCell, orderedResourceGuardIds } from "../lib/schedule-lanes.ts";
@@ -469,6 +469,25 @@ test("selected regular GM cards use drop-on-card to choose lane position", () =>
   assert.match(schedule, /targetAssignmentId\?: number/);
   assert.match(schedule, /if\(canDropOnCard\(a\)\)drop\(event,s\.id,Number\(a\.id\)\)/);
   assert.match(schedule, /const sameShift = sourceShift \? sourceShift === shift/);
+});
+
+test("dragging a card across quadrants moves only its visible segment and adjusts the clock", () => {
+  assert.deepEqual(mapAssignmentSegmentToShift("2026-08-12", "2", "4", "2026-08-12T07:00", "2026-08-12T13:00"), {
+    source: { start: "2026-08-12T07:00", end: "2026-08-12T13:00" },
+    target: { start: "2026-08-12T19:00", end: "2026-08-13T01:00" },
+    remainders: [],
+  });
+  assert.deepEqual(mapAssignmentSegmentToShift("2026-08-12", "2", "4", "2026-08-12T07:00", "2026-08-12T19:00"), {
+    source: { start: "2026-08-12T07:00", end: "2026-08-12T13:00" },
+    target: { start: "2026-08-12T19:00", end: "2026-08-13T01:00" },
+    remainders: [{ start: "2026-08-12T13:00", end: "2026-08-12T19:00" }],
+  });
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const api = readFileSync(resolve("app/api/schedule/route.ts"), "utf8");
+  assert.match(schedule, /action: "move_assignment_to_cell"/);
+  assert.match(schedule, /sourceShift: sourceShift \|\| assignment\.shift/);
+  assert.match(api, /mapAssignmentSegmentToShift/);
+  assert.match(api, /Remanejado do \$\{sourceShift\}º para o \$\{targetShift\}º turno/);
 });
 
 test("copying a regular block into another quadrant is automatically classified as HE", () => {
