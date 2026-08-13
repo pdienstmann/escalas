@@ -2,6 +2,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { ScheduleNav, BackToSchedule } from "./schedule-nav";
 import { ModuleLoading } from "./module-loading";
+import { readClientCache, writeClientCache } from "./client-cache";
 import { useScheduleDate } from "./use-schedule-date";
 import { formatScheduleDate } from "../lib/schedule-date";
 import { formatHoursDuration } from "../lib/shift-rules";
@@ -13,12 +14,21 @@ type Operation=Rec&{id:number;title:string;starts_at:string;ends_at:string;statu
 type Data={date:string;operations:Operation[];vehicles:Vehicle[]};
 type Suggestion={guardId:number;name:string;registration:string;platoon?:string;sourceType:"available"|"redeployment"|"extension"|"overtime";originLabel?:string|null;currentHeHours:number;lastOvertime?:string|null;operationHours:number};
 
+const operationsCacheKey=(date:string)=>`gmnh:operations:${date}`;
+const operationsCacheTtl=5*60_000;
+function readOperationsCache(date:string){
+  const value=readClientCache<Data>(operationsCacheKey(date),operationsCacheTtl);
+  return value&&value.date===date&&Array.isArray(value.operations)&&Array.isArray(value.vehicles)?value:null;
+}
+
 export function OperationsDashboard({initialDate}:{initialDate?:string|null}){
-  const{date}=useScheduleDate(initialDate),[data,setData]=useState<Data|null>(null),[error,setError]=useState(""),[message,setMessage]=useState(""),[creating,setCreating]=useState(false),[busy,setBusy]=useState(false),[slotPick,setSlotPick]=useState<{operation:Operation;slot:Slot}|null>(null);
+  const{date}=useScheduleDate(initialDate);
+  const[data,setData]=useState<Data|null>(null),[error,setError]=useState(""),[message,setMessage]=useState(""),[creating,setCreating]=useState(false),[busy,setBusy]=useState(false),[slotPick,setSlotPick]=useState<{operation:Operation;slot:Slot}|null>(null);
   const load=useCallback(async()=>{try{const response=await fetch(`/api/operations?date=${date}&_=${Date.now()}`,{cache:"no-store"});const value=await response.json();if(!response.ok)throw new Error(value.error);setError("");setData(value)}catch(reason){setError(reason instanceof Error?reason.message:"Não foi possível abrir as operações.")}},[date]);
   // O efeito sincroniza a data da navegação com a API de operações.
   // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(()=>{void load()},[load]);
+  useEffect(()=>{const cached=readOperationsCache(date);setData(cached);void load()},[date,load]);
+  useEffect(()=>{if(data?.date===date)writeClientCache(operationsCacheKey(date),data)},[data,date]);
   async function post(payload:Rec){if(busy)return null;setBusy(true);try{const response=await fetch("/api/operations",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)});const value=await response.json();setMessage(response.ok?value.message:value.error);if(response.ok&&value.operations)setData(current=>current?{...current,operations:value.operations}:current);return response.ok?value:null}finally{setBusy(false)}}
   async function create(event:FormEvent<HTMLFormElement>,vehicleIds:number[]){event.preventDefault();const values=Object.fromEntries(new FormData(event.currentTarget));const result=await post({...values,vehicleIds,date,requestedGuards:Number(values.requestedGuards)});if(result)setCreating(false)}
   if(!data&&!error)return <ModuleLoading area="operações do dia" detail="Preparando a escala operacional…"/>;

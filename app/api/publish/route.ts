@@ -178,6 +178,26 @@ export async function POST(request: Request) {
   }
 }
 
+export async function GET(request: Request) {
+  try {
+    if (!permitted(request)) return Response.json({ error: "Nao autorizado" }, { status: 401 });
+    const scheduleId = Number(new URL(request.url).searchParams.get("scheduleId") || 0);
+    if (!Number.isInteger(scheduleId) || scheduleId < 1)
+      return Response.json({ error: "Informe uma escala valida." }, { status: 400 });
+    const schedule = await env.DB.prepare("SELECT id,date,status FROM schedules WHERE id=?").bind(scheduleId).first<Row>();
+    if (!schedule) return Response.json({ error: "Escala nao encontrada." }, { status: 404 });
+    const data = await loadValidationData(scheduleId, textValue(schedule.date));
+    const issues = buildIssues(data.posts, data.vehicles, data.assignments);
+    return Response.json({ schedule, issues, summary: {
+      critical: issues.filter((issue) => issue.severity === "critical").length,
+      warning: issues.filter((issue) => issue.severity === "warning").length,
+    } }, { headers: { "cache-control": "no-store" } });
+  } catch (error) {
+    console.error("publish_preview_error", error);
+    return Response.json({ error: "Não foi possível conferir as pendências da escala." }, { status: 500 });
+  }
+}
+
 async function publishSchedule(request: Request) {
   if (!permitted(request)) return Response.json({ error: "Nao autorizado" }, { status: 401 });
   const body = await request.json() as { scheduleId?: number | string };

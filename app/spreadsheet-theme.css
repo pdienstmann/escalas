@@ -802,3 +802,145 @@
     }
   }
 }
+
+/*
+ * Contenção da primeira coluna durante a rolagem horizontal.
+ *
+ * Cada célula de turno pode ter botões posicionados (remover, +HE e o
+ * menu contextual). Sem um contexto de empilhamento próprio, esses
+ * controles conseguem pintar por cima da coluna POSTO / RECURSO quando a
+ * tabela é deslocada para a esquerda. A coluna fixa recebe uma camada
+ * superior e cada célula de turno fica isolada na sua própria camada.
+ */
+@media screen {
+  .schedule tbody tr.post-row > td:first-child,
+  .schedule tbody tr.vehicle-row > td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 20;
+    isolation: isolate;
+  }
+
+  /* A camada do cabeçalho continua acima das células fixas quando a grade
+     também é deslocada verticalmente. */
+  .schedule thead th {
+    z-index: 30;
+  }
+
+  .schedule thead tr:first-child > th:first-child {
+    z-index: 40 !important;
+  }
+
+  .schedule thead tr:nth-child(2) > th {
+    z-index: 35;
+  }
+
+  .schedule tbody tr.post-row > td:not(:first-child),
+  .schedule tbody tr.vehicle-row > td:not(:first-child) {
+    position: relative;
+    z-index: 1;
+    isolation: isolate;
+  }
+
+  .schedule tbody tr.group > td,
+  .schedule tbody tr.operational-group-heading > td,
+  .schedule tbody tr.operational-team-heading > td {
+    isolation: isolate;
+  }
+
+  /* Menus contextuais nunca devem aumentar a largura de uma célula e
+     atravessar a coluna fixa. Eles continuam podendo crescer na vertical. */
+  .schedule tbody tr.post-row > td.drop-cell,
+  .schedule tbody tr.vehicle-row > td.drop-cell,
+  .schedule tbody tr.post-row > td.drop-cell .live-person-card,
+  .schedule tbody tr.vehicle-row > td.drop-cell .live-person-card,
+  .schedule tbody tr.post-row > td.drop-cell .quick-add-picker,
+  .schedule tbody tr.vehicle-row > td.drop-cell .quick-add-picker,
+  .schedule tbody tr.post-row > td.drop-cell .cell-quick-actions,
+  .schedule tbody tr.vehicle-row > td.drop-cell .cell-quick-actions {
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .schedule tbody tr.post-row > td.drop-cell .cell-quick-actions,
+  .schedule tbody tr.vehicle-row > td.drop-cell .cell-quick-actions {
+    left: auto;
+    right: auto;
+    width: 100%;
+  }
+
+  /* No celular, o menu permanece junto ao quadrante selecionado em vez de
+     virar uma camada fixa que cobre a coluna de recursos durante o scroll. */
+  @media (max-width: 600px) {
+    .schedule tbody tr.post-row > td.drop-cell .cell-quick-actions,
+    .schedule tbody tr.vehicle-row > td.drop-cell .cell-quick-actions {
+      position: relative;
+      inset: auto;
+      width: 100%;
+      max-height: none;
+      margin-top: 7px;
+      overflow: visible;
+    }
+
+    /* Ações do recurso também ficam dentro da coluna no celular, inclusive
+       para postos (antes a grade só era aplicada às viaturas). */
+    .schedule tbody tr.post-row .resource,
+    .schedule tbody tr.vehicle-row .resource {
+      display: grid;
+      grid-template-columns: 22px minmax(0, 1fr) auto;
+      grid-template-rows: auto auto;
+      align-items: start;
+      gap: 3px 5px;
+      min-width: 0;
+      max-width: 100%;
+    }
+
+    .schedule tbody tr.post-row .resource > .vehicle,
+    .schedule tbody tr.vehicle-row .resource > .vehicle {
+      grid-column: 1;
+      grid-row: 1 / span 2;
+    }
+
+    .schedule tbody tr.post-row .resource > div,
+    .schedule tbody tr.vehicle-row .resource > div {
+      grid-column: 2;
+      grid-row: 1;
+      min-width: 0;
+      width: auto;
+      padding: 0;
+    }
+
+    .schedule tbody tr.post-row .resource > div > b,
+    .schedule tbody tr.post-row .resource > div > small,
+    .schedule tbody tr.vehicle-row .resource > div > b,
+    .schedule tbody tr.vehicle-row .resource > div > small {
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    .schedule tbody tr.post-row .resource > .resource-quick-button,
+    .schedule tbody tr.vehicle-row .resource > .vehicle-quick-button {
+      grid-column: 3;
+      grid-row: 1;
+      align-self: start;
+      margin-left: 0;
+    }
+
+    .schedule tbody tr.post-row .resource > .resource-add-person,
+    .schedule tbody tr.vehicle-row .resource > .resource-add-person {
+      grid-column: 2;
+      grid-row: 2;
+      justify-self: start;
+      align-self: start;
+    }
+
+    .schedule tbody tr.post-row .resource > .resource-remove-button,
+    .schedule tbody tr.vehicle-row .resource > .resource-remove-button {
+      grid-column: 3;
+      grid-row: 2;
+      justify-self: end;
+      align-self: start;
+    }
+  }
+}

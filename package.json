@@ -11,6 +11,10 @@
 "start": "vinext start",
     "test": "npm run build && node --experimental-strip-types --test tests/phase1-scope.test.mjs tests/pattern-validation.test.mjs tests/crew-rules.test.mjs",
     "test:unit": "node --experimental-strip-types --test tests/phase1-scope.test.mjs tests/pattern-validation.test.mjs tests/crew-rules.test.mjs",
+    "test:stress": "node scripts/stress-test.mjs run",
+    "test:stress:probe": "node scripts/stress-test.mjs probe",
+    "test:stress:verify": "node scripts/stress-test.mjs verify",
+    "test:stress:race": "node scripts/stress-test.mjs race",
     "deploy": "npm run build && wrangler deploy",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"

@@ -2,15 +2,23 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { ModuleLoading } from "./module-loading";
+import { readClientCache, writeClientCache } from "./client-cache";
 import { BackToSchedule } from "./schedule-nav";
 import { useScheduleDate } from "./use-schedule-date";
 
 type Item = Record<string, string | number | null>;
+const noticesCacheKey = "gmnh:notices";
+const noticesCacheTtl = 10 * 60_000;
+function readNoticesCache() {
+  const value = readClientCache<Item[]>(noticesCacheKey, noticesCacheTtl);
+  return Array.isArray(value) ? value : null;
+}
 
 export function NoticesDashboard() {
   const { date } = useScheduleDate();
   const [items, setItems] = useState<Item[]>([]);
-  const [busy, setBusy] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [editing, setEditing] = useState<Item | null>(null);
@@ -20,16 +28,24 @@ export function NoticesDashboard() {
       const response = await fetch(`/api/notices?_=${Date.now()}`, { cache: "no-store" });
       const json = await response.json() as { items?: Item[]; error?: string };
       if (!response.ok) throw new Error(String(json.error || "Não foi possível carregar as alterações."));
-      setItems(json.items || []);
+      const nextItems = json.items || [];
+      setItems(nextItems);
+      writeClientCache(noticesCacheKey, nextItems);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Não foi possível carregar as alterações.");
     } finally {
+      setLoaded(true);
       setBusy(false);
     }
   }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    const cachedItems = readNoticesCache();
+    if (cachedItems) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setItems(cachedItems);
+      setLoaded(true);
+    }
     void load();
   }, [load]);
 
@@ -68,6 +84,8 @@ export function NoticesDashboard() {
     if (!editing) return;
     if (await act({ ...Object.fromEntries(new FormData(event.currentTarget)), action: "update", id: editing.id })) setEditing(null);
   }
+
+  if (!loaded) return <ModuleLoading area="alteracoes" detail="Sincronizando lembretes operacionais..." />;
 
   if (busy) return <ModuleLoading area="alterações diversas" detail="Carregando lembretes operacionais…" />;
 

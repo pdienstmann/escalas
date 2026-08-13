@@ -8,11 +8,21 @@ export const dynamic="force-dynamic";
 
 export async function GET(request:Request){
   if(!permitted(request))return Response.json({error:"Não autorizado"},{status:401});
-  const date=new URL(request.url).searchParams.get("date");
+  const searchParams=new URL(request.url).searchParams;
+  const date=searchParams.get("date");
+  const month=searchParams.get("month");
+  if(month&&!/^\d{4}-\d{2}$/.test(month))return Response.json({error:"Mês inválido."},{status:400});
   const result=date
     ?await env.DB.prepare("SELECT * FROM operational_notices WHERE effective_date=? ORDER BY status,title").bind(date).all()
+    :month
+      ?await env.DB.prepare("SELECT * FROM operational_notices WHERE effective_date>=? AND effective_date<? ORDER BY effective_date,status,title").bind(`${month}-01`,nextMonth(month)).all()
     :await env.DB.prepare("SELECT * FROM operational_notices ORDER BY effective_date DESC,created_at DESC LIMIT 100").all();
   return Response.json({items:result.results});
+}
+
+function nextMonth(month:string){
+  const [year,value]=month.split("-").map(Number);
+  return `${value===12?year+1:year}-${String(value===12?1:value+1).padStart(2,"0")}-01`;
 }
 
 export async function POST(request:Request){

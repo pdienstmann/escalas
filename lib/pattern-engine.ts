@@ -77,13 +77,14 @@ export async function ensurePatterns(db: D1Database) {
         slots.map((slot, index) =>
           db
             .prepare(
-              "INSERT INTO pattern_slots (pattern_id,guard_id,post_id,vehicle_id,role) VALUES (?,?,?,?,?)",
+              "INSERT INTO pattern_slots (pattern_id,guard_id,post_id,vehicle_id,shift,role) VALUES (?,?,?,?,?,?)",
             )
             .bind(
               pattern.id,
               guards[index].id,
               slot.postId,
               slot.vehicleId,
+              null,
               slot.role,
             ),
         ),
@@ -137,6 +138,19 @@ export async function applyPatternsToSchedule(
       .bind(dayCode, nightCode)
       .all<Record<string, unknown>>()
   ).results;
+  // A GM linked to a grupamento in the selected pattern is owned by that
+  // section of the scale.  Carry the selected turn/VTR into the generated
+  // assignment so the daily view does not duplicate the person in the
+  // conventional post list.
+  const groupAssignments = new Map<string, Record<string, unknown>>();
+  for (const pattern of patterns) {
+    const rows = (
+      await db.prepare("SELECT resource_id,shift,vehicle_id,starts_at,ends_at FROM pattern_operational_group_members WHERE pattern_id=? AND resource_kind='guard'")
+        .bind(pattern.id)
+        .all<Record<string, unknown>>()
+    ).results;
+    for (const row of rows) groupAssignments.set(`${pattern.id}:${row.resource_id}`, row);
+  }
   const commands: D1PreparedStatement[] = [];
   for (const pattern of patterns) {
     const slots = (
@@ -146,27 +160,44 @@ export async function applyPatternsToSchedule(
           .all<Record<string, unknown>>()
       ).results,
       shifts = pattern.period === "day" ? ["2", "3"] : ["4", "1"];
-    for (const slot of slots)
-      for (const shift of shifts) {
+    for (const slot of slots) {
+      const groupAssignment = groupAssignments.get(`${pattern.id}:${slot.guard_id}`);
+      // A null shift means the position repeats in both turns of the period.
+      // Imported pattern sheets can override it with a single turn (for
+      // example, Rodoviária has a different GM in the 2º and 3º turns).
+      const groupShift = String(groupAssignment?.shift || "");
+      const targetShifts = groupShift && shifts.includes(groupShift)
+        ? [groupShift]
+        : slot.shift && shifts.includes(String(slot.shift))
+        ? [String(slot.shift)]
+        : shifts;
+      for (const shift of targetShifts) {
         const t = times(date, shift);
+        const customStart = String(groupAssignment?.starts_at || "").trim();
+        const customEnd = String(groupAssignment?.ends_at || "").trim();
+        const startsAt = customStart ? `${date}T${customStart}` : t.start;
+        const endsAt = customEnd ? `${shift === "4" && customEnd < customStart ? new Date(`${date}T12:00:00Z`).toISOString().slice(0, 10) : date}T${customEnd}` : t.end;
+        const assignedVehicleId = groupAssignment?.vehicle_id != null ? Number(groupAssignment.vehicle_id) : slot.vehicle_id;
+        const assignedPostId = groupAssignment?.vehicle_id != null ? null : slot.post_id;
         commands.push(
           db
             .prepare(
-              "INSERT INTO assignments (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,status) VALUES (?,?,?,?,?,?,?,?,?)",
+              "INSERT OR IGNORE INTO assignments (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,status) VALUES (?,?,?,?,?,?,?,?,?)",
             )
             .bind(
               scheduleId,
               slot.guard_id,
-              slot.post_id,
-              slot.vehicle_id,
+              assignedPostId,
+              assignedVehicleId,
               shift,
               slot.role,
-              t.start,
-              t.end,
+              startsAt,
+              endsAt,
               "normal",
             ),
         );
       }
+    }
   }
   if (commands.length) await db.batch(commands);
   const day = patterns.find((p) => p.code === dayCode),

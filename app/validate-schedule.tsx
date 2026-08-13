@@ -53,16 +53,32 @@ export function ValidateSchedule() {
   const [issues, setIssues] = useState<ValidationIssue[]>([]);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [checking, setChecking] = useState(true);
+  const [visibleIssues, setVisibleIssues] = useState(40);
 
   useEffect(() => {
+    // A new date starts in an explicit checking state; the asynchronous
+    // callbacks below replace it with the real validation result.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setChecking(true);
     fetch(`/api/schedule?date=${date}&_=${Date.now()}`, { cache: "no-store" })
       .then((response) => response.json())
       .then((payload) => {
-        setIssues([]);
-        setMessage("");
-        setData(payload as Data);
+        const nextData = payload as Data;
+        setData(nextData);
+        return fetch(`/api/publish?scheduleId=${nextData.schedule.id}&_=${Date.now()}`, { cache: "no-store" });
       })
-      .catch(() => setMessage("Não foi possível carregar a validação."));
+      .then((response) => response.json().then((payload) => ({ response, payload })))
+      .then(({ response, payload }) => {
+        if (!response.ok) throw new Error(String(payload.error || "Não foi possível conferir as pendências."));
+        setIssues(normalizeIssues(payload.issues));
+        setMessage("");
+        setChecking(false);
+      })
+      .catch(() => {
+        setMessage("Não foi possível carregar a validação.");
+        setChecking(false);
+      });
   }, [date]);
 
   async function publish() {
@@ -92,6 +108,7 @@ export function ValidateSchedule() {
   const currentData = data?.date === date ? data : null;
   const criticalIssues = useMemo(() => issues.filter((issue) => issue.severity === "critical"), [issues]);
   const warningIssues = useMemo(() => issues.filter((issue) => issue.severity === "warning"), [issues]);
+  const shownIssues = issues.slice(0, visibleIssues);
 
   if (!currentData) {
     return (
@@ -107,7 +124,7 @@ export function ValidateSchedule() {
 
   return (
     <main className="validation-page">
-      <Link href={hrefFor("/")}>← Voltar à escala</Link>
+      <Link href={hrefFor("/escala")}>← Voltar à escala</Link>
       <header>
         <span>VALIDAÇÃO OPERACIONAL</span>
         <h1>Conferência antes da publicação</h1>
@@ -128,9 +145,10 @@ export function ValidateSchedule() {
         </article>
       </div>
       <div className="validation-severity-summary" aria-live="polite">
-        <article className={criticalIssues.length ? "bad" : "good"}><b>{criticalIssues.length}</b><span>pendências críticas</span><small>bloqueiam a publicação</small></article>
-        <article className={warningIssues.length ? "warning" : "good"}><b>{warningIssues.length}</b><span>alertas</span><small>exigem conferência</small></article>
+        <article className={checking ? "" : criticalIssues.length ? "bad" : "good"}><b>{checking ? "…" : criticalIssues.length}</b><span>pendências críticas</span><small>{checking ? "conferindo a escala" : "bloqueiam a publicação"}</small></article>
+        <article className={checking ? "" : warningIssues.length ? "warning" : "good"}><b>{checking ? "…" : warningIssues.length}</b><span>alertas</span><small>{checking ? "conferindo a escala" : "exigem conferência"}</small></article>
       </div>
+      <p className="validation-preview-note">Conferência automática atualizada ao abrir esta página. O botão abaixo repete a validação antes de publicar.</p>
       <section>
         <h2>Verificações automáticas</h2>
         <ul>
@@ -149,10 +167,10 @@ export function ValidateSchedule() {
         <section className="validation-issues">
           <header>
             <div><small>PENDÊNCIAS ENCONTRADAS</small><h2>O que precisa ser conferido</h2></div>
-            <Link href={hrefFor("/")}>Abrir escala</Link>
+            <Link href={hrefFor("/escala")}>Abrir escala</Link>
           </header>
           <div className="issue-grid">
-            {issues.map((issue) => (
+            {shownIssues.map((issue) => (
               <article className={`validation-issue ${issue.severity}`} key={issue.id}>
                 <header><span>{issue.severity === "critical" ? "CRÍTICO" : "ALERTA"}</span><b>{issue.label}</b></header>
                 <p>{issue.detail}</p>
@@ -160,6 +178,7 @@ export function ValidateSchedule() {
               </article>
             ))}
           </div>
+          {visibleIssues < issues.length && <button type="button" className="validation-show-more" onClick={() => setVisibleIssues((value) => value + 40)}>Mostrar mais pendências ({issues.length - visibleIssues} restantes)</button>}
         </section>
       )}
       <button className="publish-button" disabled={busy} onClick={() => void publish()}>

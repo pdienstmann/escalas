@@ -4,7 +4,9 @@ import { FullPageLink as Link } from "./full-page-link";
 import { withScheduleDate } from "../lib/schedule-date";
 
 const primaryItems = [
-  { href: "/", label: "Escala", exact: true },
+  { href: "/", label: "Início", exact: true },
+  { href: "/escala", label: "Escala" },
+  { href: "/planejamento", label: "Planejamento" },
   { href: "/operacoes", label: "Operações" },
   { href: "/movimentacoes", label: "Pendências" },
   { href: "/horas-extras", label: "Horas extras" },
@@ -26,6 +28,7 @@ export function ScheduleNav({
   date: string;
   active?: string;
 }) {
+  const activeMoreItem = moreItems.find((item) => active.startsWith(item.href));
   return (
     <nav className="tabs" aria-label="Módulos da escala">
       {primaryItems.map((item) => {
@@ -40,8 +43,10 @@ export function ScheduleNav({
           </Link>
         );
       })}
-      <details className="nav-more">
-        <summary>Mais</summary>
+      <details className={`nav-more${activeMoreItem ? " has-active" : ""}`}>
+        <summary aria-label={activeMoreItem ? `Mais módulos. Atual: ${activeMoreItem.label}` : "Mais módulos"}>
+          <span>Mais</span>{activeMoreItem && <small aria-hidden="true">· {activeMoreItem.label}</small>}
+        </summary>
         <div>{moreItems.map((item)=>{
           const href=withScheduleDate(item.href,date),isActive=active.startsWith(item.href);
           return isActive?<b key={item.href}>{item.label}</b>:<Link key={item.href} href={href}>{item.label}</Link>;
@@ -52,5 +57,5 @@ export function ScheduleNav({
 }
 
 export function BackToSchedule({ date, label = "← Voltar à escala" }: { date: string; label?: string }) {
-  return <Link href={withScheduleDate("/", date)}>{label}</Link>;
+  return <Link href={withScheduleDate("/escala", date)}>{label}</Link>;
 }

@@ -12,6 +12,7 @@ type OperationVehicle = Rec & { id:number; prefix:string; type:string; zone?:str
 type PrintOperation = Rec & { id:number; title:string; starts_at:string; ends_at:string; vehicles:OperationVehicle[]; generalSlots:OperationSlot[] };
 type State = {
   date: string;
+  guards?: Rec[];
   posts: Rec[];
   vehicles: Rec[];
   assignments: Rec[];
@@ -20,6 +21,8 @@ type State = {
   sections?: Rec[];
   patternLabel?: string;
   operations?: PrintOperation[];
+  operationalGroups?: Rec[];
+  operationalGroupMembers?: Rec[];
 };
 const shifts = {
   day: [
@@ -72,6 +75,15 @@ function PrintOperationsPage({data}:{data:State}){
 function OperationSlotCell({slot}:{slot?:OperationSlot}){return <td>{slot?<PrintOperationGuard slot={slot}/>:<strong className="print-hole">VAGA</strong>}</td>}
 function PrintOperationGuard({slot}:{slot:OperationSlot}){return <span className="print-operation-guard"><b>{slot.guard_name||"VAGA"}</b>{slot.guard_name&&<em>{operationSource(String(slot.source_type||"pending"))}</em>}</span>}
 const operationSource=(source:string)=>source==="available"?"DISP.":source==="extension"?"EXT. HE":source==="overtime"?"HE":source==="redeployment"?"REM.":"—";
+function groupMemberForShift(data: State, guardId: number, shift: string) {
+  const period = shift === "2" || shift === "3" ? "day" : "night";
+  return (data.operationalGroupMembers || []).find((member) => String(member.resource_kind) === "guard" && Number(member.resource_id) === guardId && member.pattern_id != null && (String(member.shift || "") === shift || (!member.shift && String(member.pattern_period || "") === period)));
+}
+
+function isGroupOwnedAssignment(data: State, assignment: Rec, shift: string) {
+  return Boolean(groupMemberForShift(data, Number(assignment.guard_id), shift));
+}
+
 function PrintPage({
   data,
   period,
@@ -130,7 +142,7 @@ function PrintPage({
                       (a) =>
                         (kind === "vehicle"
                           ? a.vehicle_id === r.id
-                          : a.post_id === r.id) && assignmentOverlapsShift(a,data.date,s.id),
+                          : a.post_id === r.id) && assignmentOverlapsShift(a,data.date,s.id) && !isGroupOwnedAssignment(data,a,s.id),
                     ),
                     missingRoles = kind === "vehicle"
                       ? ["driver", "patrol"].filter((role) => !list.some((assignment) => String(assignment.role) === role && !isOvertimeExtensionCell(assignment,data.date,s.id)))
@@ -171,7 +183,7 @@ function PrintPage({
               </tr>
             </Fragment>
           ))}
-
+          <PrintOperationalGroupRows data={data} period={period} />
         </tbody>
       </table>
       <footer>
@@ -190,6 +202,7 @@ function PrintPage({
                     <small>
                       {movementDetail(m)}
                       {m.request_ref ? ` · Req. ${m.request_ref}` : ""}
+                      {m.notes ? ` · ${m.notes}` : ""}
                     </small>
                   </p>
                 ))}
@@ -217,6 +230,44 @@ function PrintPage({
     </section>
   );
 }
+function PrintOperationalGroupRows({ data, period }: { data: State; period: "day" | "night" }) {
+  const periodShifts = shifts[period];
+  const groups = data.operationalGroups || [];
+  const members = data.operationalGroupMembers || [];
+  const guards = new Map((data.guards || []).map((guard) => [Number(guard.id), String(guard.name || `GM ${guard.id}`)]));
+  const relevant = members.filter((member) => {
+    if (String(member.resource_kind) !== "guard" || member.pattern_id == null) return false;
+    const memberPeriod = String(member.pattern_period || "");
+    return memberPeriod === period;
+  });
+  if (!relevant.length) return null;
+  const shiftLabel = (shift: string) => ({ "1": "01:00–07:00", "2": "07:00–13:00", "3": "13:00–19:00", "4": "19:00–01:00" } as Record<string, string>)[shift] || "";
+  return <>
+    <tr className="print-section print-operational-group-section"><td colSpan={1 + periodShifts.length}><b>GRUPAMENTOS E EQUIPES</b></td></tr>
+    {groups.map((group) => {
+      const groupMembers = relevant.filter((member) => Number(member.group_id) === Number(group.id));
+      if (!groupMembers.length) return null;
+      const teams = [...new Set(groupMembers.map((member) => String(member.team_label || "EQUIPE GERAL").trim().toUpperCase() || "EQUIPE GERAL"))];
+      return <Fragment key={`print-group-${group.id}`}>
+        <tr className="print-operational-group-title"><td colSpan={1 + periodShifts.length}><b>{String(group.short_name || group.name)}</b><small>{String(group.name || "Grupamento")}</small></td></tr>
+        {teams.map((team) => {
+          const teamMembers = groupMembers.filter((member) => String(member.team_label || "EQUIPE GERAL").trim().toUpperCase() === team);
+          return <tr className="print-operational-group-team" key={`print-team-${group.id}-${team}`}>
+            <td><b>{team}</b><small>{teamMembers.length} GM(s)</small></td>
+            {periodShifts.map((shift) => <td key={shift.id}>{teamMembers.filter((member) => !member.shift || String(member.shift) === shift.id).map((member) => {
+              const assignment = data.assignments.find((item) => Number(item.guard_id) === Number(member.resource_id) && String(item.work_kind || "shift") !== "overtime_extension" && assignmentOverlapsShift(item, data.date, shift.id) && (member.vehicle_id == null || Number(item.vehicle_id) === Number(member.vehicle_id)));
+              const vehicle = member.vehicle_id ? data.vehicles.find((item) => Number(item.id) === Number(member.vehicle_id)) : assignment?.vehicle_id ? data.vehicles.find((item) => Number(item.id) === Number(assignment.vehicle_id)) : null;
+              const destination = vehicle ? `${vehicleIcon(String(vehicle.type))} ${String(vehicle.prefix)}` : assignment?.post_id ? String(data.posts.find((post) => Number(post.id) === Number(assignment.post_id))?.name || "Posto") : "À disposição";
+              const time = member.starts_at && member.ends_at ? `${String(member.starts_at).slice(0, 5)}–${String(member.ends_at).slice(0, 5)}` : shiftLabel(shift.id);
+              return <span className={`print-person print-group-person ${assignment ? "normal" : "print-group-unassigned"}`} key={`${member.id}-${shift.id}`}><b>{guards.get(Number(member.resource_id)) || `GM ${member.resource_id}`}</b><small>{destination} · {time}</small>{assignment?.request_ref && <em>Req. {compactRequestReference(assignment.request_ref)}</em>}</span>;
+            })}</td>)}
+          </tr>;
+        })}
+      </Fragment>;
+    })}
+  </>;
+}
+
 const groups = [
   {
     key: "technical_reserve",
@@ -228,7 +279,7 @@ const groups = [
   { key: "course", types: ["course"], label: "Cursos" },
   {
     key: "medical_leave",
-    types: ["medical_leave"],
+    types: ["medical_leave", "other_leave"],
     label: "Atestados / licenças",
   },
   { key: "adjustments", types: ["time_bank", "swap"], label: "BH / trocas" },
@@ -239,9 +290,10 @@ function movementDetail(m: Rec) {
   const date = (value: Date) => value.toLocaleDateString("pt-BR");
   const time = (value: Date) =>
     value.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-  if (m.type === "medical_leave") return `até ${date(end)}`;
+  const displayedEnd = /T00:00(?:$|:00)/.test(String(m.ends_at || "")) ? new Date(end.getTime() - 86400000) : end;
+  if (m.type === "medical_leave" || m.type === "other_leave") return `até ${date(displayedEnd)}`;
   if (m.type === "vacation" || m.type === "course")
-    return `${date(start)} a ${date(end)}`;
+    return `${date(start)} a ${date(displayedEnd)}`;
   if (m.type === "day_off" || m.type === "technical_reserve")
     return date(start);
   return `${date(start)} ${time(start)}–${time(end)}`;

@@ -18,6 +18,7 @@ import { suggestionPosition } from "../lib/suggestion-position.ts";
 import { compactRequestReference } from "../lib/request-reference.ts";
 import { copiedBlockStatus } from "../lib/copy-rules.ts";
 import { operationalGroupLabel, operationalGroupOrder, operationalTeamLabel } from "../lib/operational-groups.ts";
+import { normalizeLeaveDisplayName, normalizeLeaveName, preferredLeaveNameMatch } from "../lib/leave-name.ts";
 
 test("request references stay compact and visible in the schedule and PDF", () => {
   const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
@@ -47,6 +48,20 @@ test("withScheduleDate preserves path and injects date query", () => {
     "/validacao?foo=1&date=2026-08-15",
   );
   assert.equal(withScheduleDate("/impressao", "bad"), "/impressao");
+});
+
+test("the More navigation stays visible above the responsive tab bar", () => {
+  const nav = readFileSync(resolve("app/schedule-nav.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/simple-ux.css"), "utf8");
+  assert.match(nav, /<details className=\{`nav-more/);
+  assert.match(nav, /moreItems\.map/);
+  assert.match(nav, /activeMoreItem/);
+  assert.match(nav, /aria-label=\{activeMoreItem/);
+  assert.match(styles, /\.tabs\{position:relative;z-index:60;overflow:visible!important\}/);
+  assert.match(styles, /\.nav-more\[open\]\{z-index:1000\}/);
+  assert.match(styles, /\.nav-more\.has-active summary/);
+  assert.match(styles, /flex-wrap:wrap/);
+  assert.match(styles, /max-height:calc\(100dvh - 130px\)/);
 });
 
 test("orderScheduleResources uses shared section order for schedule and PDF", () => {
@@ -110,7 +125,7 @@ test("section headers expose resource counts without removing their inline actio
   const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
   const theme = readFileSync(resolve("app/spreadsheet-theme.css"), "utf8");
   assert.match(schedule, /const sectionResourceCounts = useMemo/);
-  assert.match(schedule, /sectionResourceCount=\{sectionResourceCounts\.get\(section\) \|\| 0\}/);
+  assert.match(schedule, /sectionResourceCount=\{sectionResourceCounts\.get\(displaySection\) \|\| 0\}/);
   assert.match(schedule, /className="section-heading-summary"/);
   assert.match(schedule, /aria-expanded=\{!collapsed\}/);
   assert.match(theme, /\.section-toggle-label/);
@@ -122,6 +137,29 @@ test("worker marks dynamic HTML as uncached so deploys cannot mix old pages with
   assert.match(worker, /content-type.*text\/html/);
   assert.match(worker, /headers\.set\("cache-control", "no-store, max-age=0"\)/);
   assert.match(worker, /headers\.set\("cdn-cache-control", "no-store"\)/);
+});
+
+test("concurrent first opens can apply one pattern without duplicate-assignment failures", () => {
+  const engine = readFileSync(resolve("lib/pattern-engine.ts"), "utf8");
+  assert.match(engine, /INSERT OR IGNORE INTO assignments \(schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,status\)/);
+});
+
+test("management reads reuse structural D1 initialization inside a warm worker", () => {
+  const api = readFileSync(resolve("app/api/admin/route.ts"), "utf8");
+  assert.match(api, /let adminInfrastructurePromise: Promise<void> \| null = null/);
+  assert.match(api, /await Promise\.all\(\[ensureAdminInfrastructure\(\), ensureSections\(\)\]\)/);
+  assert.match(api, /adminInfrastructurePromise = null/);
+});
+
+test("monthly planning accepts a direct month link and large leave lists render progressively", () => {
+  const page = readFileSync(resolve("app/planejamento/page.tsx"), "utf8");
+  const dashboard = readFileSync(resolve("app/gestao-client.tsx"), "utf8");
+  assert.match(page, /params\.month/);
+  assert.match(page, /`\$\{params\.month\}-01`/);
+  assert.match(dashboard, /filteredItems\.slice\(0, visibleCount\)/);
+  assert.match(dashboard, /Mostrar mais 50/);
+  assert.match(dashboard, /☀ Diurno/);
+  assert.match(dashboard, /☾ Noturno/);
 });
 
 test("redeployment visibility rule keeps crew when vehicle leaves active set", () => {
@@ -218,25 +256,40 @@ test("the operational toolbar can jump directly to a visible section", () => {
   assert.match(usability, /\.section-jump select/);
 });
 
-test("selected GM cards expose a direct move flow with available resources", () => {
+test("the pending shortcut keeps holes and the redeployment pool together", () => {
   const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
-  const usability = readFileSync(resolve("app/usability.css"), "utf8");
-  assert.match(schedule, /className="quick-move-trigger"/);
-  assert.match(schedule, /moveChoices\.map/);
-  assert.match(schedule, /void onMove\(assignment, destination\.kind, destination\.resource, shift, shift\)/);
-  assert.match(schedule, /Escolher posto ou viatura/);
-  assert.match(usability, /\.inline-move-picker/);
+  assert.match(schedule, /if \(target === "pending"\) setView\("holes"\)/);
+  assert.match(schedule, /const showRedeploy = view === "all" \|\| view === "holes" \|\| view === "redeploy"/);
+  assert.match(schedule, /redeploymentExpanded\|\|view==="redeploy"\|\|view==="holes"/);
 });
 
-test("selected regular GM cards expose an explicit lane-position picker", () => {
+test("schedule restores both page and horizontal grid position per date", () => {
   const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
-  const usability = readFileSync(resolve("app/usability.css"), "utf8");
-  assert.match(schedule, /className="quick-position-trigger"/);
-  assert.match(schedule, /inline-position-picker/);
-  assert.match(schedule, /void onMove\(a,kind,resource,s\.id,s\.id,Number\(target\.id\)\)/);
+  assert.match(schedule, /gmnh:grid-scroll/);
+  assert.match(schedule, /wrapper\.scrollLeft=Number\(savedGrid\.left\|\|0\)/);
+  assert.match(schedule, /wrapper\.scrollTop=Number\(savedGrid\.top\|\|0\)/);
+  assert.match(schedule, /wrapper\?\.addEventListener\("scroll",rememberGrid/);
+});
+
+test("selected GM cards use drag and drop instead of a destination picker", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  assert.doesNotMatch(schedule, /quick-move-trigger|Mover local/);
+  assert.doesNotMatch(schedule, /moveChoices|inline-move-picker/);
+  assert.match(schedule, /dataTransfer\.setData\("text\/assignment", String\(a\.id\)\)/);
+  assert.match(schedule, /void onMove\(assignment, kind, resource, shift, sourceShift, targetAssignmentId\)/);
+  assert.match(schedule, /function canDropOnCard\(target: Rec\)/);
+  assert.match(schedule, /draggingAssignmentId===Number\(a\.id\)\?"dragging-source"/);
+  assert.match(schedule, /targetAssignmentId && targetAssignmentId === id/);
+  assert.match(schedule, /drag-context-hint/);
+});
+
+test("selected regular GM cards use drop-on-card to choose lane position", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  assert.doesNotMatch(schedule, /quick-position-trigger|Ajustar posição/);
+  assert.doesNotMatch(schedule, /inline-position-picker|Colocar no final/);
+  assert.match(schedule, /targetAssignmentId\?: number/);
+  assert.match(schedule, /if\(canDropOnCard\(a\)\)drop\(event,s\.id,Number\(a\.id\)\)/);
   assert.match(schedule, /const sameShift = sourceShift \? sourceShift === shift/);
-  assert.match(schedule, /Colocar no final/);
-  assert.match(usability, /\.inline-position-picker/);
 });
 
 test("copying a regular block into another quadrant is automatically classified as HE", () => {
@@ -547,9 +600,14 @@ test("monthly leave compilation is reviewed before one bulk confirmation", () =>
   assert.match(migration, /idx_leave_choices_campaign_guard_date/);
   assert.match(api, /body\.action === "leave_import"/);
   assert.match(api, /await syncConfirmedLeaves\(\)/);
-  assert.match(dashboard, /Revisar antes de incluir/);
-  assert.match(dashboard, /Confirmar importação geral/);
+  assert.match(dashboard, /Conferir \{recognized\} folgas/);
+  assert.match(dashboard, /Incluir \$\{validRows\.length\} folgas confirmadas/);
   assert.match(dashboard, /GM não encontrado/);
+  assert.match(dashboard, /function splitLeaveImportRecords/);
+  assert.match(dashboard, /matchAll\(\/\\b\(DIA\|NOITE\)/);
+  assert.match(dashboard, /row\.shift==="NOITE"/);
+  assert.match(dashboard, /leave-import-list/);
+  assert.match(readFileSync(resolve("app/management.css"), "utf8"), /\.leave-import>fieldset\{display:block/);
 });
 
 test("monthly leave panorama highlights shift, roles, vehicle risks and links to the day", () => {
@@ -560,22 +618,55 @@ test("monthly leave panorama highlights shift, roles, vehicle risks and links to
   assert.match(api, /pattern_role/);
   assert.match(api, /criticalThreshold/);
   assert.match(api, /vehicleTotal/);
-  assert.match(dashboard, /Risco de efetivo nas folgas/);
+  assert.match(dashboard, /Folgas por período de serviço/);
   assert.match(dashboard, /Motoristas/);
   assert.match(dashboard, /Abrir escala/);
   assert.match(dashboard, /\?date=\$\{day\.date\}/);
-  assert.match(dashboard, /média empírica/);
+  assert.match(dashboard, /totalDay/);
+  assert.match(dashboard, /totalNight/);
   assert.doesNotMatch(dashboard, /Abrir escala do dia mais carregado/);
 });
 
 test("monthly leave import can register an unknown GM during the review", () => {
   const api = readFileSync(resolve("app/api/admin/route.ts"), "utf8");
   const dashboard = readFileSync(resolve("app/gestao-client.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/management.css"), "utf8");
   assert.match(api, /newGuards/);
   assert.match(api, /normalizeImportName/);
   assert.match(api, /createdGuards/);
-  assert.match(dashboard, /Informe a matrícula/);
-  assert.match(dashboard, /Será cadastrado após informar a matrícula/);
+  assert.match(dashboard, /Matrícula \(opcional\)/);
+  assert.match(dashboard, /Confirmação obrigatória antes de incluir/);
+  assert.match(api, /registration \|\| `SEM-MATRICULA-\$\{crypto\.randomUUID\(\)\}`/);
+  assert.match(api, /for \(let offset = 0; offset < uniqueRows\.length; offset \+= 75\)/);
+  assert.match(dashboard, /confirmedNewGuards/);
+  assert.match(dashboard, /leave-import-review-v2/);
+  assert.match(dashboard, /Sem matrícula/);
+  assert.match(styles, /\.leave-import-progress/);
+  assert.match(styles, /\.leave-new-guard-confirm/);
+});
+
+test("leave import canonicalizes compound names and hides generated no-registration identifiers", () => {
+  const api = readFileSync(resolve("app/api/admin/route.ts"), "utf8");
+  const scheduleApi = readFileSync(resolve("app/api/schedule/route.ts"), "utf8");
+  const dashboard = readFileSync(resolve("app/gestao-client.tsx"), "utf8");
+  assert.match(api, /preferredLeaveNameMatch/);
+  assert.match(api, /CASE WHEN registration LIKE 'SEM-MATRICULA-%' THEN NULL ELSE registration END/);
+  assert.match(scheduleApi, /CASE WHEN g\.registration LIKE 'SEM-MATRICULA-%' THEN NULL ELSE g\.registration END AS registration/);
+  assert.match(dashboard, /normalizeLeaveDisplayName/);
+  assert.match(dashboard, /displayRegistration/);
+});
+
+test("leave import preserves compound names and prefers the readable registered spelling", () => {
+  const dashboard = readFileSync(resolve("app/gestao-client.tsx"), "utf8");
+  const api = readFileSync(resolve("app/api/admin/route.ts"), "utf8");
+  assert.equal(normalizeLeaveDisplayName("  De   Souza "), "DE SOUZA");
+  assert.equal(normalizeLeaveName("De Souza"), "DESOUZA");
+  assert.equal(preferredLeaveNameMatch("desouza", [{ id: 2, name: "DESOUZA" }, { id: 1, name: "DE SOUZA" }])?.name, "DE SOUZA");
+  assert.equal(preferredLeaveNameMatch("Lucas Martins", [{ id: 3, name: "LUCAS MARTINS" }])?.name, "LUCAS MARTINS");
+  assert.match(dashboard, /leave-import-name-corrections/);
+  assert.match(dashboard, /Nome completo do GM/);
+  assert.match(api, /resolveExistingGuardName/);
+  assert.match(api, /existingByName/);
 });
 
 test("pattern editor can create contextual posts and vehicles without duplicate fleet rows", () => {
@@ -694,8 +785,12 @@ test("manual overtime dashboard exposes actionable alerts, safe refresh state an
   assert.match(dashboard, /value="over12"/);
   assert.match(dashboard, /isRefreshing/);
   assert.match(dashboard, /Tentar novamente/);
+  assert.match(dashboard, /function printReport/);
+  assert.match(dashboard, /PDF \/ imprimir/);
   assert.match(styles, /\.he-alert-grid/);
   assert.match(styles, /\.he-load-error/);
+  assert.match(styles, /@media print/);
+  assert.match(styles, /\.overtime-page \.he-spreadsheet table\{width:100%/);
 });
 
 test("long post and vehicle names wrap instead of being clipped", () => {
@@ -719,6 +814,11 @@ test("spreadsheet visual theme preserves the live grid controls while restyling 
   assert.match(theme, /\.app\.compact \.schedule th:first-child/);
   assert.match(theme, /\.live-person-card \.live-person/);
   assert.match(theme, /@media screen/);
+  assert.match(theme, /\.schedule tbody tr\.post-row > td:first-child[\s\S]*?z-index: 20/);
+  assert.match(theme, /\.schedule tbody tr\.vehicle-row > td:not\(:first-child\)[\s\S]*?isolation: isolate/);
+  assert.match(theme, /\.schedule thead tr:first-child > th:first-child[\s\S]*?z-index: 40/);
+  assert.match(theme, /\.schedule tbody tr\.post-row > td\.drop-cell \.cell-quick-actions[\s\S]*?max-width: 100%/);
+  assert.match(theme, /@media \(max-width: 600px\)[\s\S]*?\.schedule tbody tr\.vehicle-row \.resource/);
   assert.match(schedule, /className="schedule-add-trigger"/);
   assert.match(schedule, /className="resource-add-person"/);
   assert.match(schedule, /className="inline-he-extension"/);
@@ -752,9 +852,10 @@ test("pattern editor reuses the current date cache and refreshes it after synchr
   assert.match(source, /escala-patterns-cache/);
   assert.match(source, /sessionStorage\.getItem/);
   assert.match(source, /sessionStorage\.setItem/);
-  assert.match(source, /useState<Data \| null>\(\(\) => readPatternCache\(date\)\)/);
-  assert.match(source, /void load\(Boolean\(readPatternCache\(date\)\)\)/);
-  assert.match(source, /writePatternCache\(date, json\)/);
+  assert.match(source, /useState<Data \| null>\(null\)/);
+  assert.match(source, /const cached = readPatternCache\(date\)/);
+  assert.match(source, /void load\(Boolean\(cached\)\)/);
+  assert.match(source, /writePatternCache\(date, normalized\)/);
 });
 
 test("operational notices can be edited in place with an auditable API action", () => {
@@ -853,6 +954,7 @@ test("dragging a GM highlights compatible and blocked schedule destinations", ()
   assert.match(schedule, /drag-drop-ready/);
   assert.match(schedule, /onDragStart\(a\)/);
   assert.match(schedule, /onDragEnd=\{onDragEnd\}/);
+  assert.match(schedule, /if \(canReceiveDrag\(s\.id\)\) drop\(e, s\.id\)/);
   assert.match(styles, /\.drop-cell\.drag-drop-ready/);
   assert.match(styles, /\.drop-cell\.drag-drop-blocked/);
 });
@@ -912,6 +1014,8 @@ test("schedule keeps a small queue of recent undoable changes", () => {
   assert.match(schedule, /setUndoEvents\(\(current\) => \[event, \.\.\.current\.filter\(\(item\) => item\.id !== event\.id\)\]\.slice\(0, 5\)\)/);
   assert.match(schedule, /undoEvents\.length>0/);
   assert.match(schedule, /undoEvents\.length>1/);
+  assert.match(schedule, /schedule-toast-undo-label/);
+  assert.match(schedule, /undoEvents\[0\]\.label/);
 });
 
 test("overtime dashboard reuses a month cache while refreshing the live book", () => {
@@ -919,7 +1023,7 @@ test("overtime dashboard reuses a month cache while refreshing the live book", (
   assert.match(dashboard, /const overtimeCacheKey = \(month: string\)/);
   assert.match(dashboard, /function readOvertimeCache\(month: string\): Data \| null/);
   assert.match(dashboard, /function writeOvertimeCache\(data: Data\)/);
-  assert.match(dashboard, /useState<Data \| null>\(\(\) => readOvertimeCache\(date\.slice\(0, 7\)\)\)/);
+  assert.match(dashboard, /useState<Data \| null>\(null\)/);
   assert.match(dashboard, /const cached = readOvertimeCache\(month\)/);
   assert.match(dashboard, /writeOvertimeCache\(next\)/);
   assert.match(dashboard, /const isRefreshing = loading \|\| syncing \|\| !monthMatches/);
@@ -944,12 +1048,25 @@ test("publication validation respects FA resources and reports actionable critic
   assert.match(api, /missingRoles/);
   assert.match(api, /overlapping/);
   assert.match(api, /severity: "critical"/);
+  assert.match(api, /export async function GET\(request: Request\)/);
+  assert.match(api, /loadValidationData\(scheduleId, textValue\(schedule\.date\)\)/);
   assert.match(dashboard, /normalizeIssues/);
+  assert.match(dashboard, /api\/publish\?scheduleId=/);
   assert.match(dashboard, /pendências críticas/);
   assert.match(dashboard, /Abrir escala/);
   assert.match(dashboard, /validation-issue/);
+  assert.match(dashboard, /issues\.slice\(0, visibleIssues\)/);
+  assert.match(dashboard, /Mostrar mais pendências/);
+  assert.match(dashboard, /hrefFor\("\/escala"\)/);
   assert.match(styles, /validation-severity-summary/);
   assert.match(styles, /validation-issue\.warning/);
+});
+
+test("large overtime books start compact and can progressively reveal more GMs", () => {
+  const dashboard = readFileSync(resolve("app/overtime-dashboard.tsx"), "utf8");
+  assert.match(dashboard, /useState\(60\)/);
+  assert.match(dashboard, /ranking\.slice\(0,visibleLimit\)/);
+  assert.match(dashboard, /Mostrar mais GMs/);
 });
 
 test("cancelling a confirmed leave promotes the next waitlisted GM and syncs the scale", () => {
@@ -996,10 +1113,254 @@ test("monthly leave campaigns have a guarded close, publish and reopen lifecycle
   assert.match(api, /Resolva as .*lista de espera/);
   assert.match(api, /status='published'/);
   assert.match(api, /justificativa/);
-  assert.match(dashboard, /campaignAction/);
-  assert.match(dashboard, /Fechar campanha/);
-  assert.match(dashboard, /Publicar campanha/);
-  assert.match(dashboard, /Reabrir com justificativa/);
-  assert.match(dashboard, /campaignLocked/);
+  assert.doesNotMatch(dashboard, /campaignAction/);
+  assert.match(dashboard, /const campaignLocked = false/);
+  assert.doesNotMatch(dashboard, /<section className=\{`leave-campaign-status/);
+  assert.match(dashboard, /Edição livre: importe, ajuste ou remova folgas/);
   assert.match(styles, /leave-campaign-status/);
+});
+
+test("monthly leave editing does not depend on the historical campaign status", () => {
+  const api = readFileSync(resolve("app/api/admin/route.ts"), "utf8");
+  const dashboard = readFileSync(resolve("app/gestao-client.tsx"), "utf8");
+  assert.match(api, /SELECT \* FROM leave_campaigns WHERE month=\? LIMIT 1/);
+  assert.match(api, /INSERT OR IGNORE INTO leave_campaigns/);
+  assert.match(api, /A data não pertence ao mês de folgas selecionado/);
+  assert.doesNotMatch(api, /leaveCampaign\.status !== "open"/);
+  assert.doesNotMatch(api, /approvalCampaign\.status !== "open"/);
+  assert.doesNotMatch(api, /cancellationCampaign\.status !== "open"/);
+  assert.match(dashboard, /const campaignLocked = false/);
+  assert.match(dashboard, /locked=\{campaignLocked\}/);
+});
+
+test("operational groups are managed in patterns and scoped to D1/D2/N1/N2", () => {
+  const api = readFileSync(resolve("app/api/patterns/route.ts"), "utf8");
+  const dashboard = readFileSync(resolve("app/patterns-dashboard.tsx"), "utf8");
+  const groupsDb = readFileSync(resolve("lib/operational-groups-db.ts"), "utf8");
+  assert.match(api, /pattern_operational_group_members/);
+  assert.match(api, /operational_group_create/);
+  assert.match(api, /pattern_operational_group_member_set/);
+  assert.match(api, /operational_group_member_set/);
+  assert.match(dashboard, /PatternGroupsPanel/);
+  assert.match(dashboard, /D1/);
+  assert.match(dashboard, /D2/);
+  assert.match(dashboard, /N1/);
+  assert.match(dashboard, /N2/);
+  assert.match(dashboard, /Todos os padrões/);
+  assert.match(groupsDb, /pattern_operational_group_members/);
+});
+
+test("conventional patterns stay prominent while groups remain at the end of the page", () => {
+  const dashboard = readFileSync(resolve("app/patterns-dashboard.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/patterns-enhanced.css"), "utf8");
+  const conventional = dashboard.indexOf('className="pattern-conventional-focus"');
+  const groups = dashboard.indexOf("<PatternGroupsPanel data={data}");
+  assert.ok(conventional >= 0);
+  assert.ok(groups > conventional);
+  assert.match(dashboard, /Padrões convencionais 12x36/);
+  assert.match(dashboard, /D1 · D2 · N1 · N2/);
+  assert.match(styles, /\.pattern-conventional-focus/);
+  assert.match(styles, /\.pattern-conventional-heading/);
+});
+
+test("pattern group links are exposed to the applied daily scale", () => {
+  const api = readFileSync(resolve("app/api/schedule/route.ts"), "utf8");
+  const dashboard = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  assert.match(api, /pattern_operational_group_members/);
+  assert.match(api, /pattern_period/);
+  assert.match(api, /const contextualMembers = \[\.\.\.operationalGroupMembers\.results, \.\.\.patternOperationalGroupMembers\.results\]/);
+  assert.match(api, /operationalGroupMembers: contextualMembers/);
+  assert.match(dashboard, /operationalGroupByResource/);
+  assert.match(dashboard, /operationalGroupByGuard/);
+  assert.match(dashboard, /operationalGroupByGuardShift/);
+  assert.match(dashboard, /guardOperationalMetaByShift/);
+});
+
+test("weekly pattern cards distinguish regular hours from fixed daily overtime", () => {
+  const dashboard = readFileSync(resolve("app/patterns-dashboard.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/patterns-enhanced.css"), "utf8");
+  assert.match(dashboard, /Padrões semanais/);
+  assert.match(dashboard, /HE fixa até/);
+  assert.match(dashboard, /HE diária fixa/);
+  assert.match(dashboard, /regular_end/);
+  assert.match(dashboard, /overtime_end/);
+  assert.match(styles, /\.weekly-slot-card/);
+  assert.match(styles, /\.weekly-he-badge/);
+});
+
+test("operational modules reuse a short-lived session cache without replacing live data", () => {
+  const cache = readFileSync(resolve("app/client-cache.ts"), "utf8");
+  const operations = readFileSync(resolve("app/operations-dashboard.tsx"), "utf8");
+  const notices = readFileSync(resolve("app/notices-dashboard.tsx"), "utf8");
+  assert.match(cache, /readClientCache/);
+  assert.match(cache, /writeClientCache/);
+  assert.match(operations, /gmnh:operations/);
+  assert.match(operations, /readClientCache<Data>/);
+  assert.match(operations, /writeClientCache\(operationsCacheKey\(date\),data\)/);
+  assert.match(notices, /gmnh:notices/);
+  assert.match(notices, /writeClientCache\(noticesCacheKey, nextItems\)/);
+  assert.match(notices, /const cachedItems = readNoticesCache\(\)/);
+  assert.match(notices, /void load\(\)/);
+});
+
+test("applied operational groups render as sessions inside the main scale grid", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const scheduleStyles = readFileSync(resolve("app/schedule-density.css"), "utf8");
+  assert.doesNotMatch(schedule, /<OperationalGroupsSection/);
+  assert.match(schedule, /className="operational-group-heading"/);
+  assert.match(schedule, /operational-group-section-label/);
+  assert.match(schedule, /sessão da escala|sessao da escala/);
+  assert.match(scheduleStyles, /\.operational-group-section-label/);
+  assert.match(scheduleStyles, /\.operational-group-mark/);
+  assert.match(schedule, /activeGroupFilter/);
+  assert.match(schedule, /setGroupFilter\("all"\)/);
+  assert.match(schedule, /filter\(\(\[, count\]\) => count > 0\)/);
+  assert.match(schedule, /pattern_period/);
+  assert.match(schedule, /OperationalGroupsGrid/);
+  assert.match(schedule, /GRUPAMENTOS E EQUIPES/);
+  assert.match(schedule, /\+ VTR \/ dupla/);
+  assert.match(schedule, /firstPostIndex/);
+  assert.match(scheduleStyles, /\.operational-groups-grid-team/);
+});
+
+test("monthly planning aggregates patterns, absences and resource coverage in one view", () => {
+  const api = readFileSync(resolve("app/api/planning/route.ts"), "utf8");
+  const page = readFileSync(resolve("app/monthly-planning.tsx"), "utf8");
+  const printPage = readFileSync(resolve("app/monthly-planning-print.tsx"), "utf8");
+  const printRoute = readFileSync(resolve("app/planejamento/impressao/page.tsx"), "utf8");
+  const printStyles = readFileSync(resolve("app/monthly-planning-print.css"), "utf8");
+  const priorityStyles = readFileSync(resolve("app/monthly-planning-priority.css"), "utf8");
+  const nav = readFileSync(resolve("app/schedule-nav.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/monthly-planning.css"), "utf8");
+  assert.match(api, /shift_patterns/);
+  assert.match(api, /weekly_slots/);
+  assert.match(api, /leave_choices/);
+  assert.match(api, /service_adjustments/);
+  assert.match(api, /vehicle_outages/);
+  assert.match(api, /operational_group_members/);
+  assert.match(api, /negative_full/);
+  assert.match(api, /parseScenario/);
+  assert.match(api, /scenarioGuardById/);
+  assert.match(api, /scenarioVehicleById/);
+  assert.match(api, /overtimeNeeded/);
+  assert.match(page, /Planejamento mensal/);
+  assert.match(page, /Simulação rápida/);
+  assert.match(page, /Adicionar e recalcular/);
+  assert.match(page, /PDF panorama/);
+  assert.match(page, /Prioridade de conferência/);
+  assert.match(page, /Com impacto/);
+  assert.match(page, /scrollIntoView/);
+  assert.match(page, /planning-day-detail/);
+  assert.match(page, /GMs disponíveis/);
+  assert.match(page, /PlanningMonthPeriod/);
+  assert.match(page, /Abrir escala completa/);
+  assert.match(page, /Grupamentos/);
+  assert.match(nav, /href: "\/planejamento"/);
+  assert.match(styles, /\.planning-calendar/);
+  assert.match(styles, /\.planning-simulation/);
+  assert.match(styles, /\.planning-resource-list/);
+  assert.match(printPage, /PLANEJAMENTO MENSAL/);
+  assert.match(printPage, /Imprimir \/ salvar PDF/);
+  assert.match(printPage, /Recursos para conferir/);
+  assert.match(printRoute, /MonthlyPlanningPrint/);
+  assert.match(printStyles, /@page/);
+  assert.match(priorityStyles, /\.planning-priority/);
+});
+test("absence records use inclusive dates, grouped filters and conflict protection", () => {
+  const dashboard = readFileSync(resolve("app/gestao-client.tsx"), "utf8");
+  const api = readFileSync(resolve("app/api/admin/route.ts"), "utf8");
+  const styles = readFileSync(resolve("app/management.css"), "utf8");
+  const print = readFileSync(resolve("app/print-schedule.tsx"), "utf8");
+  assert.match(dashboard, /function MovementRecords\(/);
+  assert.match(dashboard, /type="date"/);
+  assert.match(dashboard, /other_leave/);
+  assert.match(dashboard, /movement-record-groups/);
+  assert.match(api, /async function validateMovement/);
+  assert.match(api, /m\.status IN \('approved','pending'\)/);
+  assert.match(api, /já está vinculado a outro afastamento/);
+  assert.match(styles, /\.movement-filters/);
+  assert.match(styles, /\.movement-record-group/);
+  assert.match(print, /types: \["medical_leave", "other_leave"\]/);
+  assert.match(print, /displayedEnd/);
+});
+
+test("pattern grupamento members can own a turn and VTR without duplicating the conventional scale", () => {
+  const db = readFileSync(resolve("lib/operational-groups-db.ts"), "utf8");
+  const engine = readFileSync(resolve("lib/pattern-engine.ts"), "utf8");
+  const patternsApi = readFileSync(resolve("app/api/patterns/route.ts"), "utf8");
+  const scheduleApi = readFileSync(resolve("app/api/schedule/route.ts"), "utf8");
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const print = readFileSync(resolve("app/print-schedule.tsx"), "utf8");
+  const dashboard = readFileSync(resolve("app/patterns-dashboard.tsx"), "utf8");
+  assert.match(db, /ALTER TABLE pattern_operational_group_members ADD COLUMN \$\{name\} \$\{definition\}/);
+  assert.match(db, /\["shift", "TEXT"\]/);
+  assert.match(engine, /groupAssignments/);
+  assert.match(engine, /assignedVehicleId/);
+  assert.match(patternsApi, /m\.shift,m\.vehicle_id,m\.starts_at,m\.ends_at/);
+  assert.match(patternsApi, /pattern_operational_group_members \(pattern_id,group_id,resource_kind,resource_id,team_label,shift,vehicle_id/);
+  assert.match(patternsApi, /requestedVehicleId/);
+  assert.match(scheduleApi, /m\.shift,m\.vehicle_id,m\.starts_at,m\.ends_at/);
+  assert.match(schedule, /ownedMember\?\.pattern_id/);
+  assert.match(schedule, /member\.vehicle_id/);
+  assert.match(schedule, /operational-groups-grid-time/);
+  assert.match(print, /isGroupOwnedAssignment/);
+  assert.match(print, /PrintOperationalGroupRows/);
+  assert.match(dashboard, /VTR do grupamento/);
+  assert.match(dashboard, /Turno do GM/);
+});
+
+test("management dashboard is the home page and combines monthly staffing with daily notes", () => {
+  const home = readFileSync(resolve("app/page.tsx"), "utf8");
+  const dashboard = readFileSync(resolve("app/management-dashboard.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/management-dashboard.css"), "utf8");
+  const notices = readFileSync(resolve("app/api/notices/route.ts"), "utf8");
+  const nav = readFileSync(resolve("app/schedule-nav.tsx"), "utf8");
+  const schedulePage = readFileSync(resolve("app/escala/page.tsx"), "utf8");
+  assert.match(home, /ManagementDashboard/);
+  assert.match(schedulePage, /LiveSchedule/);
+  assert.match(nav, /href: "\/escala"/);
+  assert.match(dashboard, /Dashboard de gestão/);
+  assert.match(dashboard, /Efetivo por dia/);
+  assert.match(dashboard, /DashboardPeriodOverview/);
+  assert.match(dashboard, /Furos projetados por período/);
+  assert.match(dashboard, /periodPriorities\(days, "day"\)/);
+  assert.match(dashboard, /periodPriorities\(days, "night"\)/);
+  assert.match(dashboard, /weekDays\[day\.weekday\]/);
+  assert.match(dashboard, /folgas com impacto/);
+  assert.match(dashboard, /OBSERVAÇÕES DO DIA/);
+  assert.match(dashboard, /api\/planning\?month=/);
+  assert.match(dashboard, /api\/notices\?month=/);
+  assert.match(dashboard, /Adicionar observação/);
+  assert.match(notices, /effective_date>=\?/);
+  assert.match(notices, /nextMonth/);
+  assert.match(styles, /\.dashboard-calendar/);
+  assert.match(styles, /\.dashboard-priority-columns/);
+  assert.match(styles, /@media\(max-width:760px\)/);
+});
+
+test("holes are filled alerts and redeployment keeps the complete operational period above the grid", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/simple-ux.css"), "utf8");
+  const poolPosition = schedule.indexOf("redeployment-pool redeployment-pool-top");
+  const workspacePosition = schedule.indexOf("<div className={`workspace");
+  assert.ok(poolPosition >= 0 && poolPosition < workspacePosition);
+  assert.match(schedule, /availableGroup\.period === targetPeriod/);
+  assert.match(schedule, /moveGroup\(availableGroup\.assignments, kind, resource\)/);
+  assert.match(schedule, /O bloco reúne os dois turnos/);
+  assert.match(styles, /\.schedule td\.furo\{background:#fff0f1!important/);
+  assert.match(styles, /\.schedule \.live-hole\{min-height:38px;border:2px solid #d51f32!important/);
+  assert.match(styles, /\.redeployment-pool\.redeployment-pool-top/);
+});
+
+test("leave imports stay in the 12x36 workforce and pattern editors isolate work regimes", () => {
+  const adminApi = readFileSync(resolve("app/api/admin/route.ts"), "utf8");
+  const patternsApi = readFileSync(resolve("app/api/patterns/route.ts"), "utf8");
+  const patterns = readFileSync(resolve("app/patterns-dashboard.tsx"), "utf8");
+  assert.match(adminApi, /requested\.baseShift \|\| "12x36 dia", "12x36"/);
+  assert.match(patternsApi, /guardUsesRegime\(guardId, "weekly"\)/);
+  assert.match(patternsApi, /guardUsesRegime\(guardId, "12x36"\)/);
+  assert.match(patterns, /function weeklyGuards/);
+  assert.match(patterns, /eligibleGuards = weeklyGuards\(data\.guards\)/);
+  assert.match(patterns, /Importações de folgas permanecem no efetivo 12x36/);
+  assert.match(patterns, /unassignedGuards = shiftGuards\(data\.guards\)/);
 });

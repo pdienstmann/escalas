@@ -1,0 +1,10 @@
+.planning-summary-delta{font-size:9px;font-weight:900}
+.planning-summary-delta.good{color:#147340}
+.planning-summary-delta.bad{color:#ad2732}
+.planning-summary-delta.neutral{color:#7b8e9b}
+.planning-simulation-comparison{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:9px 13px;border-top:1px solid #e0d3ec;background:#fcf8ff;color:#74558b;font-size:10px}
+.planning-simulation-comparison b{margin-right:3px;color:#64358d}
+.planning-simulation-comparison span{padding:4px 7px;border-radius:10px;background:#f0e4f9}
+.planning-simulation-comparison strong{color:#4d2474}
+.monthly-planning-print-link{display:inline-flex;align-items:center;padding:9px 12px;border:1px solid #83b2d4;border-radius:6px;background:#e9f3fb;color:#174e7b;text-decoration:none;font-size:10px;font-weight:900;white-space:nowrap}
+@media(max-width:700px){.monthly-planning-print-link{justify-content:center;width:100%}}

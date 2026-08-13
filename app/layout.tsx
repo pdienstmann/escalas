@@ -9,6 +9,7 @@ import "./overtime-enhancements.css";
 import "./drag-edit.css";
 import "./patterns.css";
 import "./patterns-enhanced.css";
+import "./group-pattern-placement.css";
 import "./pattern-resource-actions.css";
 import "./extension-actions.css";
 import "./usability.css";
@@ -26,6 +27,11 @@ import "./request-reference.css";
 import "./segment-remove.css";
 import "./service-adjustments.css";
 import "./spreadsheet-theme.css";
+import "./monthly-planning.css";
+import "./monthly-planning-simulation.css";
+import "./monthly-planning-print.css";
+import "./monthly-planning-priority.css";
+import "./management-dashboard.css";
 
 export const metadata: Metadata = { title:"Escala GMNH", description:"Gestão integrada de escalas da Guarda Municipal", icons:{icon:"/favicon.svg"}, openGraph:{title:"Escala GMNH",description:"Gestão integrada de efetivo",images:["/og.png"]} };
 export default function RootLayout({children}:{children:React.ReactNode}){return <html lang="pt-BR"><body>{children}</body></html>}

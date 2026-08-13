@@ -73,7 +73,10 @@ const demoGuards = [
   "DE ALMEIDA",
 ];
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function ensureCatalog() {
+  // Demo catalog removed. Catalog is imported/managed explicitly.
+  return;
   const [guardCount, vehicleCount, postRows] = await Promise.all([
     env.DB.prepare("SELECT COUNT(*) total FROM guards").first<{
       total: number;
@@ -136,7 +139,10 @@ async function ensureCatalog() {
     ]);
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function ensureDemoMovements() {
+  // Demo movements removed. Real adjustments come from the management UI.
+  return;
   const existing=await env.DB.prepare("SELECT COUNT(*) total FROM movements WHERE request_ref IN ('DEMO-RT-01','DEMO-FOLGA-01','DEMO-FERIAS-01','DEMO-CURSO-01','DEMO-ATESTADO-01','REQ-BH-0826','TROCA-115/2026')").first<{total:number}>();
   if(Number(existing?.total||0)>=7)return;
   const samples = [
@@ -217,7 +223,12 @@ async function ensureDemoMovements() {
 async function ensureSections(){
   const groups=(await env.DB.prepare("SELECT group_name,MIN(sort_order) sort_order FROM posts WHERE active=1 GROUP BY group_name").all<{group_name:string;sort_order:number}>()).results;
   const commands=[env.DB.prepare("INSERT OR IGNORE INTO schedule_sections (section_key,label,sort_order) VALUES ('VEHICLES','VIATURAS E ZONAS',0)")];
-  for(const group of groups)commands.push(env.DB.prepare("INSERT OR IGNORE INTO schedule_sections (section_key,label,sort_order) VALUES (?,?,?)").bind(`POST:${group.group_name}`,group.group_name,Number(group.sort_order||0)+10));
+  for(const group of groups){
+    // The fleet has its own dedicated section; resource rows accidentally
+    // classified as VIATURAS E ZONAS must not create a second header.
+    if(String(group.group_name)==="VIATURAS E ZONAS")continue;
+    commands.push(env.DB.prepare("INSERT OR IGNORE INTO schedule_sections (section_key,label,sort_order) VALUES (?,?,?)").bind(`POST:${group.group_name}`,group.group_name,Number(group.sort_order||0)+10));
+  }
   await env.DB.batch(commands);
 }
 
@@ -238,6 +249,10 @@ function shiftTimes(date: string, shift: string) {
 }
 
 async function seedSchedule(date: string, scheduleId: number) {
+  // The imported PAR/ÍMPAR patterns are the source of truth.  The former
+  // fallback filled empty resources with arbitrary catalog guards, which
+  // made a generated day differ from the pattern and hid real holes.
+  return;
   const existing = (
     await env.DB.prepare(
       "SELECT guard_id,post_id,vehicle_id,shift,role FROM assignments WHERE schedule_id=?",
@@ -317,7 +332,20 @@ async function seedSchedule(date: string, scheduleId: number) {
 }
 
 async function ensureBase(date: string) {
+  // An already generated schedule only needs the small, date-specific weekly
+  // reconciliation. Re-running every schema/catalog check on each page visit
+  // made ordinary date changes take several seconds on D1.
+  const existingSchedule = await env.DB.prepare("SELECT id FROM schedules WHERE date=?")
+    .bind(date)
+    .first<{ id: number }>();
+  if (existingSchedule) {
+    await applyWeeklyToSchedule(env.DB, date, existingSchedule.id);
+    return;
+  }
   await ensureServiceAdjustmentsTable();
+  // Pattern-scoped operational groups reference shift_patterns.  Ensure the
+  // parent catalog exists before creating the group-members table.
+  await ensurePatterns(env.DB);
   await ensureOperationalGroups(env.DB);
   await ensureAssignmentLaneOrder();
   await env.DB.prepare(
@@ -338,10 +366,9 @@ async function ensureBase(date: string) {
     linked_assignments INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(outage_id,schedule_id)
   )`).run();
-  await ensureCatalog();
-  await ensureDemoMovements();
+  // Catalog and movements are maintained by the admin/import flows.  Do not
+  // recreate the former demo records when a schedule is opened.
   await ensureSections();
-  await ensurePatterns(env.DB);
   await env.DB.prepare(
     "INSERT OR IGNORE INTO schedules (date,status) VALUES (?,'draft')",
   )
@@ -432,10 +459,10 @@ export async function GET(request: Request) {
   const schedule = await env.DB.prepare("SELECT * FROM schedules WHERE date=?")
     .bind(date)
     .first<Record<string, unknown>>();
-  const [guards, posts, vehicles, allVehicles, assignments, movements, notices, outages, sections, operations, serviceAdjustments, operationalGroups, operationalGroupMembers] =
+  const [guards, posts, vehicles, allVehicles, assignments, movements, notices, outages, sections, operations, serviceAdjustments, operationalGroups, operationalGroupMembers, weeklySlotCount] =
     await Promise.all([
       env.DB.prepare(
-        "SELECT id,name,registration,platoon,base_shift,work_regime,overtime_eligible FROM guards WHERE active=1 ORDER BY name",
+        "SELECT id,name,CASE WHEN registration LIKE 'SEM-MATRICULA-%' THEN NULL ELSE registration END AS registration,platoon,base_shift,work_regime,overtime_eligible FROM guards WHERE active=1 ORDER BY name",
       ).all(),
       env.DB.prepare(
         "SELECT id,name,group_name FROM posts WHERE active=1 AND NOT EXISTS (SELECT 1 FROM schedule_resource_exclusions e WHERE e.schedule_id=? AND e.resource_kind='post' AND e.resource_id=posts.id) ORDER BY sort_order,name",
@@ -476,6 +503,7 @@ export async function GET(request: Request) {
       env.DB.prepare(`SELECT m.id,m.group_id,m.resource_kind,m.resource_id,m.team_label,g.name group_name,g.short_name group_short_name,g.color group_color,g.sort_order group_sort_order
         FROM operational_group_members m JOIN operational_groups g ON g.id=m.group_id
         WHERE g.active=1 ORDER BY g.sort_order,g.name,m.resource_kind,m.resource_id`).all(),
+      env.DB.prepare("SELECT COUNT(*) total FROM weekly_slots WHERE active=1").first<{ total: number }>(),
     ]);
   const operationAssignments=(await env.DB.prepare(`SELECT os.guard_id,o.starts_at,o.ends_at FROM operation_slots os JOIN operations o ON o.id=os.operation_id WHERE o.schedule_id=? AND o.status!='cancelled' AND os.guard_id IS NOT NULL`).bind(schedule?.id).all<{guard_id:number;starts_at:string;ends_at:string}>()).results;
   const blocked = new Set([
@@ -500,7 +528,18 @@ export async function GET(request: Request) {
       Number(operation.guard_id)===Number(a.guard_id)&&String(a.starts_at)<operation.ends_at&&String(a.ends_at)>operation.starts_at,
     ));
   const appliedPattern=await env.DB.prepare("SELECT dp.code day_code,np.code night_code FROM schedule_patterns sp JOIN shift_patterns dp ON dp.id=sp.day_pattern_id JOIN shift_patterns np ON np.id=sp.night_pattern_id WHERE sp.schedule_id=?").bind(schedule?.id).first<Record<string,unknown>>();
+  const patternOperationalGroupMembers = appliedPattern
+    ? await env.DB.prepare(`SELECT m.id,m.pattern_id,m.group_id,m.resource_kind,m.resource_id,m.team_label,m.shift,m.vehicle_id,m.starts_at,m.ends_at,p.code pattern_code,p.period pattern_period,g.name group_name,g.short_name group_short_name,g.color group_color,g.sort_order group_sort_order
+      FROM pattern_operational_group_members m JOIN shift_patterns p ON p.id=m.pattern_id AND p.active=1 JOIN operational_groups g ON g.id=m.group_id AND g.active=1
+      WHERE m.pattern_id IN (SELECT day_pattern_id FROM schedule_patterns WHERE schedule_id=? UNION SELECT night_pattern_id FROM schedule_patterns WHERE schedule_id=?)
+      ORDER BY g.sort_order,g.name,m.resource_kind,m.resource_id`).bind(schedule?.id,schedule?.id).all()
+    : { results: [] as Record<string, unknown>[] };
+  const contextualMembers = [...operationalGroupMembers.results, ...patternOperationalGroupMembers.results];
   const suggested=appliedPattern?null:await resolvePatternCodes(env.DB,date);
+  const weeklyCount=Number(weeklySlotCount?.total||0);
+  const patternDay=String((appliedPattern||suggested)?.day_code||"");
+  const patternNight=String((appliedPattern||suggested)?.night_code||"");
+  const patternBase=patternDay&&patternNight?`${patternDay} + ${patternNight}`:"Sem padrão aplicado";
   return Response.json({
     date,
     schedule,
@@ -518,8 +557,11 @@ export async function GET(request: Request) {
     operations: operations.results,
     serviceAdjustments: serviceAdjustments.results,
     operationalGroups: operationalGroups.results,
-    operationalGroupMembers: operationalGroupMembers.results,
-    patternLabel: appliedPattern?`${appliedPattern.day_code} + ${appliedPattern.night_code} + SEMANAL`:`${suggested?.dayCode} + ${suggested?.nightCode} + SEMANAL · AJUSTES`,
+    operationalGroupMembers: contextualMembers,
+    weeklySlotCount: weeklyCount,
+    patternLabel: appliedPattern
+      ? `${patternBase}${weeklyCount ? " + SEMANAL" : ""}`
+      : `${patternBase}${weeklyCount ? " + SEMANAL" : ""} · AJUSTES`,
   });
 }
 
@@ -1778,7 +1820,7 @@ async function buildSuggestions(request: Request, date: string) {
   ] = await Promise.all([
     env.DB
       .prepare(
-        "SELECT id,name,registration,platoon,base_shift,work_regime,overtime_eligible FROM guards WHERE active=1 ORDER BY name",
+        "SELECT id,name,CASE WHEN registration LIKE 'SEM-MATRICULA-%' THEN NULL ELSE registration END AS registration,platoon,base_shift,work_regime,overtime_eligible FROM guards WHERE active=1 ORDER BY name",
       )
       .all<{
         id: number;
@@ -1797,7 +1839,7 @@ async function buildSuggestions(request: Request, date: string) {
       .all<{ guard_id: number }>(),
     env.DB
       .prepare(
-        `SELECT a.*,g.name guard_name,g.registration,
+        `SELECT a.*,g.name guard_name,CASE WHEN g.registration LIKE 'SEM-MATRICULA-%' THEN NULL ELSE g.registration END AS registration,
                 COALESCE(p.name,v.prefix,'Sem destino') origin_label,
                 CASE WHEN a.post_id IS NOT NULL THEN 'post' WHEN a.vehicle_id IS NOT NULL THEN 'vehicle' ELSE 'pending' END origin_kind,
                 CASE WHEN (a.post_id IS NULL AND a.vehicle_id IS NULL)

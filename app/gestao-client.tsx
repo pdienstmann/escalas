@@ -2,6 +2,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { ModuleBusyOverlay, ModuleLoading } from "./module-loading";
 import { BackToSchedule } from "./schedule-nav";
+import { normalizeLeaveDisplayName, normalizeLeaveName, preferredLeaveNameMatch } from "../lib/leave-name";
 import { useScheduleDate } from "./use-schedule-date";
 type Item = Record<string, string | number | null>;
 type LeaveOverviewDay = {
@@ -89,6 +90,7 @@ const modeLabel = {
   movimentos: "movimentações do efetivo",
   ajustes: "banco de horas e trocas",
 } as const;
+const displayRegistration=(value:unknown)=>{const text=String(value||"");return /^SEM-MATRICULA-/i.test(text)?"":text};
 
 export function GestaoClient({
   mode,
@@ -96,8 +98,8 @@ export function GestaoClient({
   mode: "cadastros" | "viaturas" | "folgas" | "movimentos" | "ajustes";
 }) {
   const { date } = useScheduleDate();
-  const [data, setData] = useState<Data>(() => readAdminCache(date) || empty),
-    [busy, setBusy] = useState(() => !readAdminCache(date)),
+  const [data, setData] = useState<Data>(empty),
+    [busy, setBusy] = useState(true),
     [saving, setSaving] = useState(false),
     [message, setMessage] = useState(""),
     [adjustmentSubtype, setAdjustmentSubtype] = useState("negative_early"),
@@ -125,10 +127,15 @@ export function GestaoClient({
     }
   }, [date]);
   useEffect(() => {
+    const cached = readAdminCache(date);
+    if (cached) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setData(cached);
+      setBusy(false);
+    }
     // The first request synchronizes this client view with the durable D1 state.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
-  }, [load]);
+  }, [date, load]);
   async function submit(e: FormEvent<HTMLFormElement>, action: string) {
     e.preventDefault();
     if (saving) return;
@@ -239,6 +246,9 @@ export function GestaoClient({
       setSaving(false);
     }
   }
+  // Kept as a compatibility handler for old admin links; the visible editor
+  // now lives in the Padrões module.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async function operationalGroupAction(body: Record<string, string | number | null>) {
     if (saving) return false;
     setSaving(true); setMessage("");
@@ -354,15 +364,16 @@ export function GestaoClient({
     setMessage(r.ok ? `${j.count} GMs importados ou atualizados.` : j.error);
     if (r.ok) await load();
   }
-  async function importLeaves(month:string,rows:Array<{guardId?:number;guardName?:string;date:string}>,newGuards:Array<{name:string;registration:string;platoon?:string;baseShift?:string}>) {
+  async function importLeaves(month:string,rows:Array<{guardId?:number;guardName?:string;date:string;shift?:"day"|"night"}>,newGuards:Array<{name:string;registration?:string;platoon?:string;baseShift?:string}>) {
     if(saving)return;
-    setSaving(true);setMessage("");
+    setSaving(true);setMessage("Importando folgas: preparando registros e conferindo GMs...");
     try{
       const r=await fetch("/api/admin",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"leave_import",month,rows,newGuards})});
-      const j=await r.json();setMessage(r.ok?j.message:j.error);
+      const j=await r.json();setMessage(r.ok?j.message:j.error||"A importação não foi concluída.");
       if(r.ok)await load();
       return r.ok;
-    }finally{setSaving(false)}
+    }catch(error){setMessage(error instanceof Error?`Importação interrompida: ${error.message}`:"Importação interrompida. Tente novamente.");return false}
+    finally{setSaving(false)}
   }
   async function choiceAction(
     action: "leave_approve" | "leave_cancel",
@@ -385,24 +396,6 @@ export function GestaoClient({
         : j.error,
     );
     if (r.ok) await load();
-  }
-  async function campaignAction(action: "leave_campaign_close" | "leave_campaign_publish" | "leave_campaign_reopen") {
-    const campaignId = data.campaign?.id;
-    if (!campaignId || saving) return;
-    if (action === "leave_campaign_close" && !window.confirm("Fechar a campanha? Depois disso novos lançamentos e cancelamentos ficarão bloqueados.")) return;
-    if (action === "leave_campaign_publish" && !window.confirm("Publicar a campanha? O quadro será tratado como fechado e integrado às escalas futuras.")) return;
-    const reason = action === "leave_campaign_reopen" ? window.prompt("Informe a justificativa para reabrir a campanha:", "Correção de folgas")?.trim() || "" : "";
-    if (action === "leave_campaign_reopen" && reason.length < 5) {
-      setMessage("Informe uma justificativa com pelo menos 5 caracteres.");
-      return;
-    }
-    setSaving(true); setMessage("");
-    try {
-      const r = await fetch("/api/admin", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, campaignId, reason }) });
-      const j = await r.json();
-      setMessage(r.ok ? j.message : j.error);
-      if (r.ok) await load();
-    } finally { setSaving(false); }
   }
   async function previewVehicleReturn(returnOn:string){
     if(!returningOutage)return;setSaving(true);setMessage("");
@@ -466,7 +459,7 @@ export function GestaoClient({
         title="Cadastros operacionais"
         subtitle="Pessoas, postos e viaturas alimentam a mesma escala diária."
         busy={saving}
-        busyArea={modeLabel[mode]}
+       busyArea={saving&&mode==="folgas"?"importação das folgas":modeLabel[mode]}
       >
         <div className="forms-grid">
           <Form title="Novo GM" onSubmit={(e) => submit(e, "guard")}>
@@ -491,15 +484,7 @@ export function GestaoClient({
             <input name="sortOrder" type="number" placeholder="Ordem" />
           </Form>
         </div>
-        <OperationalGroupsPanel
-          groups={data.operationalGroups}
-          members={data.operationalGroupMembers}
-          guards={data.guards}
-          posts={data.posts}
-          vehicles={data.vehicles}
-          saving={saving}
-          onAction={operationalGroupAction}
-        />
+        <p className="catalog-groups-handoff">A composição de grupamentos e equipes foi movida para <b>Padrões 12x36</b>, onde o vínculo pode ser definido por D1, D2, N1, N2 ou para todos os padrões.</p>
         <div className="catalog-tools">
           <SectionOrder sections={data.sections} onReorder={(key, direction) => void reorderSection(key, direction)} onRename={setSectionEditor} />
           <GuardImport onImport={(rows) => void importGuards(rows)} />
@@ -635,29 +620,32 @@ export function GestaoClient({
         busyArea={modeLabel[mode]}
       >
         <Form
-          title="Novo afastamento ou ajuste"
+          title="Novo afastamento / indisponibilidade"
           onSubmit={(e) => submit(e, "movement")}
         >
-          <GuardSelect guards={data.guards} />
-          <select name="type">
+          <div className="field-caption"><span>GM</span><GuardSelect guards={data.guards} /></div>
+          <label className="field-caption">Tipo de registro<select name="type" defaultValue="vacation">
             <option value="day_off">Folga</option>
             <option value="vacation">Férias</option>
             <option value="course">Curso</option>
             <option value="medical_leave">Atestado / licença</option>
             <option value="technical_reserve">Reserva técnica</option>
             <option value="time_bank">Banco de horas</option>
-          </select>
-          <input name="startsAt" type="datetime-local" required />
-          <input name="endsAt" type="datetime-local" required />
-          <input name="requestRef" placeholder="Nº do requerimento" />
-          <input name="notes" placeholder="Observação" />
+            <option value="other_leave">Outro afastamento</option>
+          </select></label>
+          <div className="two movement-date-fields">
+            <label className="field-caption">Início<input name="startsAt" type="date" defaultValue={date} required /></label>
+            <label className="field-caption">Retorno (inclusive)<input name="endsAt" type="date" defaultValue={date} required /></label>
+          </div>
+          <small className="form-hint">Use o mesmo dia nos dois campos para um afastamento de um dia. O retorno é aplicado automaticamente à escala.</small>
+          <label className="field-caption">Nº do requerimento<input name="requestRef" placeholder="Opcional" /></label>
+          <label className="field-caption">Observação / destino<input name="notes" placeholder="Opcional" /></label>
         </Form>
         {message && <p className="notice">{message}</p>}
-        <SimpleRecords
-          title="Registros recentes"
+        <MovementRecords
+          title="Afastamentos registrados"
           items={data.movements}
-          main="guard_name"
-          detail="type"
+          saving={saving}
           onEdit={setMovementEditing}
           onDelete={(item)=>void movementAction("movement_delete",{id:item.id})}
         />
@@ -742,8 +730,9 @@ export function GestaoClient({
       </Module>
     );
   const campaign = data.campaign;
-  const campaignStatus = campaign ? String(campaign.status || "open") : "none";
-  const campaignLocked = !campaign || campaignStatus !== "open";
+  // O status histórico continua disponível para auditoria, mas nunca trava
+  // a edição da tela de folgas.
+  const campaignLocked = false;
   const leaveDaysByDate = [...new Map(data.days.map((day) => [String(day.date), day])).keys()].map((dateKey) => data.days.find((day) => String(day.date) === dateKey && !String(day.platoon || "").trim()) || data.days.find((day) => String(day.date) === dateKey)!).filter(Boolean);
   const leavePlatoons = [...new Set(data.guards.map((guard) => String(guard.platoon || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR"));
   return (
@@ -754,14 +743,7 @@ export function GestaoClient({
       busy={saving}
       busyArea={modeLabel[mode]}
     >
-      <section className={`leave-campaign-status ${campaignStatus}`}>
-        <div><small>ESTADO DA CAMPANHA</small><h3>{campaignStatus === "open" ? "Campanha aberta" : campaignStatus === "closed" ? "Campanha fechada" : campaignStatus === "published" ? "Campanha publicada" : "Nenhuma campanha aberta"}</h3><p>{campaignStatus === "open" ? "Lançamentos, cancelamentos e ajustes estão liberados." : campaignStatus === "closed" ? "Confira os dados e publique quando estiver tudo correto." : campaignStatus === "published" ? "A campanha está bloqueada para edição e já pode ser usada pelas escalas futuras." : "Importe um novo mês para abrir uma campanha."}</p></div>
-        <div className="leave-campaign-actions">
-          {campaignStatus === "open" && <button type="button" disabled={saving} onClick={() => void campaignAction("leave_campaign_close")}>Fechar campanha</button>}
-          {campaignStatus === "closed" && <button type="button" className="save" disabled={saving} onClick={() => void campaignAction("leave_campaign_publish")}>Publicar campanha</button>}
-          {(campaignStatus === "closed" || campaignStatus === "published") && <button type="button" disabled={saving} onClick={() => void campaignAction("leave_campaign_reopen")}>Reabrir com justificativa</button>}
-        </div>
-      </section>
+      <p className="leave-editing-note" role="status">Edição livre: importe, ajuste ou remova folgas a qualquer momento. As alterações são aplicadas às escalas automaticamente.</p>
       <LeaveMonthOverview overview={data.leaveOverview} />
       <LeaveImport
         guards={data.guards}
@@ -838,6 +820,7 @@ export function GestaoClient({
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function OperationalGroupsPanel({
   groups,
   members,
@@ -859,7 +842,7 @@ function OperationalGroupsPanel({
   const [resourceId, setResourceId] = useState("");
   const [groupId, setGroupId] = useState("");
   const resourceOptions = resourceKind === "guard"
-    ? guards.map((item) => ({ id: item.id, label: `${item.name}${item.registration ? ` · ${item.registration}` : ""}` }))
+    ? guards.map((item) => ({ id: item.id, label: `${item.name}${displayRegistration(item.registration) ? ` · ${displayRegistration(item.registration)}` : " · sem matrícula"}` }))
     : resourceKind === "post"
       ? posts.map((item) => ({ id: item.id, label: `${item.name} · ${item.group_name || "Posto"}` }))
       : vehicles.map((item) => ({ id: item.id, label: `${item.prefix} · ${item.zone || "Zona não definida"}` }));
@@ -944,14 +927,21 @@ function GuardImport({onImport}:{onImport:(rows:Array<{registration:string;name:
   </section>
 }
 type ParsedLeave={line:number;shift:string;guardId:number|null;guardName:string;dates:string[];problems:string[]};
-const normalizeLeaveName=(value:string)=>value.normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^A-Z0-9]+/gi," ").trim().toUpperCase();
+function splitLeaveImportRecords(raw:string){
+  const withoutMarkers=raw.replace(/\[(?:\d+)\]/g," ");
+  const normalized=withoutMarkers.replace(/\r?\n/g," ").replace(/\s+/g," ").trim();
+  if(!normalized)return [] as Array<{source:string;shift:string;line:number}>;
+  const starts=[...normalized.matchAll(/\b(DIA|NOITE)\b/gi)].map(match=>({index:match.index??0,shift:String(match[1]).toUpperCase()}));
+  if(!starts.length)return withoutMarkers.split(/\r?\n/).map((source,index)=>({source:source.trim().replace(/\s+/g," "),shift:"",line:index+1})).filter(item=>item.source);
+  return starts.map((start,index)=>({source:normalized.slice(start.index,starts[index+1]?.index??normalized.length).trim(),shift:start.shift,line:index+1}));
+}
 function parseLeaveImport(raw:string,guards:Item[],month:string):ParsedLeave[]{
-  const [year,monthNumber]=month.split("-").map(Number),byName=new Map(guards.map(guard=>[normalizeLeaveName(String(guard.name)),guard]));
-  return raw.split(/\r?\n/).map((source,index)=>({source:source.trim(),line:index+1})).filter(item=>item.source&&!/^\[\d+\]|^GM\b|^DIA\s+GM\b/i.test(item.source)).map(({source,line})=>{
-    const shift=/^NOITE\b/i.test(source)?"NOITE":/^DIA\b/i.test(source)?"DIA":"";
+  const [year,monthNumber]=month.split("-").map(Number),exactByName=new Map(guards.map(guard=>[normalizeLeaveDisplayName(String(guard.name)),guard])),compactCandidates=new Map<string,Item[]>();
+  guards.forEach(guard=>{const key=normalizeLeaveName(String(guard.name));compactCandidates.set(key,[...(compactCandidates.get(key)||[]),guard])});
+  return splitLeaveImportRecords(raw).filter(item=>item.source&&!/^\s*(?:DIA|NOITE)\s+GM\b/i.test(item.source)).map(({source,line,shift})=>{
     const matches=[...source.matchAll(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/g)];
     const prefix=(matches.length?source.slice(0,matches[0].index):source).replace(/^\s*(DIA|NOITE)\s+/i,"").replace(/\t/g," ").trim();
-    const guard=byName.get(normalizeLeaveName(prefix));
+    const displayPrefix=normalizeLeaveDisplayName(prefix),guard=(displayPrefix.includes(" ")?exactByName.get(displayPrefix):undefined)||preferredLeaveNameMatch(prefix,compactCandidates.get(normalizeLeaveName(prefix))||[]);
     const problems:string[]=[];
     if(!guard)problems.push(`GM não encontrado: ${prefix||"linha sem nome"}`);
     if(!matches.length)problems.push("Nenhuma data reconhecida");
@@ -965,24 +955,32 @@ function parseLeaveImport(raw:string,guards:Item[],month:string):ParsedLeave[]{
     return {line,shift,guardId:guard?Number(guard.id):null,guardName:String(guard?.name||prefix||"GM não identificado"),dates,problems};
   });
 }
-function LeaveImport({guards,choices,defaultMonth,saving,locked=false,onImport}:{guards:Item[];choices:Item[];defaultMonth:string;saving:boolean;locked?:boolean;onImport:(month:string,rows:Array<{guardId?:number;guardName?:string;date:string}>,newGuards:Array<{name:string;registration:string;platoon?:string;baseShift?:string}>)=>Promise<boolean|undefined>}){
-  const [raw,setRaw]=useState(""),[month,setMonth]=useState(defaultMonth),[reviewing,setReviewing]=useState(false),[newRegistrations,setNewRegistrations]=useState<Record<string,string>>({});
+type LeaveImportRow={guardId?:number;guardName?:string;date:string;shift?:"day"|"night"};
+function LeaveImport({guards,choices,defaultMonth,saving,locked=false,onImport}:{guards:Item[];choices:Item[];defaultMonth:string;saving:boolean;locked?:boolean;onImport:(month:string,rows:LeaveImportRow[],newGuards:Array<{name:string;registration?:string;platoon?:string;baseShift?:string}>)=>Promise<boolean|undefined>}){
+  const [raw,setRaw]=useState(""),[month,setMonth]=useState(defaultMonth),[reviewing,setReviewing]=useState(false),[newRegistrations,setNewRegistrations]=useState<Record<string,string>>({}),[newNames,setNewNames]=useState<Record<string,string>>({}),[confirmedNewGuards,setConfirmedNewGuards]=useState<Record<string,boolean>>({});
   const parsed=useMemo(()=>parseLeaveImport(raw,guards,month),[raw,guards,month]);
   const existing=new Set(choices.map(choice=>`${Number(choice.guard_id)}:${String(choice.date)}`));
   const unknownNames=[...new Map(parsed.filter(row=>!row.guardId&&row.guardName).map(row=>[normalizeLeaveName(row.guardName),row.guardName])).values()];
-  const newGuards=unknownNames.map(name=>({name,registration:String(newRegistrations[normalizeLeaveName(name)]||"").trim(),baseShift:"12x36 dia"}));
-  const missingRegistrations=newGuards.filter(guard=>!guard.registration).length;
+  const unknownShifts=new Map<string,Set<string>>();
+  parsed.filter(row=>!row.guardId&&row.guardName).forEach(row=>{const key=normalizeLeaveName(row.guardName);unknownShifts.set(key,new Set([...(unknownShifts.get(key)||new Set<string>()),row.shift]))});
+  const proposedName=(name:string)=>normalizeLeaveDisplayName(newNames[normalizeLeaveName(name)]||name);
+  const newGuards=unknownNames.map(name=>({name:proposedName(name),registration:String(newRegistrations[normalizeLeaveName(name)]||"").trim(),baseShift:unknownShifts.get(normalizeLeaveName(name))?.has("NOITE")&&!unknownShifts.get(normalizeLeaveName(name))?.has("DIA")?"12x36 noite":"12x36 dia"}));
+  const missingConfirmations=newGuards.filter(guard=>!confirmedNewGuards[normalizeLeaveName(guard.name)]).length;
   const unresolvedProblems=parsed.reduce((total,row)=>total+row.problems.filter(problem=>!problem.startsWith("GM não encontrado")).length,0);
-  const validRows=parsed.flatMap(row=>row.dates.filter(date=>row.guardId? !existing.has(`${row.guardId}:${date}`):Boolean(newRegistrations[normalizeLeaveName(row.guardName)]?.trim())).map(date=>row.guardId?{guardId:Number(row.guardId),date}:{guardName:row.guardName,date}));
-  const problems=unresolvedProblems+missingRegistrations,recognized=parsed.reduce((total,row)=>total+row.dates.length,0);
+  const validRows=parsed.flatMap(row=>row.dates.filter(date=>row.guardId? !existing.has(`${row.guardId}:${date}`):Boolean(confirmedNewGuards[normalizeLeaveName(row.guardName)])).map(date=>row.guardId?{guardId:Number(row.guardId),date,shift:row.shift==="NOITE"?"night":"day" as const}:{guardName:proposedName(row.guardName),date,shift:row.shift==="NOITE"?"night":"day" as const}));
+  const problems=unresolvedProblems+missingConfirmations,recognized=parsed.reduce((total,row)=>total+row.dates.length,0);
+  const recognizedDay=parsed.filter(row=>row.shift==="DIA").reduce((total,row)=>total+row.dates.length,0),recognizedNight=parsed.filter(row=>row.shift==="NOITE").reduce((total,row)=>total+row.dates.length,0);
   function rowHasProblem(row:ParsedLeave){return row.problems.some(problem=>!problem.startsWith("GM não encontrado"))||(!row.guardId&&!newRegistrations[normalizeLeaveName(row.guardName)]?.trim())}
-  async function confirmImport(){if(locked||!validRows.length||problems||saving)return;const ok=await onImport(month,validRows,newGuards.filter(guard=>guard.registration));if(ok){setRaw("");setReviewing(false);setNewRegistrations({})}}
-  return <section className="leave-import"><fieldset disabled={locked}>
-    <header><div><small>IMPORTAÇÃO DO COMPILADO MENSAL</small><h2>Colar tabela de folgas</h2><p>{locked?"Campanha fechada: reabra-a para importar ou corrigir folgas.":"Cole as colunas DIA/NOITE, GM e todas as datas. Nada é salvo antes da confirmação geral."}</p></div><label>Mês<input type="month" value={month} disabled={locked} onChange={event=>{setMonth(event.target.value);setReviewing(false)}}/></label></header>
-    <textarea value={raw} disabled={locked} onChange={event=>{setRaw(event.target.value);setReviewing(false)}} rows={6} placeholder={"DIA\tALENCAR\t22/08 (SÁBADO)\t06/08 (QUINTA-FEIRA)\nNOITE\tALEXANDRE\t12/08\t14/08"}/>
-    <div className="leave-import-actions"><span><b>{parsed.length}</b> GMs · <b>{recognized}</b> folgas reconhecidas{unknownNames.length?` · ${unknownNames.length} novo(s) aguardando matrícula`:""}{problems?` · ${problems} pendência(s)`:""}</span><button type="button" disabled={locked||!parsed.length} onClick={()=>setReviewing(true)}>Revisar antes de incluir</button></div>
+  async function confirmImport(){if(locked||!validRows.length||problems||saving)return;const ok=await onImport(month,validRows,newGuards.filter(guard=>confirmedNewGuards[normalizeLeaveName(guard.name)]));if(ok){setRaw("");setReviewing(false);setNewRegistrations({});setNewNames({});setConfirmedNewGuards({})}}
+  const reviewContent=reviewing?<div className="leave-import-review-v2"><header><div><small>ETAPA 2 DE 3 · CONFERÊNCIA</small><h3>Revise antes de incluir</h3><p>Nenhum dado foi salvo. Confira período, nome do GM e datas reconhecidas.</p></div><strong className={problems?"warning":"ready"}>{problems?`${problems} pendência(s)`:"Pronto para incluir"}</strong></header><div className="leave-review-period-summary"><span className="day"><b>DIA</b><strong>{recognizedDay}</strong><small>folgas reconhecidas</small></span><span className="night"><b>NOITE</b><strong>{recognizedNight}</strong><small>folgas reconhecidas</small></span><span><b>GMs</b><strong>{parsed.length}</strong><small>nomes encontrados</small></span></div><div className="leave-import-list">{parsed.map(row=><article key={`${row.line}-${row.guardName}`} className={`${!row.guardId&&!confirmedNewGuards[normalizeLeaveName(row.guardName)]?"invalid":""} ${row.shift.toLowerCase()}`}><span className={`leave-shift ${row.shift.toLowerCase()}`}>{row.shift||"-"}</span><div><b>{row.guardName}</b><small>Linha {row.line}</small>{!row.guardId&&<div className="leave-new-guard"><label className="leave-new-guard-confirm"><input type="checkbox" checked={Boolean(confirmedNewGuards[normalizeLeaveName(row.guardName)])} onChange={event=>setConfirmedNewGuards(current=>({...current,[normalizeLeaveName(row.guardName)]:event.target.checked}))}/><span>Confirmo cadastrar este GM</span></label><input value={newRegistrations[normalizeLeaveName(row.guardName)]||""} onChange={event=>setNewRegistrations(current=>({...current,[normalizeLeaveName(row.guardName)]:event.target.value}))} placeholder="Matrícula (opcional)"/><small>Sem matrícula: o cadastro ficará identificado dessa forma.</small></div>}</div><div className="leave-date-tags">{row.dates.map(date=><span key={date} className={row.guardId&&existing.has(`${row.guardId}:${date}`)?"existing":""}>{formatDate(date)}{row.guardId&&existing.has(`${row.guardId}:${date}`)?" · já incluída":""}</span>)}{row.problems.filter(problem=>!problem.startsWith("GM não encontrado")).map(problem=><em key={problem}>{problem}</em>)}{!row.guardId&&!confirmedNewGuards[normalizeLeaveName(row.guardName)]&&<em className="new-guard-note">Confirmação obrigatória antes de incluir</em>}</div></article>)}</div><footer><button type="button" onClick={()=>setReviewing(false)}>← Voltar e corrigir</button><button type="button" className="save" disabled={!validRows.length||Boolean(problems)||saving} onClick={()=>void confirmImport()}>{saving?"Importando...":`Incluir ${validRows.length} folgas confirmadas`}</button></footer></div>:null;
+  return <section className="leave-import" aria-busy={saving}><fieldset disabled={locked}>
+    <header><div><small>IMPORTAÇÃO DO COMPILADO MENSAL</small><h2>Importar folgas por copiar e colar</h2><p>Um fluxo seguro em três etapas. O sistema separa DIA e NOITE e só grava após sua confirmação.</p></div><label>Mês da importação<input type="month" value={month} disabled={locked} onChange={event=>{setMonth(event.target.value);setReviewing(false)}}/></label></header>
+    <ol className="leave-import-steps"><li className={!reviewing?"active":"done"}><b>1</b><span><strong>Colar compilado</strong><small>Copie diretamente da planilha</small></span></li><li className={reviewing?"active":""}><b>2</b><span><strong>Conferir</strong><small>Dia, noite, nomes e datas</small></span></li><li><b>3</b><span><strong>Incluir</strong><small>Confirmação única e segura</small></span></li></ol>
+    <div className="leave-import-paste"><label><span>Conteúdo copiado da planilha</span><textarea value={raw} disabled={locked} onChange={event=>{setRaw(event.target.value);setReviewing(false)}} rows={7} placeholder={"DIA\tALENCAR\t22/08 (SÁBADO)\t06/08 (QUINTA-FEIRA)\nNOITE\tALEXANDRE\t12/08\t14/08"}/></label><aside><b>Como importar</b><span>1. Selecione e copie as linhas da planilha.</span><span>2. Cole no campo ao lado.</span><span>3. Confira os totais de DIA e NOITE.</span><small>Nada será salvo nesta etapa.</small></aside></div>
+    {unknownNames.length>0&&<div className="leave-import-name-corrections"><header><b>Confira os nomes novos</b><small>Os espaços fazem parte do nome. Corrija antes de revisar para evitar cadastros como “DESOUZA” ou “LUCASMARTINS”.</small></header>{unknownNames.map(name=>{const key=normalizeLeaveName(name);return <label key={key}><span>Texto reconhecido: <b>{name}</b></span><input value={newNames[key]??normalizeLeaveDisplayName(name)} onChange={event=>{setNewNames(current=>({...current,[key]:event.target.value}));setReviewing(false)}} placeholder="Nome completo do GM"/></label>})}</div>}
+    <div className="leave-import-actions"><div className="leave-import-totals"><span className="day"><small>DIA</small><b>{recognizedDay}</b></span><span className="night"><small>NOITE</small><b>{recognizedNight}</b></span><span><small>GMs</small><b>{parsed.length}</b></span>{unknownNames.length>0&&<span className="warning"><small>NOVOS</small><b>{unknownNames.length}</b></span>}{problems>0&&<span className="danger"><small>PENDÊNCIAS</small><b>{problems}</b></span>}</div><button type="button" disabled={locked||!parsed.length} onClick={()=>setReviewing(true)}>Conferir {recognized} folgas →</button></div>
     {reviewing&&<div className="leave-import-review"><header><div><small>CONFIRMAÇÃO - NENHUM DADO SALVO AINDA</small><h3>Folgas de {month.split("-").reverse().join("/")}</h3><p>{unknownNames.length?`${unknownNames.length} GM(s) não cadastrado(s): informe a matrícula abaixo para criar e importar junto.`:"Todos os nomes foram encontrados no cadastro."}</p></div><strong className={problems?"warning":"ready"}>{problems?"Completar cadastro":`${validRows.length} novas folgas`}</strong></header><div className="leave-import-list">{parsed.map(row=><article key={`${row.line}-${row.guardName}`} className={rowHasProblem(row)?"invalid":""}><span className={`leave-shift ${row.shift.toLowerCase()}`}>{row.shift||"-"}</span><div><b>{row.guardName}</b><small>Linha {row.line}</small>{!row.guardId&&<label className="leave-new-guard"><span>GM novo · matrícula</span><input value={newRegistrations[normalizeLeaveName(row.guardName)]||""} onChange={event=>setNewRegistrations(current=>({...current,[normalizeLeaveName(row.guardName)]:event.target.value}))} placeholder="Informe a matrícula"/></label>}</div><div className="leave-date-tags">{row.dates.map(date=><span key={date} className={row.guardId&&existing.has(`${row.guardId}:${date}`)?"existing":""}>{formatDate(date)}{row.guardId&&existing.has(`${row.guardId}:${date}`)?" · já incluída":""}</span>)}{row.problems.filter(problem=>!problem.startsWith("GM não encontrado")).map(problem=><em key={problem}>{problem}</em>)}{!row.guardId&&<em className="new-guard-note">Será cadastrado após informar a matrícula</em>}</div></article>)}</div><footer><button type="button" onClick={()=>setReviewing(false)}>Voltar e corrigir</button><button type="button" className="save" disabled={!validRows.length||Boolean(problems)||saving} onClick={()=>void confirmImport()}>{saving?"Importando…":`Confirmar importação geral (${validRows.length})`}</button></footer></div>}
-  </fieldset></section>
+   </fieldset>{saving&&<div className="leave-import-progress" role="status"><span className="loading-spinner" aria-hidden="true"/><div><b>Incluindo folgas...</b><small>Todos os registros estão sendo processados. Não feche esta tela.</small></div></div>}{reviewContent}</section>
 }
 function LeaveMonthOverview({overview}:{overview:LeaveOverview|null}) {
   if(!overview)return <section className="leave-overview empty"><b>Panorama mensal</b><p>Abra uma campanha de folgas para visualizar os dias críticos.</p></section>;
@@ -997,21 +995,22 @@ function LeaveMonthOverview({overview}:{overview:LeaveOverview|null}) {
   }
   const priorities=[...overview.days].sort((a,b)=>severityWeight(b.severity)-severityWeight(a.severity)||b.total-a.total||a.date.localeCompare(b.date)).slice(0,10);
   const monthlyAverage=overview.average.toLocaleString("pt-BR",{minimumFractionDigits:1,maximumFractionDigits:1});
+  const totalDay=overview.days.reduce((sum,day)=>sum+day.day,0),totalNight=overview.days.reduce((sum,day)=>sum+day.night,0);
+  const averageDay=(totalDay/Math.max(1,totalDays)).toLocaleString("pt-BR",{minimumFractionDigits:1,maximumFractionDigits:1}),averageNight=(totalNight/Math.max(1,totalDays)).toLocaleString("pt-BR",{minimumFractionDigits:1,maximumFractionDigits:1});
   return <section className="leave-overview">
-    <header><div><small>PANORAMA DO MÊS</small><h2>Risco de efetivo nas folgas</h2><p>A média empírica é de <b>{monthlyAverage} folgas/dia</b>; dias acima de {overview.criticalThreshold} entram como críticos para conferência. O total considera todo o efetivo em viaturas.</p></div></header>
-    <div className="leave-overview-summary">
-      <span><b>{overview.totalLeaves}</b><small>folgas confirmadas</small></span>
-      <span className="average"><b>{monthlyAverage}</b><small>média por dia</small></span>
-      <span className="critical"><b>{overview.criticalDays}</b><small>dias críticos</small></span>
-      <span className="vehicle"><b>{overview.vehicleLeaves}</b><small>folgas em viaturas</small></span>
+    <header><div><small>PANORAMA DO MÊS</small><h2>Folgas por período de serviço</h2><p>Compare o impacto diurno e noturno separadamente. Um total igual pode representar distribuições operacionais completamente diferentes.</p></div></header>
+    <div className="leave-period-summary">
+      <article className="day"><header><span>☀</span><div><b>Diurno</b><small>2º + 3º turno</small></div><strong>{totalDay}</strong></header><p>Média de <b>{averageDay}</b> folga/dia</p></article>
+      <article className="night"><header><span>☾</span><div><b>Noturno</b><small>4º + 1º turno</small></div><strong>{totalNight}</strong></header><p>Média de <b>{averageNight}</b> folga/dia</p></article>
+      <aside><span><b>{overview.criticalDays}</b> dias críticos</span><span><b>{overview.vehicleLeaves}</b> folgas em viaturas</span><small>Média geral: {monthlyAverage}/dia</small></aside>
     </div>
     <div className="leave-overview-grid">
       <div className="leave-calendar-wrap">
         <div className="leave-calendar-weekdays">{["SEG","TER","QUA","QUI","SEX","SÁB","DOM"].map(label=><span key={label}>{label}</span>)}</div>
-        <div className="leave-calendar">{calendar.map((entry,index)=>entry?<a key={entry.date} href={`/?date=${entry.date}`} className={entry.day?.severity||"clear"} title={entry.day?`${entry.day.total} folgas · Dia ${entry.day.day} · Noite ${entry.day.night}`:"Sem folgas confirmadas"}><span>{entry.number}</span>{entry.day?<><b>{entry.day.total} folga{entry.day.total===1?"":"s"}</b><small><i>D {entry.day.day}</i><i>N {entry.day.night}</i></small>{entry.day.vehicleTotal>0&&<em>VTR {entry.day.vehicleTotal}</em>}</>:<small className="no-leave">—</small>}</a>:<span className="calendar-blank" key={`blank-${index}`}/>)}</div>
+        <div className="leave-calendar">{calendar.map((entry,index)=>entry?<a key={entry.date} href={`/escala?date=${entry.date}`} className={entry.day?.severity||"clear"} title={entry.day?`Diurno ${entry.day.day} folgas · Noturno ${entry.day.night} folgas`:"Sem folgas confirmadas"}><span>{entry.number}</span>{entry.day?<div className="leave-calendar-periods"><small className="day"><b>D</b><strong>{entry.day.day}</strong><em>folgas</em></small><small className="night"><b>N</b><strong>{entry.day.night}</strong><em>folgas</em></small></div>:<small className="no-leave">Sem folgas</small>}{entry.day&&entry.day.vehicleTotal>0&&<em>VTR {entry.day.vehicleTotal}</em>}</a>:<span className="calendar-blank" key={`blank-${index}`}/>)}</div>
         <footer><span><i className="normal"/>Regular</span><span><i className="attention"/>Atenção</span><span><i className="critical"/>Crítico</span><small>Clique em qualquer dia para abrir a escala.</small></footer>
       </div>
-      <div className="leave-priority-days"><header><div><small>MAIOR IMPACTO</small><h3>Dias para conferir</h3></div><span>{priorities.length}</span></header>{priorities.length?priorities.map(day=><a href={`/?date=${day.date}`} className={day.severity} key={day.date}><div className="priority-date"><b>{new Date(`${day.date}T12:00:00`).toLocaleDateString("pt-BR",{day:"2-digit",month:"short"})}</b><small>{day.patterns.join(" + ")}</small></div><div className="priority-detail"><strong>{day.total} folgas <i>Dia {day.day}</i><i>Noite {day.night}</i></strong><div className="leave-role-chips">{roleEntries(day.roles).map(([role,count])=><span key={role}>{roleLabel(role)} {count}</span>)}</div>{day.vehicleTotal>0&&<em className="vehicle-total">VTR afetadas: {day.vehicleTotal}</em>}{day.vehicleRisks.map(risk=><em key={risk.vehicle}>⚠ {risk.vehicle}: {risk.members.map(member=>member.name).join(" + ")}</em>)}</div><span className="open-day">Abrir escala →</span></a>):<p>Nenhuma folga confirmada neste mês.</p>}</div>
+      <div className="leave-priority-days"><header><div><small>MAIOR IMPACTO</small><h3>Dias para conferir</h3></div><span>{priorities.length}</span></header>{priorities.length?priorities.map(day=><a href={`/escala?date=${day.date}`} className={day.severity} key={day.date}><div className="priority-date"><b>{new Date(`${day.date}T12:00:00`).toLocaleDateString("pt-BR",{day:"2-digit",month:"short"})}</b><small>{day.patterns.join(" + ")}</small></div><div className="priority-detail"><div className="priority-periods"><span className="day"><b>D</b><strong>{day.day}</strong><small>folgas</small></span><span className="night"><b>N</b><strong>{day.night}</strong><small>folgas</small></span></div><div className="leave-role-chips">{roleEntries(day.roles).map(([role,count])=><span key={role}>{roleLabel(role)} {count}</span>)}</div>{day.vehicleTotal>0&&<em className="vehicle-total">VTR afetadas: {day.vehicleTotal}</em>}{day.vehicleRisks.map(risk=><em key={risk.vehicle}>⚠ {risk.vehicle}: {risk.members.map(member=>member.name).join(" + ")}</em>)}</div><span className="open-day">Abrir escala →</span></a>):<p>Nenhuma folga confirmada neste mês.</p>}</div>
     </div>
   </section>;
 }
@@ -1161,60 +1160,90 @@ function Record({
   );
 }
 
-function SimpleRecords({
+function MovementRecords({
   title,
   items,
-  main,
-  detail,
+  saving,
   onEdit,
   onDelete,
 }: {
   title: string;
   items: Item[];
-  main: string;
-  detail: string;
+  saving: boolean;
   onEdit?:(item:Item)=>void;
   onDelete?:(item:Item)=>void;
 }) {
+  const [query, setQuery] = useState("");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const normalizedQuery = query.trim().toLocaleLowerCase("pt-BR");
+  const visible = useMemo(() => items.filter((item) => {
+    const text = `${item.guard_name || ""} ${item.registration || ""} ${item.request_ref || ""} ${item.notes || ""}`.toLocaleLowerCase("pt-BR");
+    return (typeFilter === "all" || String(item.type) === typeFilter) && (!normalizedQuery || text.includes(normalizedQuery));
+  }).sort((left,right)=>String(left.starts_at||"").localeCompare(String(right.starts_at||""))||String(left.guard_name||"").localeCompare(String(right.guard_name||""),"pt-BR")), [items, normalizedQuery, typeFilter]);
+  const groups = movementTypeOptions.filter((option) => visible.some((item) => String(item.type) === option.value));
+  const counts = movementTypeOptions.reduce<Record<string, number>>((result, option) => {
+    result[option.value] = items.filter((item) => String(item.type) === option.value).length;
+    return result;
+  }, {});
   return (
-    <section className="record-list">
-      <h3>
-        {title}
-        <span>{items.length}</span>
-      </h3>
-      {items.length === 0 ? (
-        <p>Nenhum registro.</p>
-      ) : (
-        items.map((item, index) => (
-          <div key={String(item.id ?? index)}>
-            <b>{String(item[main] ?? "")}</b>
-            <small>
-              {movementLabel(String(item[detail] ?? ""))} ·{" "}
-              {movementPeriod(item)}
-              {item.request_ref ? ` · Req. ${item.request_ref}` : ""}
-            </small>
-            {(onEdit||onDelete)&&<span className="record-actions">{onEdit&&<button onClick={()=>onEdit(item)}>Editar</button>}{onDelete&&<button className="danger-link" onClick={()=>onDelete(item)}>Remover</button>}</span>}
-          </div>
-        ))
-      )}
+    <section className="record-list movement-records">
+      <header className="movement-records-head">
+        <h3>{title}<span>{visible.length}{visible.length !== items.length ? ` / ${items.length}` : ""}</span></h3>
+        <p>Registros ativos retiram o GM automaticamente do período informado e mostram o furo na escala.</p>
+      </header>
+      <div className="movement-record-summary" role="status">
+        {movementTypeOptions.filter(option=>counts[option.value]).map(option=><button type="button" key={option.value} className={typeFilter===option.value?"active":""} onClick={()=>setTypeFilter(typeFilter===option.value?"all":option.value)}><b>{counts[option.value]}</b><span>{option.label}</span></button>)}
+      </div>
+      <div className="movement-filters">
+        <label>Buscar GM, matrícula ou requerimento<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Digite para filtrar…" /></label>
+        <label>Tipo<select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}><option value="all">Todos ({items.length})</option>{movementTypeOptions.map((option) => <option key={option.value} value={option.value}>{option.label} ({counts[option.value] || 0})</option>)}</select></label>
+      </div>
+      {!visible.length ? <p className="movement-empty">Nenhum registro corresponde aos filtros.</p> : <div className="movement-record-groups">
+        {groups.map((group) => {
+          const groupItems = visible.filter((item) => String(item.type) === group.value);
+          return <section key={group.value} className="movement-record-group">
+            <header><strong>{group.label}</strong><span>{groupItems.length}</span></header>
+            <div>{groupItems.map((item, index) => <article key={String(item.id ?? index)}>
+              <div className="movement-record-person"><b>{String(item.guard_name || "GM sem nome")}</b><small>{displayRegistration(item.registration) ? `Mat. ${displayRegistration(item.registration)}` : "Sem matrícula"}{item.base_shift ? ` · ${item.base_shift}` : ""}</small></div>
+              <div className="movement-record-period"><b>{movementPeriod(item)}</b><small>{item.request_ref ? `Req. ${item.request_ref}` : "Sem requerimento"}{item.notes ? ` · ${item.notes}` : ""}</small></div>
+              <span className="record-actions">{onEdit&&<button type="button" disabled={saving} onClick={()=>onEdit(item)}>Editar</button>}{onDelete&&<button type="button" disabled={saving} className="danger-link" onClick={()=>onDelete(item)}>Remover</button>}</span>
+            </article>)}</div>
+          </section>;
+        })}
+      </div>}
     </section>
   );
 }
+
+const movementTypeOptions = [
+  { value: "day_off", label: "Folgas" },
+  { value: "vacation", label: "Férias" },
+  { value: "course", label: "Cursos" },
+  { value: "medical_leave", label: "Atestados / licenças" },
+  { value: "technical_reserve", label: "Reserva técnica" },
+  { value: "time_bank", label: "Banco de horas" },
+  { value: "other_leave", label: "Outros afastamentos" },
+  { value: "swap", label: "Trocas legadas" },
+];
 
 function MovementEditor({item,guards,onClose,onSubmit}:{item:Item;guards:Item[];onClose:()=>void;onSubmit:(body:Record<string,string|number|null>)=>void}) {
   function send(e:FormEvent<HTMLFormElement>){e.preventDefault();onSubmit({id:item.id,...Object.fromEntries(new FormData(e.currentTarget))} as Record<string,string|number|null>)}
   return <div className="catalog-backdrop" role="presentation"><form className="catalog-editor" onSubmit={send}>
     <header><div><small>EDITAR MOVIMENTAÇÃO</small><h2>{String(item.guard_name)}</h2></div><button type="button" onClick={onClose} aria-label="Fechar">×</button></header>
     <label>GM<select name="guardId" defaultValue={String(item.guard_id)} required>{guards.map(g=><option key={String(g.id)} value={String(g.id)}>{String(g.name)}</option>)}</select></label>
-    <label>Tipo<select name="type" defaultValue={String(item.type)}><option value="day_off">Folga</option><option value="vacation">Férias</option><option value="course">Curso</option><option value="medical_leave">Atestado / licença</option><option value="technical_reserve">Reserva técnica</option><option value="time_bank">Banco de horas</option>{String(item.type)==="swap"&&<option value="swap">Troca legada — use Banco de horas e trocas</option>}</select></label>
-    <label>Início<input name="startsAt" type="datetime-local" defaultValue={toLocalInput(item.starts_at)} required/></label>
-    <label>Fim<input name="endsAt" type="datetime-local" defaultValue={toLocalInput(item.ends_at)} required/></label>
+    <label>Tipo<select name="type" defaultValue={String(item.type)}><option value="day_off">Folga</option><option value="vacation">Férias</option><option value="course">Curso</option><option value="medical_leave">Atestado / licença</option><option value="technical_reserve">Reserva técnica</option><option value="time_bank">Banco de horas</option><option value="other_leave">Outro afastamento</option>{String(item.type)==="swap"&&<option value="swap">Troca legada — use Banco de horas e trocas</option>}</select></label>
+    <label>Início<input name="startsAt" type="date" defaultValue={toDateInput(item.starts_at)} required/></label>
+    <label>Retorno (inclusive)<input name="endsAt" type="date" defaultValue={toDateInput(item.ends_at, true)} required/></label>
     <label>Nº do requerimento<input name="requestRef" defaultValue={String(item.request_ref||"")}/></label>
     <label>Observação<input name="notes" defaultValue={String(item.notes||"")}/></label>
     <button className="save">Salvar alteração</button>
   </form></div>
 }
-function toLocalInput(value:Item[string]){const text=String(value||"");return text.length>=16?text.slice(0,16):text}
+function toDateInput(value:Item[string], exclusiveEnd=false){
+  const text=String(value||"").slice(0,10);
+  if(!exclusiveEnd||!/^\d{4}-\d{2}-\d{2}$/.test(text))return text;
+  const date=new Date(`${text}T12:00:00Z`);date.setUTCDate(date.getUTCDate()-1);return date.toISOString().slice(0,10);
+}
 
 function LeaveRecords({
   items,
@@ -1223,15 +1252,31 @@ function LeaveRecords({
   items: Item[];
   onAction: (action: "leave_approve" | "leave_cancel", id: Item["id"]) => void;
 }) {
+  const [period, setPeriod] = useState<"all" | "day" | "night">("all");
+  const [visibleCount, setVisibleCount] = useState(50);
+  const isNight = (item: Item) => /noite/i.test(String(item.base_shift || ""));
+  const dayTotal = items.filter((item) => !isNight(item)).length;
+  const nightTotal = items.length - dayTotal;
+  const filteredItems = items.filter((item) => period === "all" || (period === "night") === isNight(item));
+  const visibleItems = filteredItems.slice(0, visibleCount);
+  const selectPeriod = (next: "all" | "day" | "night") => {
+    setPeriod(next);
+    setVisibleCount(50);
+  };
   return (
     <section className="record-list leave-records">
       <h3>
         Escolhas registradas<span>{items.length}</span>
       </h3>
-      {items.length === 0 ? (
+      <header className="leave-record-filters" aria-label="Filtrar escolhas por período">
+        <button type="button" className={period === "all" ? "active" : ""} onClick={() => selectPeriod("all")}>Todas <b>{items.length}</b></button>
+        <button type="button" className={`day ${period === "day" ? "active" : ""}`} onClick={() => selectPeriod("day")}>☀ Diurno <b>{dayTotal}</b></button>
+        <button type="button" className={`night ${period === "night" ? "active" : ""}`} onClick={() => selectPeriod("night")}>☾ Noturno <b>{nightTotal}</b></button>
+      </header>
+      {filteredItems.length === 0 ? (
         <p>Nenhuma escolha registrada.</p>
       ) : (
-        items.map((item) => (
+        visibleItems.map((item) => (
           <div key={String(item.id)}>
             <b>{String(item.guard_name)}</b>
             <small>
@@ -1258,28 +1303,15 @@ function LeaveRecords({
           </div>
         ))
       )}
+      {visibleItems.length < filteredItems.length && <button type="button" className="leave-record-more" onClick={() => setVisibleCount((current) => current + 50)}>Mostrar mais 50 <small>{filteredItems.length - visibleItems.length} restantes</small></button>}
     </section>
   );
 }
 
-function movementLabel(type: string) {
-  return (
-    (
-      {
-        day_off: "Folga",
-        vacation: "Férias",
-        course: "Curso",
-        medical_leave: "Atestado / licença",
-        technical_reserve: "Reserva técnica",
-        time_bank: "Banco de horas",
-        swap: "Troca de serviço",
-      } as Record<string, string>
-    )[type] || type
-  );
-}
 function movementPeriod(item: Item) {
-  const start = new Date(String(item.starts_at)),
-    end = new Date(String(item.ends_at));
+  const start = new Date(String(item.starts_at));
+  const end = new Date(String(item.ends_at));
+  if (/T00:00(?:$|:00)/.test(String(item.ends_at || ""))) end.setDate(end.getDate() - 1);
   return `${start.toLocaleDateString("pt-BR")} a ${end.toLocaleDateString("pt-BR")}`;
 }
 function serviceAdjustmentLabel(subtype: string) {
@@ -1406,7 +1438,7 @@ function CatalogEditor({
               Matrícula
               <input
                 name="registration"
-                defaultValue={String(i.registration || "")}
+                defaultValue={displayRegistration(i.registration)}
                 required
               />
             </label>

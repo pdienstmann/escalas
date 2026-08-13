@@ -3,19 +3,63 @@ import { writeAudit } from "../../../lib/audit";
 import { permitted } from "../../../lib/access";
 import { todayScheduleDate } from "../../../lib/schedule-date";
 import { ensureOperationalGroups } from "../../../lib/operational-groups-db";
+import { normalizeLeaveDisplayName as normalizeImportDisplayName, normalizeLeaveName as normalizeImportName, preferredLeaveNameMatch } from "../../../lib/leave-name";
 
 export const dynamic = "force-dynamic";
-type LeaveImportRow = { guardId?: number; guardName?: string; date: string };
-type NewLeaveGuard = { name: string; registration: string; platoon?: string; baseShift?: string };
+type LeaveImportRow = { guardId?: number; guardName?: string; date: string; shift?: "day" | "night" };
+type NewLeaveGuard = { name: string; registration?: string; platoon?: string; baseShift?: string };
 type AdminBody = Record<string, string | number> & { rows?: LeaveImportRow[]; newGuards?: NewLeaveGuard[] };
 
-const normalizeImportName = (value: string) =>
-  value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^A-Z0-9]+/gi, " ")
-    .trim()
-    .toUpperCase();
+const movementTypes = new Set([
+  "day_off",
+  "vacation",
+  "course",
+  "medical_leave",
+  "technical_reserve",
+  "time_bank",
+  "other_leave",
+]);
+
+function movementDate(value: unknown, end = false) {
+  const text = String(value || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    if (!isValidIsoDate(text)) return null;
+    if (!end) return `${text}T00:00`;
+    const next = new Date(`${text}T12:00:00Z`);
+    next.setUTCDate(next.getUTCDate() + 1);
+    return `${next.toISOString().slice(0, 10)}T00:00`;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(text)) return null;
+  const normalized = text.slice(0, 16);
+  return Number.isNaN(new Date(normalized).getTime()) ? null : normalized;
+}
+
+async function validateMovement(body: AdminBody, excludeId?: number) {
+  const guardId = Number(body.guardId);
+  const type = String(body.type || "").trim();
+  const startsAt = movementDate(body.startsAt);
+  const endsAt = movementDate(body.endsAt, true);
+  if (!Number.isInteger(guardId) || guardId <= 0) return { error: "Selecione um GM válido." };
+  if (!movementTypes.has(type)) return { error: "Selecione um tipo de afastamento válido." };
+  if (!startsAt || !endsAt) return { error: "Informe datas válidas para início e retorno." };
+  if (startsAt >= endsAt) return { error: "O retorno deve ser posterior ao início. Para um dia, use a mesma data nos dois campos." };
+  const guard = await env.DB.prepare("SELECT id,name FROM guards WHERE id=? LIMIT 1").bind(guardId).first<{ id: number; name: string }>();
+  if (!guard) return { error: "GM não encontrado. Atualize o cadastro antes de registrar o afastamento." };
+  const requestRef = String(body.requestRef || "").trim() || null;
+  if (requestRef) {
+    const duplicate = await env.DB.prepare("SELECT id FROM movements WHERE UPPER(TRIM(request_ref))=UPPER(TRIM(?)) AND (? IS NULL OR id<>?) LIMIT 1")
+      .bind(requestRef, excludeId ?? null, excludeId ?? null).first<{ id: number }>();
+    if (duplicate) return { error: `O requerimento ${requestRef} já está vinculado a outro afastamento.` };
+  }
+  const conflict = await env.DB.prepare(
+    "SELECT m.id,m.type,m.starts_at,m.ends_at FROM movements m WHERE m.guard_id=? AND m.status IN ('approved','pending') AND m.starts_at<? AND m.ends_at>? AND (? IS NULL OR m.id<>?) ORDER BY m.starts_at LIMIT 1",
+  ).bind(guardId, endsAt, startsAt, excludeId ?? null, excludeId ?? null).first<{ id: number; type: string; starts_at: string; ends_at: string }>();
+  if (conflict) {
+    return { error: `Já existe ${conflict.type} para este GM entre ${conflict.starts_at.slice(0, 10)} e ${conflict.ends_at.slice(0, 10)}. Edite o registro existente para evitar duplicidade.` };
+  }
+  return { guardId, type, startsAt, endsAt, requestRef, notes: String(body.notes || "").trim() || null, guard };
+}
+
 const isValidIsoDate = (value: string) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const date = new Date(`${value}T12:00:00Z`);
@@ -122,75 +166,6 @@ function buildLeaveOverview(
   };
 }
 
-
-async function seed() {
-  const count = await env.DB.prepare(
-    "SELECT COUNT(*) AS total FROM guards",
-  ).first<{ total: number }>();
-  if ((count?.total ?? 0) === 0)
-    await env.DB.batch([
-      env.DB.prepare(
-        "INSERT INTO guards (registration,name,platoon,base_shift) VALUES (?,?,?,?)",
-      ).bind("1001", "MARQUES", "B", "12x36 dia"),
-      env.DB.prepare(
-        "INSERT INTO guards (registration,name,platoon,base_shift) VALUES (?,?,?,?)",
-      ).bind("1002", "ROMANA", "B", "12x36 dia"),
-      env.DB.prepare(
-        "INSERT INTO guards (registration,name,platoon,base_shift) VALUES (?,?,?,?)",
-      ).bind("1003", "C. ALEXANDRE", "B", "12x36 dia"),
-      env.DB.prepare(
-        "INSERT INTO guards (registration,name,platoon,base_shift) VALUES (?,?,?,?)",
-      ).bind("1004", "RIVERO", "A", "12x36 noite"),
-      env.DB.prepare(
-        "INSERT INTO posts (name,group_name,sort_order) VALUES (?,?,?)",
-      ).bind("Sala de Operações", "Comando e Operações", 1),
-      env.DB.prepare(
-        "INSERT INTO posts (name,group_name,sort_order) VALUES (?,?,?)",
-      ).bind("Praça da Juventude", "Praças e Parques", 20),
-      env.DB.prepare(
-        "INSERT INTO vehicles (prefix,type,zone) VALUES (?,?,?)",
-      ).bind("VTR 1337", "sedan", "Zona B3 Dia"),
-      env.DB.prepare(
-        "INSERT INTO vehicles (prefix,type,zone) VALUES (?,?,?)",
-      ).bind("VTR 1302", "pickup", "Lomba Grande"),
-    ]);
-  await env.DB.prepare(
-    "INSERT OR IGNORE INTO leave_campaigns (month,title,status,access_code) VALUES (?,?,?,?)",
-  )
-    .bind("2026-08", "Folgas de agosto de 2026", "open", "AGO26")
-    .run();
-  const campaign = await env.DB.prepare(
-    "SELECT id FROM leave_campaigns WHERE month = ?",
-  )
-    .bind("2026-08")
-    .first<{ id: number }>();
-  const existingLimits = campaign
-    ? await env.DB.prepare(
-        "SELECT COUNT(*) total FROM leave_day_limits WHERE campaign_id=?",
-      )
-        .bind(campaign.id)
-        .first<{ total: number }>()
-    : null;
-  if (campaign && Number(existingLimits?.total || 0) === 0) {
-    const dates = [
-      "2026-08-03",
-      "2026-08-08",
-      "2026-08-10",
-      "2026-08-15",
-      "2026-08-17",
-      "2026-08-22",
-      "2026-08-24",
-      "2026-08-29",
-    ];
-    await env.DB.batch(
-      dates.map((date) =>
-        env.DB.prepare(
-          "INSERT INTO leave_day_limits (campaign_id,date,capacity) VALUES (?,?,?)",
-        ).bind(campaign.id, date, 3),
-      ),
-    );
-  }
-}
 
 async function syncConfirmedLeaves(choiceId?: number) {
   const where = choiceId ? "AND c.id=?" : "";
@@ -393,6 +368,27 @@ async function ensureServiceAdjustmentsTable(){
   await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_service_adjustments_settlement_date ON service_adjustments(settlement_date,status)").run();
 }
 
+let adminInfrastructurePromise: Promise<void> | null = null;
+
+async function ensureAdminInfrastructure() {
+  if (!adminInfrastructurePromise) {
+    adminInfrastructurePromise = (async () => {
+      await ensureLeaveDayLimitShift();
+      await ensureFleetReturnTables();
+      await ensureServiceAdjustmentsTable();
+      await ensureOperationalGroups(env.DB);
+    })();
+  }
+  try {
+    await adminInfrastructurePromise;
+  } catch (error) {
+    // A falha não deve envenenar o isolate: a próxima requisição pode tentar
+    // novamente depois de uma indisponibilidade transitória do D1.
+    adminInfrastructurePromise = null;
+    throw error;
+  }
+}
+
 function assignmentTimes(date:string,shift:string){
   const values:Record<string,[string,string]>={"2":["07:00","13:00"],"3":["13:00","19:00"],"4":["19:00","01:00"],"1":["01:00","07:00"]};
   const [start,end]=values[shift];const next=new Date(`${date}T12:00:00Z`);next.setUTCDate(next.getUTCDate()+1);
@@ -430,14 +426,18 @@ async function restoreVehiclePatternCrew(scheduleId:number,date:string,vehicleId
 export async function GET(request: Request) {
   if (!permitted(request))
     return Response.json({ error: "Não autorizado" }, { status: 401 });
-  await ensureLeaveDayLimitShift();
-  await seed();
-  await syncConfirmedLeaves();
-  await ensureSections();
-  await ensureFleetReturnTables();
-  await ensureServiceAdjustmentsTable();
-  await ensureOperationalGroups(env.DB);
+  // Import/create/update actions already synchronize their affected leaves.
+  // Reprocessing every confirmed leave on every read made all management tabs
+  // pay a large and unnecessary D1 cost.
+  await Promise.all([ensureAdminInfrastructure(), ensureSections()]);
   const requestedDate = new URL(request.url).searchParams.get("date") || todayScheduleDate();
+  const requestedMonth = String(requestedDate).slice(0, 7);
+  if (/^\d{4}-(0[1-9]|1[0-2])$/.test(requestedMonth)) {
+    const [year, month] = requestedMonth.split("-").map(Number);
+    const monthLabel = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(year, month - 1, 1)));
+    await env.DB.prepare("INSERT OR IGNORE INTO leave_campaigns (month,title,status,access_code) VALUES (?,?,?,?)")
+      .bind(requestedMonth, `Folgas de ${monthLabel}`, "open", `AUTO-${requestedMonth}`).run();
+  }
   const monthStart = `${String(requestedDate).slice(0,7)}-01`;
   const nextMonth = new Date(`${monthStart}T12:00:00Z`);
   nextMonth.setUTCMonth(nextMonth.getUTCMonth()+1);
@@ -445,7 +445,7 @@ export async function GET(request: Request) {
   const [guards, posts, vehicles, movements, campaign, days, choices, vehicleOutages, sections, vehicleCrews, vehicleReturnImpacts, leavePatternSlots, serviceAdjustments, operationalGroups, operationalGroupMembers] =
     await Promise.all([
       env.DB.prepare(
-        "SELECT * FROM guards WHERE active = 1 ORDER BY name",
+        "SELECT id,CASE WHEN registration LIKE 'SEM-MATRICULA-%' THEN NULL ELSE registration END AS registration,name,platoon,base_shift,active,created_at,updated_at,work_regime,overtime_eligible,overtime_note FROM guards WHERE active = 1 ORDER BY name",
       ).all(),
       env.DB.prepare(
         "SELECT * FROM posts WHERE active = 1 ORDER BY sort_order,name",
@@ -454,11 +454,12 @@ export async function GET(request: Request) {
         "SELECT * FROM vehicles WHERE active = 1 ORDER BY prefix",
       ).all(),
       env.DB.prepare(
-        "SELECT m.*, g.name AS guard_name FROM movements m JOIN guards g ON g.id=m.guard_id ORDER BY m.starts_at DESC LIMIT 30",
+        "SELECT m.*, g.name AS guard_name, CASE WHEN g.registration LIKE 'SEM-MATRICULA-%' THEN NULL ELSE g.registration END AS registration, g.base_shift FROM movements m JOIN guards g ON g.id=m.guard_id WHERE m.status!='rejected' ORDER BY m.starts_at DESC LIMIT 250",
       ).all(),
       env.DB.prepare(
-        "SELECT * FROM leave_campaigns WHERE status IN ('open','closed','published') ORDER BY month DESC LIMIT 1",
-      ).first(),
+        // O status é histórico; nunca deve impedir a edição das folgas.
+        "SELECT * FROM leave_campaigns WHERE month=? LIMIT 1",
+      ).bind(requestedMonth).first(),
       env.DB.prepare(
         `SELECT l.*,
           (SELECT COUNT(*) FROM leave_choices c
@@ -467,12 +468,12 @@ export async function GET(request: Request) {
              AND (l.platoon IS NULL OR TRIM(l.platoon)='' OR g.platoon=l.platoon)
              AND (l.shift IS NULL OR TRIM(l.shift)='' OR CASE WHEN lower(COALESCE(g.base_shift,'')) LIKE '%noite%' THEN 'night' ELSE 'day' END=l.shift)) AS used
          FROM leave_day_limits l
-         WHERE l.campaign_id=(SELECT id FROM leave_campaigns WHERE status IN ('open','closed','published') ORDER BY month DESC LIMIT 1)
+         WHERE l.campaign_id=(SELECT id FROM leave_campaigns WHERE month=? LIMIT 1)
          ORDER BY l.date,CASE WHEN l.platoon IS NULL OR TRIM(l.platoon)='' THEN 0 ELSE 1 END,CASE WHEN l.shift IS NULL OR TRIM(l.shift)='' THEN 0 ELSE 1 END,l.platoon,l.shift`,
-      ).all(),
+      ).bind(requestedMonth).all(),
       env.DB.prepare(
-        "SELECT c.*,g.name AS guard_name,g.registration,g.platoon,g.base_shift FROM leave_choices c JOIN guards g ON g.id=c.guard_id WHERE c.status!='cancelled' AND c.campaign_id=(SELECT id FROM leave_campaigns WHERE status IN ('open','closed','published') ORDER BY month DESC LIMIT 1) ORDER BY c.date,g.name",
-      ).all(),
+        "SELECT c.*,g.name AS guard_name,CASE WHEN g.registration LIKE 'SEM-MATRICULA-%' THEN NULL ELSE g.registration END AS registration,g.platoon,g.base_shift FROM leave_choices c JOIN guards g ON g.id=c.guard_id WHERE c.status!='cancelled' AND c.campaign_id=(SELECT id FROM leave_campaigns WHERE month=? LIMIT 1) ORDER BY c.date,g.name",
+      ).bind(requestedMonth).all(),
       env.DB.prepare("SELECT o.*,v.prefix,v.type FROM vehicle_outages o JOIN vehicles v ON v.id=o.vehicle_id WHERE o.active=1 ORDER BY o.starts_on DESC").all(),
       env.DB.prepare("SELECT section_key,label,sort_order FROM schedule_sections ORDER BY sort_order,label").all(),
       env.DB.prepare(
@@ -868,20 +869,22 @@ export async function POST(request: Request) {
     } else if (body.action === "movement") {
       if (String(body.type || "") === "swap")
         return Response.json({ error: "Trocas entre dias devem ser registradas em Banco de horas e trocas, informando os dois dias e os dois GMs." }, { status: 400 });
+      const values = await validateMovement(body);
+      if ("error" in values) return Response.json(values, { status: 400 });
       const created = await env.DB.prepare(
-        "INSERT INTO movements (guard_id,type,starts_at,ends_at,request_ref,notes) VALUES (?,?,?,?,?,?)",
+        "INSERT INTO movements (guard_id,type,starts_at,ends_at,request_ref,notes,status) VALUES (?,?,?,?,?,?, 'approved')",
       )
         .bind(
-          body.guardId,
-          body.type,
-          body.startsAt,
-          body.endsAt,
-          body.requestRef || null,
-          body.notes || null,
+          values.guardId,
+          values.type,
+          values.startsAt,
+          values.endsAt,
+          values.requestRef,
+          values.notes,
         )
         .run();
       const movement = await env.DB.prepare(
-        "SELECT m.*,g.name guard_name FROM movements m JOIN guards g ON g.id=m.guard_id WHERE m.id=?",
+        "SELECT m.*,g.name guard_name,CASE WHEN g.registration LIKE 'SEM-MATRICULA-%' THEN NULL ELSE g.registration END AS registration,g.base_shift FROM movements m JOIN guards g ON g.id=m.guard_id WHERE m.id=?",
       ).bind(created.meta.last_row_id).first();
       await writeAudit(request,{action:"create",entityType:"movement",entityId:Number(created.meta.last_row_id),summary:`Registrou ${body.type} para ${movement?.guard_name}`,after:movement as Record<string,unknown>,undoable:true});
       return Response.json({ ok: true, movement });
@@ -890,9 +893,11 @@ export async function POST(request: Request) {
         return Response.json({ error: "Trocas entre dias devem ser registradas em Banco de horas e trocas, informando os dois dias e os dois GMs." }, { status: 400 });
       const before = await env.DB.prepare("SELECT m.*,g.name guard_name FROM movements m JOIN guards g ON g.id=m.guard_id WHERE m.id=?").bind(body.id).first<Record<string,unknown>>();
       if (!before) return Response.json({error:"Movimentação não encontrada."},{status:404});
-      await env.DB.prepare("UPDATE movements SET guard_id=?,type=?,starts_at=?,ends_at=?,request_ref=?,notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
-        .bind(body.guardId,body.type,body.startsAt,body.endsAt,body.requestRef||null,body.notes||null,body.id).run();
-      const after = await env.DB.prepare("SELECT m.*,g.name guard_name FROM movements m JOIN guards g ON g.id=m.guard_id WHERE m.id=?").bind(body.id).first();
+      const values = await validateMovement(body, Number(body.id));
+      if ("error" in values) return Response.json(values, { status: 400 });
+      await env.DB.prepare("UPDATE movements SET guard_id=?,type=?,starts_at=?,ends_at=?,request_ref=?,notes=?,status='approved',updated_at=CURRENT_TIMESTAMP WHERE id=?")
+        .bind(values.guardId,values.type,values.startsAt,values.endsAt,values.requestRef,values.notes,body.id).run();
+      const after = await env.DB.prepare("SELECT m.*,g.name guard_name,CASE WHEN g.registration LIKE 'SEM-MATRICULA-%' THEN NULL ELSE g.registration END AS registration,g.base_shift FROM movements m JOIN guards g ON g.id=m.guard_id WHERE m.id=?").bind(body.id).first();
       await writeAudit(request,{action:"update",entityType:"movement",entityId:body.id,summary:`Alterou ${body.type} de ${after?.guard_name}`,before,after:after as Record<string,unknown>,undoable:true});
       return Response.json({ok:true,movement:after});
     } else if (body.action === "movement_delete") {
@@ -938,8 +943,8 @@ export async function POST(request: Request) {
       if (!Number.isInteger(campaignId) || campaignId <= 0 || !isValidIsoDate(date) || !Number.isInteger(capacity) || capacity < 0 || capacity > 500)
         return Response.json({ error: "Informe data e limite válidos (de 0 a 500 folgas)." }, { status: 400 });
       const campaign = await env.DB.prepare("SELECT id,month,status FROM leave_campaigns WHERE id=?").bind(campaignId).first<{ id: number; month: string; status: string }>();
-      if (!campaign || campaign.status !== "open" || !date.startsWith(`${campaign.month}-`))
-        return Response.json({ error: "A data não pertence à campanha de folgas aberta." }, { status: 400 });
+      if (!campaign || !date.startsWith(`${campaign.month}-`))
+        return Response.json({ error: "A data não pertence ao mês de folgas selecionado." }, { status: 400 });
       const used = await countLeaveChoices(campaignId, date, "confirmed", platoon, shift);
       if (capacity < used)
         return Response.json({ error: `O limite não pode ficar abaixo das ${used} folgas já confirmadas neste escopo.` }, { status: 409 });
@@ -955,44 +960,59 @@ export async function POST(request: Request) {
       return Response.json({ ok: true, message: `Limite ${scopeLabel} salvo para ${date}.`, limit: after });
     } else if (body.action === "leave_import") {
       const month = String(body.month || "").trim();
-      const rows = Array.isArray(body.rows) ? body.rows.slice(0, 500) : [];
-      const submittedNewGuards = Array.isArray(body.newGuards) ? body.newGuards.slice(0, 200) : [];
+      const rows = Array.isArray(body.rows) ? body.rows : [];
+      const submittedNewGuards = Array.isArray(body.newGuards) ? body.newGuards : [];
+      if (rows.length > 2000 || submittedNewGuards.length > 500)
+        return Response.json({ error: "A importação excede o limite seguro de 2.000 folgas ou 500 GMs novos. Divida o compilado em duas confirmações." }, { status: 413 });
       if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || !rows.length)
         return Response.json({ error: "Informe o mês e ao menos uma folga válida." }, { status: 400 });
+
+      const activeGuardRows = (await env.DB.prepare("SELECT id,name FROM guards WHERE active=1 ORDER BY name").all<{ id: number; name: string }>()).results;
+      const activeGuardsExact = new Map(activeGuardRows.map((guard) => [normalizeImportDisplayName(guard.name), guard]));
+      const activeGuardsCompact = new Map<string, Array<{ id: number; name: string }>>();
+      for (const guard of activeGuardRows) {
+        const key = normalizeImportName(guard.name);
+        activeGuardsCompact.set(key, [...(activeGuardsCompact.get(key) || []), guard]);
+      }
+      const resolveExistingGuardName = (name: string) => {
+        const displayName = normalizeImportDisplayName(name);
+        return (displayName.includes(" ") ? activeGuardsExact.get(displayName) : undefined) || preferredLeaveNameMatch(name, activeGuardsCompact.get(normalizeImportName(name)) || []);
+      };
 
       const newGuardRequests = new Map<string, NewLeaveGuard>();
       for (const rawGuard of submittedNewGuards) {
         const name = String(rawGuard?.name || "").trim();
         const registration = String(rawGuard?.registration || "").trim();
         const key = normalizeImportName(name);
-        if (!name || !registration || !key)
+        if (!name || !key)
           return Response.json({ error: "Todo GM novo precisa de nome e matrícula antes da importação." }, { status: 400 });
         const previous = newGuardRequests.get(key);
-        if (previous && previous.registration !== registration)
+        if (previous && previous.registration && registration && previous.registration !== registration)
           return Response.json({ error: `O GM ${name} recebeu mais de uma matrícula na importação.` }, { status: 409 });
         newGuardRequests.set(key, {
           name,
-          registration,
+          registration: registration || previous?.registration || undefined,
           platoon: String(rawGuard?.platoon || "").trim() || undefined,
           baseShift: String(rawGuard?.baseShift || "12x36 dia").trim() || "12x36 dia",
         });
       }
       const registrationOwners = new Map<string, string>();
       for (const requested of newGuardRequests.values()) {
+        if (!requested.registration) continue;
         const owner = registrationOwners.get(requested.registration);
         if (owner && normalizeImportName(owner) !== normalizeImportName(requested.name))
           return Response.json({ error: `A matrícula ${requested.registration} foi informada para mais de um GM.` }, { status: 409 });
         registrationOwners.set(requested.registration, requested.name);
       }
 
-      const activeGuardIds = new Set(
-        (await env.DB.prepare("SELECT id FROM guards WHERE active=1").all<{ id: number }>()).results.map((row) => Number(row.id)),
-      );
+      const activeGuardIds = new Set(activeGuardRows.map((row) => Number(row.id)));
       const normalizedRows = rows.map((row) => {
         const guardId = Number(row.guardId);
         const hasGuardId = Number.isInteger(guardId) && guardId > 0;
         const guardName = String(row.guardName || "").trim();
-        return { guardId: hasGuardId ? guardId : null, guardName, date: String(row.date || "").trim() };
+        const matchedGuard = hasGuardId ? null : resolveExistingGuardName(guardName);
+        const shift = row.shift === "night" ? "night" : row.shift === "day" ? "day" : undefined;
+        return { guardId: hasGuardId ? guardId : matchedGuard ? Number(matchedGuard.id) : null, guardName: matchedGuard?.name || guardName, date: String(row.date || "").trim(), shift };
       });
       if (normalizedRows.some((row) => !isValidIsoDate(row.date) || !row.date.startsWith(`${month}-`)))
         return Response.json({ error: "Há datas inválidas ou fora do mês selecionado." }, { status: 400 });
@@ -1005,6 +1025,7 @@ export async function POST(request: Request) {
       let createdGuards = 0;
       const existingGuardsByRegistration = new Map<string, { id: number; name: string }>();
       for (const requested of newGuardRequests.values()) {
+        if (!requested.registration) continue;
         const existing = await env.DB.prepare("SELECT id,name FROM guards WHERE registration=?").bind(requested.registration).first<{ id: number; name: string }>();
         if (existing) {
           if (normalizeImportName(String(existing.name)) !== normalizeImportName(requested.name))
@@ -1013,13 +1034,19 @@ export async function POST(request: Request) {
         }
       }
       for (const requested of newGuardRequests.values()) {
-        const existing = existingGuardsByRegistration.get(requested.registration);
+        const existingByName = resolveExistingGuardName(requested.name);
+        if (existingByName) {
+          newGuardIds.set(normalizeImportName(requested.name), Number(existingByName.id));
+          continue;
+        }
+        const registration = requested.registration || `SEM-MATRICULA-${crypto.randomUUID()}`;
+        const existing = requested.registration ? existingGuardsByRegistration.get(requested.registration) : undefined;
         if (existing) {
           await env.DB.prepare("UPDATE guards SET active=1,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(existing.id).run();
           newGuardIds.set(normalizeImportName(requested.name), Number(existing.id));
         } else {
           const created = await env.DB.prepare("INSERT INTO guards (registration,name,platoon,base_shift,work_regime) VALUES (?,?,?,?,?)")
-            .bind(requested.registration, requested.name, requested.platoon || null, requested.baseShift || "12x36 dia", "12x36")
+            .bind(registration, requested.name, requested.platoon || null, requested.baseShift || "12x36 dia", "12x36")
             .run();
           newGuardIds.set(normalizeImportName(requested.name), Number(created.meta.last_row_id));
           createdGuards++;
@@ -1043,22 +1070,38 @@ export async function POST(request: Request) {
         .bind(month, `Folgas de ${monthLabel}`, "open", `IMPORT-${month}`).run();
       const campaign = await env.DB.prepare("SELECT id,status FROM leave_campaigns WHERE month=?").bind(month).first<{ id: number; status: string }>();
       if (!campaign) return Response.json({ error: "Não foi possível abrir a campanha mensal." }, { status: 500 });
-      if (campaign.status !== "open") return Response.json({ error: "Esta campanha está fechada. Reabra-a antes de importar novas folgas." }, { status: 409 });
-      const results = await env.DB.batch(uniqueRows.map((row) => {
-        const weekday = new Date(`${row.date}T12:00:00Z`).getUTCDay();
-        const category = weekday === 0 || weekday === 6 ? "weekend" : "weekday";
-        return env.DB.prepare("INSERT OR IGNORE INTO leave_choices (campaign_id,guard_id,date,category,status,position) VALUES (?,?,?,?, 'confirmed',NULL)")
-          .bind(campaign.id, row.guardId, row.date, category);
-      }));
+      let imported = 0;
+      // D1 aceita lotes menores com mais previsibilidade; dividir evita que um
+      // compilado grande falhe inteiro por limite de statements/parâmetros.
+      for (let offset = 0; offset < uniqueRows.length; offset += 75) {
+        const chunk = uniqueRows.slice(offset, offset + 75);
+        const results = await env.DB.batch(chunk.map((row) => {
+          const weekday = new Date(`${row.date}T12:00:00Z`).getUTCDay();
+          const category = weekday === 0 || weekday === 6 ? "weekend" : "weekday";
+          return env.DB.prepare("INSERT OR IGNORE INTO leave_choices (campaign_id,guard_id,date,category,status,position) VALUES (?,?,?,?, 'confirmed',NULL)")
+            .bind(campaign.id, row.guardId, row.date, category);
+        }));
+        imported += results.reduce((total, result) => total + Number(result.meta.changes || 0), 0);
+      }
       await syncConfirmedLeaves();
-      const imported = results.reduce((total, result) => total + Number(result.meta.changes || 0), 0);
       await writeAudit(request, { action: "import", entityType: "leave_choice", entityId: campaign.id, summary: `Importou ${imported} folgas do compilado de ${month}`, after: { month, received: uniqueRows.length, imported, createdGuards }, undoable: false });
       return Response.json({ ok: true, imported, createdGuards, ignored: uniqueRows.length - imported, message: `${imported} folgas importadas e aplicadas as escalas. ${createdGuards ? `${createdGuards} GM(s) cadastrado(s). ` : ""}${uniqueRows.length - imported} registros ja existentes foram mantidos.` });
     } else if (body.action === "leave") {
       const date = String(body.date),
         category = String(body.category),
-        guardId = Number(body.guardId),
-        campaignId = Number(body.campaignId);
+        guardId = Number(body.guardId);
+      let campaignId = Number(body.campaignId);
+      if (!Number.isInteger(campaignId) || campaignId <= 0) {
+        if (!isValidIsoDate(date))
+          return Response.json({ error: "Informe uma data válida para a folga." }, { status: 400 });
+        const month = date.slice(0, 7);
+        const [year, monthNumber] = month.split("-").map(Number);
+        const monthLabel = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(year, monthNumber - 1, 1)));
+        await env.DB.prepare("INSERT OR IGNORE INTO leave_campaigns (month,title,status,access_code) VALUES (?,?,?,?)")
+          .bind(month, `Folgas de ${monthLabel}`, "open", `AUTO-${month}`).run();
+        const createdCampaign = await env.DB.prepare("SELECT id FROM leave_campaigns WHERE month=?").bind(month).first<{ id: number }>();
+        campaignId = Number(createdCampaign?.id || 0);
+      }
       const day = new Date(`${date}T12:00:00Z`).getUTCDay();
       if ((day === 0 || day === 6 ? "weekend" : "weekday") !== category)
         return Response.json(
@@ -1066,8 +1109,8 @@ export async function POST(request: Request) {
           { status: 400 },
         );
       const leaveCampaign = await env.DB.prepare("SELECT status FROM leave_campaigns WHERE id=?").bind(campaignId).first<{ status: string }>();
-      if (!leaveCampaign || leaveCampaign.status !== "open")
-        return Response.json({ error: "A campanha de folgas está fechada. Reabra-a antes de lançar alterações." }, { status: 409 });
+      if (!leaveCampaign)
+        return Response.json({ error: "Mês de folgas não encontrado." }, { status: 404 });
       const guard = await env.DB.prepare("SELECT id,name,platoon,base_shift FROM guards WHERE id=? AND active=1").bind(guardId).first<{ id: number; name: string; platoon: string | null; base_shift: string | null }>();
       if (!guard)
         return Response.json({ error: "GM não encontrado ou inativo." }, { status: 404 });
@@ -1119,8 +1162,8 @@ export async function POST(request: Request) {
           { status: 404 },
         );
       const approvalCampaign = await env.DB.prepare("SELECT status FROM leave_campaigns WHERE id=?").bind(choice.campaign_id).first<{ status: string }>();
-      if (!approvalCampaign || approvalCampaign.status !== "open")
-        return Response.json({ error: "A campanha de folgas está fechada. Reabra-a antes de aprovar." }, { status: 409 });
+      if (!approvalCampaign)
+        return Response.json({ error: "Mês de folgas não encontrado." }, { status: 404 });
       const limit = await resolveLeaveCapacity(choice.campaign_id, choice.date, choice.platoon, guardLeavePeriod(choice.base_shift));
       if (!limit || Number(limit.used) >= Number(limit.capacity))
         return Response.json(
@@ -1142,8 +1185,8 @@ export async function POST(request: Request) {
       if (!before) return Response.json({ error: "Solicitação não encontrada." }, { status: 404 });
       if (String(before.status) === "cancelled") return Response.json({ error: "Esta solicitação já foi cancelada." }, { status: 409 });
       const cancellationCampaign = await env.DB.prepare("SELECT status FROM leave_campaigns WHERE id=?").bind(before.campaign_id).first<{ status: string }>();
-      if (!cancellationCampaign || cancellationCampaign.status !== "open")
-        return Response.json({ error: "A campanha de folgas está fechada. Reabra-a antes de cancelar." }, { status: 409 });
+      if (!cancellationCampaign)
+        return Response.json({ error: "Mês de folgas não encontrado." }, { status: 404 });
       await env.DB.batch([
         env.DB.prepare(
           "UPDATE leave_choices SET status='cancelled',updated_at=CURRENT_TIMESTAMP WHERE id=?",
