@@ -85,6 +85,7 @@ type ResourceRemovalPick = { kind: "post" | "vehicle"; resource: Rec; assignment
 type UndoState = { id: number; label: string };
 type ViewFilter = "all" | "day" | "night" | "holes" | "redeploy";
 type MovementEdit = { type: string; movement?: Rec };
+type ScheduleDensity = "compact" | "detailed";
 type SwapPick = { pick: Pick; assignments: Rec[] };
 type ResourceDialogState = {
   kind: "post" | "vehicle";
@@ -131,6 +132,19 @@ function readScheduleCache(date:string):State|null{if(typeof window==="undefined
 function writeScheduleCache(data:State){if(typeof window==="undefined")return;try{sessionStorage.setItem(scheduleCacheKey(data.date),JSON.stringify({savedAt:Date.now(),data}))}catch{/* cache opcional */}}
 function readUiSetting(key:string){if(typeof window==="undefined")return null;try{return sessionStorage.getItem(`gmnh:ui:${key}`)}catch{return null}}
 function writeUiSetting(key:string,value:string){if(typeof window==="undefined")return;try{sessionStorage.setItem(`gmnh:ui:${key}`,value)}catch{/* preferência opcional */}}
+function setAssignmentDragPreview(event: DragEvent, name: unknown, detail: unknown) {
+  if (typeof document === "undefined") return;
+  const preview = document.createElement("div");
+  preview.className = "assignment-drag-preview";
+  const strong = document.createElement("strong");
+  strong.textContent = String(name || "GM");
+  const small = document.createElement("small");
+  small.textContent = String(detail || "Mover na escala");
+  preview.append(strong, small);
+  document.body.appendChild(preview);
+  event.dataTransfer.setDragImage(preview, 24, 18);
+  window.setTimeout(() => preview.remove(), 0);
+}
 function times(date: string, shift: string) {
   return shiftTimes(date, shift);
 }
@@ -165,6 +179,7 @@ export function LiveSchedule() {
     [query, setQuery] = useState(""),
     [view, setView] = useState<ViewFilter>("all"),
     [groupFilter, setGroupFilter] = useState("all"),
+    [density, setDensity] = useState<ScheduleDensity>("compact"),
     [settingsHydrated, setSettingsHydrated] = useState(false),
     [movementEdit, setMovementEdit] = useState<MovementEdit | null>(null),
     [swapPick,setSwapPick]=useState<SwapPick|null>(null),
@@ -220,6 +235,7 @@ export function LiveSchedule() {
     setQuery(readUiSetting("query") || "");
     setView(savedView && ["all", "day", "night", "holes", "redeploy"].includes(savedView) ? savedView as ViewFilter : "all");
     setGroupFilter(readUiSetting("group") || "all");
+    setDensity(readUiSetting("density") === "detailed" ? "detailed" : "compact");
     setSettingsHydrated(true);
   }, []);
   useEffect(() => {
@@ -234,7 +250,17 @@ export function LiveSchedule() {
     return () => window.clearInterval(refresh);
   }, [data, load, pick, quickEdit, resourceDialog, sectionEdit]);
   useEffect(()=>{if(data)writeScheduleCache(data)},[data]);
-  useEffect(()=>{if(settingsHydrated){writeUiSetting("query",query);writeUiSetting("view",view);writeUiSetting("group",groupFilter)}},[query,view,groupFilter,settingsHydrated]);
+  useEffect(()=>{if(settingsHydrated){writeUiSetting("query",query);writeUiSetting("view",view);writeUiSetting("group",groupFilter);writeUiSetting("density",density)}},[query,view,groupFilter,density,settingsHydrated]);
+  useEffect(() => {
+    if (!draggingAssignmentId) return;
+    const cancelDrag = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setDraggingAssignmentId(null);
+      setMessage("Movimentação cancelada.");
+    };
+    window.addEventListener("keydown", cancelDrag);
+    return () => window.removeEventListener("keydown", cancelDrag);
+  }, [draggingAssignmentId]);
   useEffect(()=>{
     if(typeof window==="undefined"||data?.date!==date)return;
     const pageKey=`gmnh:scroll:${date}`;
@@ -886,15 +912,19 @@ export function LiveSchedule() {
     // is only changing its lane in the visible cell, the drag source is the
     // reliable cell identity; do not rewrite the assignment's real shift.
     const sameShift = sourceShift ? sourceShift === shift : String(assignment.shift) === shift;
-    const reorder = (expectedUpdatedAt?: unknown) => postAssignment({
-      action: "reorder_resource_assignments",
-      scheduleId: data.schedule.id,
-      resourceKind: kind,
-      resourceId: resource.id,
-      assignmentId: assignment.id,
-      beforeAssignmentId: targetAssignmentId || null,
-      expectedUpdatedAt: expectedUpdatedAt || null,
-    });
+    const reorder = async (expectedUpdatedAt?: unknown) => {
+      const reordered = await postAssignment({
+        action: "reorder_resource_assignments",
+        scheduleId: data.schedule.id,
+        resourceKind: kind,
+        resourceId: resource.id,
+        assignmentId: assignment.id,
+        beforeAssignmentId: targetAssignmentId || null,
+        expectedUpdatedAt: expectedUpdatedAt || null,
+      });
+      if (reordered) setMessage(`${String(assignment.guard_name || "GM")} reposicionado.`);
+      return reordered;
+    };
     if (!independentOvertime && sameResource && sameShift) {
       await reorder(assignment.updated_at);
       return;
@@ -955,6 +985,7 @@ export function LiveSchedule() {
       reassignmentNote: assignment.reassignment_note || "Remanejamento na escala",
     });
     if (moved && !independentOvertime) await reorder();
+    else if (moved) setMessage(`${String(assignment.guard_name || "GM")} movido para ${String(kind === "vehicle" ? resource.prefix : resource.name)}.`);
   }
   async function saveRedeployment(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -977,7 +1008,7 @@ export function LiveSchedule() {
     resource: Rec,
   ) {
     if (!data || !assignments.length) return;
-    await postAssignment({
+    const moved = await postAssignment({
       action: "redeploy_group",
       assignmentIds: assignments.map((assignment) => Number(assignment.id)),
       expectedUpdatedAts: assignments.map((assignment) => ({ id: assignment.id, updatedAt: assignment.updated_at })),
@@ -985,6 +1016,7 @@ export function LiveSchedule() {
       postId: kind === "post" ? Number(resource.id) : null,
       vehicleId: kind === "vehicle" ? Number(resource.id) : null,
     });
+    if (moved) setMessage(`${String(assignments[0].guard_name || "GM")} movido para ${String(kind === "vehicle" ? resource.prefix : resource.name)}.`);
   }
   async function saveVehicleQuick(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -1255,7 +1287,7 @@ export function LiveSchedule() {
   const showTable = view !== "redeploy";
 
   return (
-    <main className={`app compact ${saving?"is-saving":""}`} aria-busy={saving||syncing}>
+    <main className={`app ${density} ${saving?"is-saving":""}`} aria-busy={saving||syncing}>
       <header className="topbar">
         <div className="brand">
           <span className="crest">GM</span>
@@ -1306,6 +1338,10 @@ export function LiveSchedule() {
           <button type="button" className={view==="day"?"active":""} onClick={()=>jump("day")}>Diurno</button>
           <button type="button" className={view==="night"?"active":""} onClick={()=>jump("night")}>Noturno</button>
           <button type="button" className={view==="holes"||view==="redeploy"?"active":""} onClick={()=>jump("pending")}>Pendências</button>
+        </div>
+        <div className="seg density-seg" role="group" aria-label="Nível de detalhes da escala">
+          <button type="button" className={density==="compact"?"active":""} aria-pressed={density==="compact"} onClick={()=>setDensity("compact")}>Compacto</button>
+          <button type="button" className={density==="detailed"?"active":""} aria-pressed={density==="detailed"} onClick={()=>setDensity("detailed")}>Detalhado</button>
         </div>
         <label className="section-jump">
           <span>Ir para área</span>
@@ -1388,6 +1424,7 @@ export function LiveSchedule() {
               event.dataTransfer.effectAllowed = "move";
               event.dataTransfer.setData("text/assignment", String(group.assignments[0].id));
               event.dataTransfer.setData("text/assignment-group", group.assignments.map((assignment) => assignment.id).join(","));
+              setAssignmentDragPreview(event, group.guardName, `${group.period === "day" ? "Diurno" : "Noturno"} completo`);
               setDraggingAssignmentId(Number(group.assignments[0].id));
             }} onDragEnd={() => setDraggingAssignmentId(null)}>
               <span className="redeploy-drag" aria-hidden="true">⋮⋮</span>
@@ -2218,8 +2255,7 @@ function OperationalGroupsGrid({ date, groups, members, guards, posts, vehicles,
                 ? "INDISPONÍVEL"
                 : "NÃO LANÇADO NESTA ESCALA";
             return <div className="operational-groups-grid-gm-wrap" key={`${member.id}-${shift.id}`}>
-              {actionAssignment && <button type="button" className="operational-group-remove-segment" aria-label={`Remover ${String(guard?.name || "GM")} somente deste horário`} title="Remover somente este horário" onClick={(event) => { event.stopPropagation(); onDelete(actionAssignment, shift.id); }}>×</button>}
-              <button type="button" draggable={Boolean(actionAssignment)} className={`operational-groups-grid-gm ${assignment ? "assigned" : "unassigned"} ${visualStatus}`} onDragStart={(event) => { if (!actionAssignment) return; event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/assignment", String(actionAssignment.id)); event.dataTransfer.setData("text/assignment-source-shift", shift.id); onDragStart(actionAssignment); }} onDragEnd={onDragEnd} onClick={() => actionAssignment && onOpenAssignment(actionAssignment, shift.id)} disabled={!assignment} title={assignment ? "Clique para editar ou arraste para mover este quadradinho" : "Integrante previsto no padrão, ainda sem lançamento nesta escala"}>
+              <button type="button" draggable={Boolean(actionAssignment)} className={`operational-groups-grid-gm ${assignment ? "assigned" : "unassigned"} ${visualStatus}`} onDragStart={(event) => { if (!actionAssignment) return; event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/assignment", String(actionAssignment.id)); event.dataTransfer.setData("text/assignment-source-shift", shift.id); setAssignmentDragPreview(event, guard?.name, destinationText); onDragStart(actionAssignment); }} onDragEnd={onDragEnd} onClick={() => actionAssignment && onOpenAssignment(actionAssignment, shift.id)} disabled={!assignment} title={assignment ? "Clique para editar ou arraste para mover este quadradinho" : "Integrante previsto no padrão, ainda sem lançamento nesta escala"}>
                 <strong>{String(guard?.name || `GM ${member.resource_id}`)}{hasVisualBadge && <span className={`group-status-badge ${visualStatus === "overtime" ? "he" : visualStatus === "time_bank" ? "bh" : visualStatus === "swap" ? "swap" : "away"}`}>{adjustmentBadge || (visualStatus === "overtime" && assignment?.regular_ends_at ? `HE · após ${String(assignment.regular_ends_at).slice(11, 16)}` : visualStatus === "away" ? String(movement?.type || "AFASTADO").replace("medical_leave", "ATESTADO").replace("day_off", "FOLGA").replace("vacation", "FÉRIAS").toUpperCase() : statusShort(visualStatus))}</span>}</strong><span>{movement && !assignment ? "Fora da escala neste período" : destinationText}</span><em>{assignmentState}</em><small className="operational-groups-grid-time">{assignment ? assignmentDisplayInShift(assignment, date, shift.id) : configuredTime}{extension ? ` · +HE ${overtimeHoursLabel(extension)}` : ""}</small>
               </button>
               {actionAssignment && showExtensionShortcut(actionAssignment, shift.id) && <button type="button" className="operational-group-inline-he" title="Estender este GM em hora extra" onClick={() => onExtend(actionAssignment, shift.id, "after")}>+HE</button>}
@@ -2227,12 +2263,14 @@ function OperationalGroupsGrid({ date, groups, members, guards, posts, vehicles,
               {actionAssignment && Number(actionAssignment.id) === selectedId && <div className="operational-group-quick-actions" role="group" aria-label={`Ações rápidas de ${String(guard?.name || "GM")}`}>
                 <header><b>{String(guard?.name || "GM")}</b><button type="button" aria-label="Fechar ações" onClick={onCloseActions}>×</button></header>
                 <button type="button" onClick={() => onAdjust(actionAssignment, shift.id)}><span aria-hidden="true">✎</span>Ajustar</button>
-                <button type="button" onClick={() => onSwap(actionAssignment, shift.id)}><span aria-hidden="true">⇄</span>Trocar</button>
-                <button type="button" className={actionAssignment.status === "time_bank" ? "active" : ""} onClick={() => onQuickStatus(actionAssignment, actionAssignment.status === "time_bank" ? "normal" : "time_bank")}><span aria-hidden="true">◷</span>BH</button>
-                <button type="button" onClick={() => onCopy(actionAssignment)}><span aria-hidden="true">▣</span>Copiar</button>
-                <button type="button" className="group-he-suggestions" onClick={() => onSuggestHe(actionAssignment, shift.id, member)}><span aria-hidden="true">＋</span>HE do grupamento</button>
-                <button type="button" onClick={() => onDetails(actionAssignment, shift.id)}><span aria-hidden="true">⋯</span>Detalhes</button>
-                <button type="button" className="danger" onClick={() => onDelete(actionAssignment, shift.id)}><span aria-hidden="true">×</span>Remover</button>
+                <details className="cell-more-actions"><summary>Mais ações</summary><div>
+                  <button type="button" onClick={() => onSwap(actionAssignment, shift.id)}><span aria-hidden="true">⇄</span>Trocar</button>
+                  <button type="button" className={actionAssignment.status === "time_bank" ? "active" : ""} onClick={() => onQuickStatus(actionAssignment, actionAssignment.status === "time_bank" ? "normal" : "time_bank")}><span aria-hidden="true">◷</span>BH</button>
+                  <button type="button" onClick={() => onCopy(actionAssignment)}><span aria-hidden="true">▣</span>Copiar</button>
+                  <button type="button" className="group-he-suggestions" onClick={() => onSuggestHe(actionAssignment, shift.id, member)}><span aria-hidden="true">＋</span>HE do grupamento</button>
+                  <button type="button" onClick={() => onDetails(actionAssignment, shift.id)}><span aria-hidden="true">⋯</span>Detalhes</button>
+                  <button type="button" className="danger" onClick={() => onDelete(actionAssignment, shift.id)}><span aria-hidden="true">×</span>Remover</button>
+                </div></details>
               </div>}
             </div>;
           })}
@@ -2535,6 +2573,20 @@ function Row({
       String(target.work_kind) !== "overtime_extension",
     );
   }
+  function linkedRegularJourney(assignment: Rec, shift: string) {
+    if (String(assignment.work_kind || "shift") === "overtime_extension") return [assignment];
+    const period = isDayShift(shift) ? "day" : "night";
+    const sameResource = (candidate: Rec) => kind === "post"
+      ? Number(candidate.post_id) === Number(resource.id)
+      : Number(candidate.vehicle_id) === Number(resource.id);
+    const linked = allScheduleAssignments.filter((candidate) =>
+      Number(candidate.guard_id) === Number(assignment.guard_id) &&
+      String(candidate.work_kind || "shift") !== "overtime_extension" &&
+      sameResource(candidate) &&
+      coveredOperationalShifts(candidate, date).some((coveredShift) => (isDayShift(coveredShift) ? "day" : "night") === period),
+    );
+    return [...new Map(linked.map((candidate) => [Number(candidate.id), candidate])).values()];
+  }
   function navigateCell(event: ReactKeyboardEvent<HTMLTableCellElement>, shift: string, list: Rec[]) {
     const target = event.target as HTMLElement;
     if (["INPUT", "SELECT", "TEXTAREA"].includes(target.tagName)) return;
@@ -2596,12 +2648,23 @@ function Row({
       .map(Number)
       .filter(Boolean);
     if (groupIds.length) {
-      const group = redeploymentGroups.find((item) =>
-        item.assignments.every((assignment) => groupIds.includes(Number(assignment.id))),
-      );
+      const group = redeploymentGroups.find((item) => item.assignments.every((assignment) => groupIds.includes(Number(assignment.id))));
+      const groupedAssignments = group?.assignments || groupIds.map((groupId) => assignmentById.get(groupId) || availableForRedeployment.find((assignment) => Number(assignment.id) === groupId)).filter((assignment): assignment is Rec => Boolean(assignment));
       const targetPeriod = isDayShift(shift) ? "day" : "night";
-      if (group && group.period === targetPeriod) {
-        void onMoveGroup(group.assignments, kind, resource);
+      const sourcePeriod = groupedAssignments.some((assignment) => coveredOperationalShifts(assignment, date).some((coveredShift) => isDayShift(coveredShift))) ? "day" : "night";
+      if (groupedAssignments.length === groupIds.length && sourcePeriod === targetPeriod) {
+        const firstAssignment = groupedAssignments[0];
+        const alreadyHere = kind === "post"
+          ? Number(firstAssignment.post_id) === Number(resource.id)
+          : Number(firstAssignment.vehicle_id) === Number(resource.id);
+        // A API de ordenação alinha todas as partes regulares do mesmo GM.
+        // Assim, soltar a jornada sobre outro card muda a faixa visual sem
+        // transformar a ação em um remanejamento.
+        if (alreadyHere) {
+          void onMove(firstAssignment, kind, resource, shift, shift, targetAssignmentId);
+          return;
+        }
+        void onMoveGroup(groupedAssignments, kind, resource);
       }
       return;
     }
@@ -2755,18 +2818,6 @@ function Row({
                 <div className={`live-person-card ${canExtendAfter||canExtendBefore?"has-he-action":""} ${dropTargetId===Number(a.id)?"drop-target":""} ${draggingAssignmentId===Number(a.id)?"dragging-source":""}`} onDragEnter={()=>{if(canDropOnCard(a))setDropTargetId(Number(a.id))}} onDragLeave={(event)=>{const next=event.relatedTarget;if(next instanceof Node&&event.currentTarget.contains(next))return;setDropTargetId(current=>current===Number(a.id)?null:current)}} onDragOver={(event)=>{if(!draggingAssignment)return;event.preventDefault();event.stopPropagation();event.dataTransfer.dropEffect=canDropOnCard(a)?"move":"none"}} onDrop={(event)=>{if(!draggingAssignment)return;event.preventDefault();event.stopPropagation();if(canDropOnCard(a))drop(event,s.id,Number(a.id))}}>
                 <button
                   type="button"
-                  className="live-person-remove"
-                  aria-label={`Remover ${String(a.guard_name)} somente deste horário`}
-                  title="Remover somente este horário"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onQuickDelete(a, s.id);
-                  }}
-                >
-                  ×
-                </button>
-                <button
-                  type="button"
                   draggable
                   className={`live-person ${visualStatus} ${Number(a.is_reassigned)?"reassigned":""} ${Number(a.id) === selectedId ? "is-selected" : ""} ${recentAssignmentIds.includes(Number(a.id))?"recent-update":""}`}
                   title="Arraste para outro posto/viatura ou solte sobre outro GM para ordenar"
@@ -2775,6 +2826,9 @@ function Row({
                     e.dataTransfer.effectAllowed = "move";
                     e.dataTransfer.setData("text/assignment", String(a.id));
                     e.dataTransfer.setData("text/assignment-source-shift", s.id);
+                    const linkedJourney = linkedRegularJourney(a, s.id);
+                    if (linkedJourney.length > 1) e.dataTransfer.setData("text/assignment-group", linkedJourney.map((assignment) => assignment.id).join(","));
+                    setAssignmentDragPreview(e, a.guard_name, linkedJourney.length > 1 ? "Jornada completa" : assignmentDisplayInShift(a, date, s.id));
                     onDragStart(a);
                   }}
                   onDragEnd={onDragEnd}
@@ -2819,11 +2873,13 @@ function Row({
                     <button type="button" className="cell-quick-close" aria-label="Fechar ações" title="Fechar" onClick={()=>onContextPick({kind,resource,shift:s.id})}>×</button>
                   </div>
                   <button type="button" className="primary-action" onClick={()=>onQuickEdit({kind,resource,shift:s.id,assignment:a})}><span aria-hidden="true">✎</span> Ajustar</button>
-                  <button type="button" className="swap-action" onClick={()=>onSwap(a,kind,resource,s.id)}><span aria-hidden="true">⇄</span> Trocar GM</button>
-                  <button type="button" className={a.status==="time_bank"?"active":""} onClick={()=>onQuickStatus(a,a.status==="time_bank"?"normal":"time_bank")}><span aria-hidden="true">◷</span> BH</button>
-                  <button type="button" className="copy-action" onClick={()=>onCopy(a)}><span aria-hidden="true">▣</span> Copiar</button>
-                  <button type="button" className="advanced-action" onClick={()=>onEdit({kind,resource,shift:s.id,assignment:a})}><span aria-hidden="true">⋯</span> Mais detalhes</button>
-                  <button type="button" className="danger" onClick={()=>onQuickDelete(a,s.id)}><span aria-hidden="true">×</span> Remover horário</button>
+                  <details className="cell-more-actions"><summary>Mais ações</summary><div>
+                    <button type="button" className="swap-action" onClick={()=>onSwap(a,kind,resource,s.id)}><span aria-hidden="true">⇄</span> Trocar GM</button>
+                    <button type="button" className={a.status==="time_bank"?"active":""} onClick={()=>onQuickStatus(a,a.status==="time_bank"?"normal":"time_bank")}><span aria-hidden="true">◷</span> BH</button>
+                    <button type="button" className="copy-action" onClick={()=>onCopy(a)}><span aria-hidden="true">▣</span> Copiar</button>
+                    <button type="button" className="advanced-action" onClick={()=>onEdit({kind,resource,shift:s.id,assignment:a})}><span aria-hidden="true">⋯</span> Mais detalhes</button>
+                    <button type="button" className="danger" onClick={()=>onQuickDelete(a,s.id)}><span aria-hidden="true">×</span> Remover horário</button>
+                  </div></details>
                   <small className="drag-context-hint">Para mover ou alinhar, arraste o quadradinho diretamente.</small>
                 </div>}</Fragment>
               </Fragment>)})}

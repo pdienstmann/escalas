@@ -44,13 +44,15 @@ Este arquivo transforma a revisao de UX em trabalho executavel. Nenhuma etapa de
 ### Concluido
 
 - Quatro turnos lado a lado, diferenca dia/noite, drag-and-drop, copia, remocao parcial, HE independente, BH, remanejamento, desfazer e sugestoes inteligentes.
+- Modos compacto e detalhado preservam nome, funcao, horario, indicadores e requerimento.
+- O cartao exibe somente a acao principal de HE; ajuste e acoes secundarias ficam no menu contextual recolhido.
+- Arraste usa sombra do GM, linha de insercao, cancelamento com Esc e confirmacao curta apos salvar.
+- As duas metades regulares seguem juntas quando pertencem ao mesmo GM, periodo e recurso; HE independente continua separada.
+- Regras de conflito revisadas: jornada regular nao absorve extensao independente; remanejamento parcial preserva o outro bloco; copia fora da carga normal nasce como HE.
 
 ### Pendente
 
-- Criar modo compacto e detalhado sem esconder horarios/alertas importantes.
-- Deixar somente a acao principal no cartao; outras em menu compacto.
-- Melhorar indicacao de insercao no arraste, cancelamento por Esc e confirmacao curta apos mover.
-- Revisar conflitos entre horario regular, HE independente, remanejamento parcial e copia convertida em HE.
+- Executar validacao visual assistida com usuarios em escalas reais especialmente densas, preservando as regras automatizadas acima.
 
 ### GMs de grupamentos na escala diaria
 

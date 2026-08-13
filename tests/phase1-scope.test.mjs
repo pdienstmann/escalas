@@ -429,6 +429,12 @@ test("selected GM cards use drag and drop instead of a destination picker", () =
   assert.match(schedule, /draggingAssignmentId===Number\(a\.id\)\?"dragging-source"/);
   assert.match(schedule, /targetAssignmentId && targetAssignmentId === id/);
   assert.match(schedule, /drag-context-hint/);
+  assert.match(schedule, /function linkedRegularJourney/);
+  assert.match(schedule, /text\/assignment-group/);
+  assert.match(schedule, /setAssignmentDragPreview/);
+  assert.match(schedule, /Movimentação cancelada/);
+  assert.match(schedule, /if \(alreadyHere\)/);
+  assert.match(schedule, /onMove\(firstAssignment, kind, resource, shift, shift, targetAssignmentId\)/);
 });
 
 test("selected GM cards expose one compact contextual action menu", () => {
@@ -438,6 +444,8 @@ test("selected GM cards expose one compact contextual action menu", () => {
   assert.match(schedule, /> Ajustar<\/button>/);
   assert.match(schedule, /> Mais detalhes<\/button>/);
   assert.match(schedule, /> Remover horário<\/button>/);
+  assert.match(schedule, /className="cell-more-actions"/);
+  assert.match(schedule, /<summary>Mais ações<\/summary>/);
   assert.match(schedule, /Para mover ou alinhar, arraste o quadradinho diretamente/);
   assert.doesNotMatch(schedule, /> Alterar \/ mover<\/button>/);
   assert.doesNotMatch(schedule, /className="inline-move-tools"/);
@@ -501,17 +509,31 @@ test("holes open one contextual picker with the three best redeployment and HE o
   assert.match(api, /if \(b\.action === "redeploy_group"\)/);
 });
 
-test("the inline X removes only the selected schedule segment", () => {
+test("segment removal remains in the compact action menu instead of occupying the card", () => {
   const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
   const api = readFileSync(resolve("app/api/schedule/route.ts"), "utf8");
   const styles = readFileSync(resolve("app/segment-remove.css"), "utf8");
-  assert.match(schedule, /className="live-person-remove"/);
+  assert.doesNotMatch(schedule, /className="live-person-remove"/);
+  assert.match(schedule, /className="danger" onClick=\{\(\)=>onQuickDelete\(a,s\.id\)\}/);
   assert.match(schedule, /action: "delete_shift_segment"/);
   assert.match(api, /if \(b\.action === "delete_shift_segment"\)/);
   assert.match(api, /UPDATE assignments SET starts_at=\?,ends_at=\?/);
   assert.match(api, /INSERT INTO assignments \(schedule_id,guard_id,post_id,vehicle_id/);
   assert.match(styles, /\.live-person-card \.live-person-remove/);
   assert.match(styles, /@media print\{\.live-person-card \.live-person-remove\{display:none/);
+});
+
+test("schedule offers compact and detailed views without losing operational card data", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const density = readFileSync(resolve("app/schedule-density.css"), "utf8");
+  assert.match(schedule, /type ScheduleDensity = "compact" \| "detailed"/);
+  assert.match(schedule, /Nível de detalhes da escala/);
+  assert.match(schedule, /setDensity\("compact"\)/);
+  assert.match(schedule, /setDensity\("detailed"\)/);
+  assert.match(schedule, /compactRequestReference\(a\.request_ref\)/);
+  assert.match(density, /\.app\.detailed \.live-person-card \.live-person/);
+  assert.match(density, /\.assignment-drag-preview/);
+  assert.match(density, /INSERIR AQUI/);
 });
 
 test("formatHoursDuration renders 2h and 2h30 without decimals", () => {
@@ -1001,7 +1023,8 @@ test("movement records keep a stable single-column flow and group guards expose 
   assert.match(schedule, />Trocar</);
   assert.match(schedule, />BH</);
   assert.match(schedule, />Detalhes</);
-  assert.match(schedule, /operational-group-remove-segment/);
+  assert.doesNotMatch(schedule, /className="operational-group-remove-segment"/);
+  assert.match(schedule, /onDelete\(actionAssignment, shift\.id\)/);
   assert.match(styles, /\.dashboard-absence-mini/);
   assert.match(styles, /grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
 });

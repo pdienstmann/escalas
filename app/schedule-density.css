@@ -123,3 +123,27 @@
 
 .operational-groups-grid-gm.overtime{border-left-color:#0e8d45;background:#edf9f0}.operational-groups-grid-gm.time_bank{border-left-color:#398bc7;background:#eef7ff}.operational-groups-grid-gm.swap{border-left-color:#d58e1d;background:#fff8e7}.operational-groups-grid-gm.away{border-left-color:#a43d4b;background:#fff0f2;color:#7d2733}.operational-groups-grid-gm.away span,.operational-groups-grid-gm.away em{color:#963d49}.group-status-badge{display:inline-block!important;margin-left:5px!important;overflow:visible!important;padding:1px 4px;border:1px solid currentColor;border-radius:8px;font-size:7px!important;font-style:normal;font-weight:900;vertical-align:middle}.group-status-badge.he{background:#0e8d45;color:#fff}.group-status-badge.bh{background:#e5f3ff;color:#17659d}.group-status-badge.swap{background:#fff0bf;color:#8a5200}.group-status-badge.away{background:#b83345;color:#fff}
 .operational-groups-grid-gm-wrap{position:relative;display:grid;margin-bottom:3px}.operational-groups-grid-gm-wrap>.operational-groups-grid-gm{width:100%;margin:0}.operational-group-inline-he{position:absolute;top:3px;right:3px;min-height:20px;padding:2px 5px;border:1px solid #087a3c;border-radius:5px;background:#0b8a44;color:#fff;font-size:7px;font-weight:900;cursor:pointer}.operational-group-inline-he.early{background:#175f91;border-color:#124e77}.operational-groups-grid-gm-wrap:has(.operational-group-inline-he)>.operational-groups-grid-gm{padding-right:42px}
+
+/* Dois níveis de leitura: ambos preservam nome, função, horário, situação e requerimento. */
+.density-seg{flex:0 0 auto}
+.app.detailed .schedule tbody tr.post-row>td,.app.detailed .schedule tbody tr.vehicle-row>td{padding-top:8px!important;padding-bottom:8px!important;border-bottom-width:5px}
+.app.detailed .drop-cell{padding:7px!important}
+.app.detailed .live-person-card .live-person{min-height:38px;padding:6px 7px;font-size:12px}
+.app.detailed .live-person-card .live-person small{margin-top:3px;font-size:10px}
+.app.detailed .request-reference{margin-top:3px;font-size:8px}
+.app.detailed .operational-groups-grid-gm{padding:7px 8px}.app.detailed .operational-groups-grid-gm strong{font-size:11px}.app.detailed .operational-groups-grid-gm span,.app.detailed .operational-groups-grid-gm em,.app.detailed .operational-groups-grid-time{font-size:9px}
+
+/* Uma ação principal; as demais permanecem acessíveis em um menu recolhido. */
+.cell-more-actions{flex:1 0 100%;grid-column:1/-1;min-width:0}
+.cell-more-actions summary{padding:5px 8px;border:1px solid #b8cad8;border-radius:5px;background:#f5f9fc;color:#315f7d;font-size:9px;font-weight:900;text-align:center;cursor:pointer;list-style:none}
+.cell-more-actions summary::-webkit-details-marker{display:none}.cell-more-actions summary:after{content:" ▾"}.cell-more-actions[open] summary:after{content:" ▴"}
+.cell-more-actions>div{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;margin-top:4px}
+.cell-more-actions>div>button{min-width:0;padding:5px 6px;white-space:normal}
+.operational-group-quick-actions>.cell-more-actions{grid-column:1/-1}.operational-group-quick-actions>.cell-more-actions>div{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}
+
+/* O arraste tem sombra própria e uma linha inequívoca de inserção. */
+.assignment-drag-preview{position:fixed;z-index:99999;top:-200px;left:-200px;display:grid;min-width:150px;padding:7px 10px;border:1px solid #2679b5;border-radius:7px;background:#fff;box-shadow:0 10px 24px #123b5b55;color:#143c58;pointer-events:none}.assignment-drag-preview strong{font-size:11px}.assignment-drag-preview small{margin-top:2px;color:#5c7588;font-size:9px}
+.live-person-card.drop-target{position:relative}.live-person-card.drop-target:before{content:"INSERIR AQUI";position:absolute;z-index:5;top:-5px;right:2px;left:2px;height:3px;border-radius:3px;background:#0871e1;box-shadow:0 0 0 2px #d9edff;color:#075cac;font-size:0}
+.drop-cell.drag-drop-ready{box-shadow:inset 0 0 0 2px #70aee0;background:#eef8ff!important}.dragging-source{opacity:.42;filter:saturate(.65)}
+@media(max-width:700px){.density-seg{order:5}.cell-more-actions>div,.operational-group-quick-actions>.cell-more-actions>div{grid-template-columns:1fr}.app.detailed .schedule{min-width:940px}}
+@media print{.density-seg,.cell-more-actions,.assignment-drag-preview{display:none!important}}
