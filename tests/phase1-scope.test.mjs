@@ -103,13 +103,33 @@ test("operational navigation is grouped on desktop and uses a compact mobile bar
   assert.match(styles, /body \{ padding-bottom:/);
 });
 
-test("large movement lists paginate without mounting every record at once", () => {
+test("large movement lists paginate remotely without mounting every record at once", () => {
   const dashboard = readFileSync(resolve("app/gestao-client.tsx"), "utf8");
+  const api = readFileSync(resolve("app/api/admin/route.ts"), "utf8");
   const styles = readFileSync(resolve("app/interaction-system.css"), "utf8");
   assert.match(dashboard, /const pageSize = 50/);
-  assert.match(dashboard, /pageItems = visible\.slice/);
+  assert.match(dashboard, /movementPage: String\(page\)/);
+  assert.match(dashboard, /movementQuery/);
+  assert.match(dashboard, /pageItems = visible/);
   assert.match(dashboard, /movement-pagination/);
+  assert.match(api, /movementPageSize/);
+  assert.match(api, /movementWhereSql/);
+  assert.match(api, /LIMIT \? OFFSET \?/);
   assert.match(styles, /\.movement-pagination/);
+});
+
+test("shared dialogs and saved module filters work across the operational pages", () => {
+  const dialog = readFileSync(resolve("app/app-dialog.tsx"), "utf8");
+  const state = readFileSync(resolve("app/use-module-ui-state.ts"), "utf8");
+  const operations = readFileSync(resolve("app/operations-dashboard.tsx"), "utf8");
+  const patterns = readFileSync(resolve("app/patterns-dashboard.tsx"), "utf8");
+  const management = readFileSync(resolve("app/gestao-client.tsx"), "utf8");
+  assert.match(dialog, /event\.key === "Escape"/);
+  assert.match(dialog, /document\.body\.style\.overflow = "hidden"/);
+  assert.match(state, /gmnh:ui:/);
+  assert.match(operations, /<AppDialog className="operation-dialog-backdrop"/);
+  assert.match(patterns, /<AppDialog className="pattern-preview-backdrop"/);
+  assert.match(management, /useModuleUiState\("movimentos", date/);
 });
 
 test("management modules request only their own administrative dataset", () => {

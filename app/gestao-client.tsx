@@ -4,6 +4,8 @@ import { ModuleBusyOverlay, ModuleLoading } from "./module-loading";
 import { BackToSchedule, ScheduleNav } from "./schedule-nav";
 import { normalizeLeaveDisplayName, normalizeLeaveName, preferredLeaveNameMatch } from "../lib/leave-name";
 import { useScheduleDate } from "./use-schedule-date";
+import { AppDialog } from "./app-dialog";
+import { useModuleUiState } from "./use-module-ui-state";
 type Item = Record<string, string | number | null>;
 type LeaveOverviewDay = {
   date: string;
@@ -31,6 +33,7 @@ type Data = {
   posts: Item[];
   vehicles: Item[];
   movements: Item[];
+  movementMeta: { page: number; pageSize: number; total: number; counts: Item | null } | null;
   campaign: Item | null;
   days: Item[];
   choices: Item[];
@@ -48,6 +51,7 @@ const empty: Data = {
   posts: [],
   vehicles: [],
   movements: [],
+  movementMeta: null,
   campaign: null,
   days: [],
   choices: [],
@@ -659,8 +663,10 @@ export function GestaoClient({
         </Form>
         {message && <p className="notice">{message}</p>}
         <MovementRecords
+          key={date}
           title="Afastamentos registrados"
           items={data.movements}
+          date={date}
           saving={saving}
           onEdit={setMovementEditing}
           onDelete={(item)=>void movementAction("movement_delete",{id:item.id})}
@@ -1186,49 +1192,72 @@ function Record({
 function MovementRecords({
   title,
   items,
+  date,
   saving,
   onEdit,
   onDelete,
 }: {
   title: string;
   items: Item[];
+  date: string;
   saving: boolean;
   onEdit?:(item:Item)=>void;
   onDelete?:(item:Item)=>void;
 }) {
-  const [query, setQuery] = useState("");
-  const [typeFilter, setTypeFilter] = useState("all");
-  const [page, setPage] = useState(1);
+  const [filters, setFilters] = useModuleUiState("movimentos", date, { query: "", typeFilter: "all", page: 1 });
+  const { query, typeFilter, page } = filters;
+  const updateFilters = (next: Partial<typeof filters>) => setFilters((current) => ({ ...current, ...next }));
   const pageSize = 50;
-  const normalizedQuery = query.trim().toLocaleLowerCase("pt-BR");
-  const visible = useMemo(() => items.filter((item) => {
-    const text = `${item.guard_name || ""} ${item.registration || ""} ${item.request_ref || ""} ${item.notes || ""}`.toLocaleLowerCase("pt-BR");
-    return (typeFilter === "all" || String(item.type) === typeFilter) && (!normalizedQuery || text.includes(normalizedQuery));
-  }).sort((left,right)=>String(left.starts_at||"").localeCompare(String(right.starts_at||""))||String(left.guard_name||"").localeCompare(String(right.guard_name||""),"pt-BR")), [items, normalizedQuery, typeFilter]);
-  const totalPages = Math.max(1, Math.ceil(visible.length / pageSize));
+  const [remote, setRemote] = useState<{ items: Item[]; total: number; counts: Item; loading: boolean }>({ items, total: items.length, counts: {}, loading: false });
+  useEffect(() => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setRemote((current) => ({ ...current, loading: true }));
+      const params = new URLSearchParams({ date, view: "movimentos", movementPage: String(page), movementPageSize: String(pageSize) });
+      if (typeFilter !== "all") params.set("movementType", typeFilter);
+      if (query.trim()) params.set("movementQuery", query.trim());
+      fetch(`/api/admin?${params}`, { cache: "no-store", signal: controller.signal })
+        .then(async (response) => {
+          const next = await response.json() as Data;
+          if (!response.ok) throw new Error("Não foi possível atualizar os afastamentos.");
+          return next;
+        })
+        .then((next) => {
+          const total = Number(next.movementMeta?.total || 0);
+          const lastPage = Math.max(1, Math.ceil(total / pageSize));
+          if (page > lastPage) { setFilters((current) => ({ ...current, page: lastPage })); return; }
+          setRemote({ items: next.movements || [], total, counts: next.movementMeta?.counts || {}, loading: false });
+        })
+        .catch((error) => { if (error.name !== "AbortError") setRemote((current) => ({ ...current, loading: false })); });
+    }, query.trim() ? 260 : 0);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [date, items, page, pageSize, query, setFilters, typeFilter]);
+  const visible = remote.items;
+  const totalPages = Math.max(1, Math.ceil(remote.total / pageSize));
   const safePage = Math.min(page, totalPages);
   const pageStart = (safePage - 1) * pageSize;
-  const pageItems = visible.slice(pageStart, pageStart + pageSize);
+  const pageItems = visible;
   const groups = movementTypeOptions.filter((option) => pageItems.some((item) => String(item.type) === option.value));
   const counts = movementTypeOptions.reduce<Record<string, number>>((result, option) => {
-    result[option.value] = items.filter((item) => String(item.type) === option.value).length;
+    result[option.value] = Number(remote.counts[option.value] || 0);
     return result;
   }, {});
   return (
     <section className="record-list movement-records">
       <header className="movement-records-head">
-        <h3>{title}<span>{visible.length}{visible.length !== items.length ? ` / ${items.length}` : ""}</span></h3>
+        <h3>{title}<span>{remote.total}{remote.loading ? " · atualizando" : ""}</span></h3>
         <p>Registros ativos retiram o GM automaticamente do período informado e mostram o furo na escala.</p>
       </header>
       <div className="movement-record-summary" role="status">
-        <button type="button" className={typeFilter==="all"?"active":""} onClick={()=>{setTypeFilter("all");setPage(1)}}><b>{items.length}</b><span>Todos</span></button>
-        {movementTypeOptions.map(option=><button type="button" key={option.value} className={typeFilter===option.value?"active":""} disabled={!counts[option.value]} onClick={()=>{setTypeFilter(typeFilter===option.value?"all":option.value);setPage(1)}}><b>{counts[option.value]||0}</b><span>{option.label}</span></button>)}
+        <button type="button" className={typeFilter==="all"?"active":""} onClick={()=>updateFilters({typeFilter:"all",page:1})}><b>{remote.total}</b><span>Todos</span></button>
+        {movementTypeOptions.map(option=><button type="button" key={option.value} className={typeFilter===option.value?"active":""} disabled={!counts[option.value]} onClick={()=>updateFilters({typeFilter:typeFilter===option.value?"all":option.value,page:1})}><b>{counts[option.value]||0}</b><span>{option.label}</span></button>)}
       </div>
       <div className="movement-filters">
-        <label>Buscar GM, matrícula ou requerimento<input value={query} onChange={(event) => {setQuery(event.target.value);setPage(1)}} placeholder="Digite para filtrar…" /></label>
-        <label>Tipo<select value={typeFilter} onChange={(event) => {setTypeFilter(event.target.value);setPage(1)}}><option value="all">Todos ({items.length})</option>{movementTypeOptions.map((option) => <option key={option.value} value={option.value}>{option.label} ({counts[option.value] || 0})</option>)}</select></label>
+        <label>Buscar GM, matrícula ou requerimento<input value={query} onChange={(event) => updateFilters({query:event.target.value,page:1})} placeholder="Digite para filtrar…" /></label>
+        <label>Tipo<select value={typeFilter} onChange={(event) => updateFilters({typeFilter:event.target.value,page:1})}><option value="all">Todos ({remote.total})</option>{movementTypeOptions.map((option) => <option key={option.value} value={option.value}>{option.label} ({counts[option.value] || 0})</option>)}</select></label>
+        {(query || typeFilter!=="all")&&<button type="button" className="movement-clear-filters" onClick={()=>updateFilters({query:"",typeFilter:"all",page:1})}>Limpar filtros</button>}
       </div>
-      {!visible.length ? <p className="movement-empty">Nenhum registro corresponde aos filtros.</p> : <div className="movement-record-groups">
+      {!visible.length && !remote.loading ? <p className="movement-empty">Nenhum registro corresponde aos filtros.</p> : <div className="movement-record-groups" aria-busy={remote.loading}>
         {groups.map((group) => {
           const groupItems = pageItems.filter((item) => String(item.type) === group.value);
           return <section key={group.value} className="movement-record-group">
@@ -1241,12 +1270,12 @@ function MovementRecords({
           </section>;
         })}
       </div>}
-      {visible.length > pageSize && <nav className="movement-pagination" aria-label="Paginação dos afastamentos">
-        <span>Exibindo {pageStart + 1}–{Math.min(pageStart + pageSize, visible.length)} de {visible.length}</span>
+      {remote.total > pageSize && <nav className="movement-pagination" aria-label="Paginação dos afastamentos">
+        <span>Exibindo {remote.total ? pageStart + 1 : 0}–{Math.min(pageStart + pageSize, remote.total)} de {remote.total}</span>
         <div>
-          <button type="button" disabled={safePage <= 1} onClick={()=>setPage(Math.max(1, safePage - 1))}>← Anterior</button>
+          <button type="button" disabled={safePage <= 1} onClick={()=>updateFilters({page:Math.max(1, safePage - 1)})}>← Anterior</button>
           <b>{safePage} / {totalPages}</b>
-          <button type="button" disabled={safePage >= totalPages} onClick={()=>setPage(Math.min(totalPages, safePage + 1))}>Próxima →</button>
+          <button type="button" disabled={safePage >= totalPages} onClick={()=>updateFilters({page:Math.min(totalPages, safePage + 1)})}>Próxima →</button>
         </div>
       </nav>}
     </section>
@@ -1266,7 +1295,7 @@ const movementTypeOptions = [
 
 function MovementEditor({item,guards,onClose,onSubmit}:{item:Item;guards:Item[];onClose:()=>void;onSubmit:(body:Record<string,string|number|null>)=>void}) {
   function send(e:FormEvent<HTMLFormElement>){e.preventDefault();onSubmit({id:item.id,...Object.fromEntries(new FormData(e.currentTarget))} as Record<string,string|number|null>)}
-  return <div className="catalog-backdrop" role="presentation"><form className="catalog-editor" onSubmit={send}>
+  return <AppDialog className="catalog-backdrop" onClose={onClose}><form className="catalog-editor" role="dialog" aria-modal="true" aria-label="Editar movimentação" onSubmit={send}>
     <header><div><small>EDITAR MOVIMENTAÇÃO</small><h2>{String(item.guard_name)}</h2></div><button type="button" onClick={onClose} aria-label="Fechar">×</button></header>
     <label>GM<select name="guardId" defaultValue={String(item.guard_id)} required>{guards.map(g=><option key={String(g.id)} value={String(g.id)}>{String(g.name)}</option>)}</select></label>
     <label>Tipo<select name="type" defaultValue={String(item.type)}><option value="day_off">Folga</option><option value="vacation">Férias</option><option value="course">Curso</option><option value="medical_leave">Atestado / licença</option><option value="technical_reserve">Reserva técnica</option><option value="time_bank">Banco de horas</option><option value="other_leave">Outro afastamento</option>{String(item.type)==="swap"&&<option value="swap">Troca legada — use Banco de horas e trocas</option>}</select></label>
@@ -1275,7 +1304,7 @@ function MovementEditor({item,guards,onClose,onSubmit}:{item:Item;guards:Item[];
     <label>Nº do requerimento<input name="requestRef" defaultValue={String(item.request_ref||"")}/></label>
     <label>Observação<input name="notes" defaultValue={String(item.notes||"")}/></label>
     <button className="save">Salvar alteração</button>
-  </form></div>
+  </form></AppDialog>
 }
 function toDateInput(value:Item[string], exclusiveEnd=false){
   const text=String(value||"").slice(0,10);

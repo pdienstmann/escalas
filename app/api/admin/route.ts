@@ -19,6 +19,7 @@ const movementTypes = new Set([
   "time_bank",
   "other_leave",
 ]);
+const movementFilterTypes = new Set([...movementTypes, "swap"]);
 
 function movementDate(value: unknown, end = false) {
   const text = String(value || "").trim();
@@ -437,6 +438,22 @@ export async function GET(request: Request) {
   await Promise.all([ensureAdminInfrastructure(), needs("cadastros") ? ensureSections() : Promise.resolve()]);
   const searchParams = requestUrl.searchParams;
   const requestedDate = searchParams.get("date") || todayScheduleDate();
+  const movementPage = Math.max(1, Number.parseInt(searchParams.get("movementPage") || "1", 10) || 1);
+  const movementPageSize = Math.min(100, Math.max(20, Number.parseInt(searchParams.get("movementPageSize") || "50", 10) || 50));
+  const movementType = String(searchParams.get("movementType") || "").trim();
+  const movementQuery = String(searchParams.get("movementQuery") || "").trim().slice(0, 80);
+  const movementDateFrom = isValidIsoDate(String(searchParams.get("movementDateFrom") || "")) ? String(searchParams.get("movementDateFrom")) : "";
+  const movementDateTo = isValidIsoDate(String(searchParams.get("movementDateTo") || "")) ? String(searchParams.get("movementDateTo")) : "";
+  const movementWhere = ["m.status!='rejected'"];
+  const movementCountWhere = ["m.status!='rejected'"];
+  const movementValues: Array<string | number> = [];
+  const movementCountValues: Array<string | number> = [];
+  if (movementType && movementFilterTypes.has(movementType)) { movementWhere.push("m.type=?"); movementValues.push(movementType); }
+  if (movementQuery) { movementWhere.push("LOWER(g.name||' '||COALESCE(g.registration,'')||' '||COALESCE(m.request_ref,'')||' '||COALESCE(m.notes,'')) LIKE ?"); movementCountWhere.push("LOWER(g.name||' '||COALESCE(g.registration,'')||' '||COALESCE(m.request_ref,'')||' '||COALESCE(m.notes,'')) LIKE ?"); const queryValue = `%${movementQuery.toLocaleLowerCase("pt-BR")}%`; movementValues.push(queryValue); movementCountValues.push(queryValue); }
+  if (movementDateFrom) { movementWhere.push("m.ends_at>=?"); movementCountWhere.push("m.ends_at>=?"); const fromValue = `${movementDateFrom}T00:00`; movementValues.push(fromValue); movementCountValues.push(fromValue); }
+  if (movementDateTo) { movementWhere.push("m.starts_at<?"); movementCountWhere.push("m.starts_at<?"); const next = new Date(`${movementDateTo}T12:00:00Z`); next.setUTCDate(next.getUTCDate() + 1); const toValue = `${next.toISOString().slice(0, 10)}T00:00`; movementValues.push(toValue); movementCountValues.push(toValue); }
+  const movementWhereSql = movementWhere.join(" AND ");
+  const movementCountWhereSql = movementCountWhere.join(" AND ");
   const emptyRows = () => Promise.resolve({ results: [] as Record<string, unknown>[] });
   const requestedMonth = String(requestedDate).slice(0, 7);
   if (needs("folgas") && /^\d{4}-(0[1-9]|1[0-2])$/.test(requestedMonth)) {
@@ -449,7 +466,7 @@ export async function GET(request: Request) {
   const nextMonth = new Date(`${monthStart}T12:00:00Z`);
   nextMonth.setUTCMonth(nextMonth.getUTCMonth()+1);
   const monthEnd = nextMonth.toISOString().slice(0,10);
-  const [guards, posts, vehicles, movements, campaign, days, choices, vehicleOutages, sections, vehicleCrews, vehicleReturnImpacts, leavePatternSlots, serviceAdjustments, operationalGroups, operationalGroupMembers] =
+  const [guards, posts, vehicles, movements, movementMeta, campaign, days, choices, vehicleOutages, sections, vehicleCrews, vehicleReturnImpacts, leavePatternSlots, serviceAdjustments, operationalGroups, operationalGroupMembers] =
     await Promise.all([
       needs("cadastros", "folgas", "movimentos", "ajustes") ? env.DB.prepare(
         "SELECT id,CASE WHEN registration LIKE 'SEM-MATRICULA-%' THEN NULL ELSE registration END AS registration,name,platoon,base_shift,active,created_at,updated_at,work_regime,overtime_eligible,overtime_note FROM guards WHERE active = 1 ORDER BY name",
@@ -461,8 +478,22 @@ export async function GET(request: Request) {
         "SELECT * FROM vehicles WHERE active = 1 ORDER BY prefix",
       ).all() : emptyRows(),
       needs("movimentos") ? env.DB.prepare(
-        "SELECT m.*, g.name AS guard_name, CASE WHEN g.registration LIKE 'SEM-MATRICULA-%' THEN NULL ELSE g.registration END AS registration, g.base_shift FROM movements m JOIN guards g ON g.id=m.guard_id WHERE m.status!='rejected' ORDER BY m.starts_at DESC LIMIT 250",
-      ).all() : emptyRows(),
+        `SELECT m.*, g.name AS guard_name, CASE WHEN g.registration LIKE 'SEM-MATRICULA-%' THEN NULL ELSE g.registration END AS registration, g.base_shift
+         FROM movements m JOIN guards g ON g.id=m.guard_id WHERE ${movementWhereSql}
+         ORDER BY m.starts_at DESC,m.id DESC LIMIT ? OFFSET ?`,
+      ).bind(...movementValues, movementPageSize, (movementPage - 1) * movementPageSize).all() : emptyRows(),
+      needs("movimentos") ? env.DB.prepare(
+        `SELECT COUNT(*) total,
+          COALESCE(SUM(CASE WHEN m.type='day_off' THEN 1 ELSE 0 END),0) day_off,
+          COALESCE(SUM(CASE WHEN m.type='vacation' THEN 1 ELSE 0 END),0) vacation,
+          COALESCE(SUM(CASE WHEN m.type='course' THEN 1 ELSE 0 END),0) course,
+          COALESCE(SUM(CASE WHEN m.type='medical_leave' THEN 1 ELSE 0 END),0) medical_leave,
+          COALESCE(SUM(CASE WHEN m.type='technical_reserve' THEN 1 ELSE 0 END),0) technical_reserve,
+          COALESCE(SUM(CASE WHEN m.type='time_bank' THEN 1 ELSE 0 END),0) time_bank,
+          COALESCE(SUM(CASE WHEN m.type='other_leave' THEN 1 ELSE 0 END),0) other_leave,
+          COALESCE(SUM(CASE WHEN m.type='swap' THEN 1 ELSE 0 END),0) swap
+         FROM movements m JOIN guards g ON g.id=m.guard_id WHERE ${movementCountWhereSql}`,
+      ).bind(...movementCountValues).first() : Promise.resolve(null),
       needs("folgas") ? env.DB.prepare(
         // O status é histórico; nunca deve impedir a edição das folgas.
         "SELECT * FROM leave_campaigns WHERE month=? LIMIT 1",
@@ -515,6 +546,7 @@ export async function GET(request: Request) {
     posts: posts.results,
     vehicles: vehicles.results,
     movements: movements.results,
+    movementMeta: needs("movimentos") ? { page: movementPage, pageSize: movementPageSize, total: Number((movementMeta as { total?: number } | null)?.total || 0), counts: movementMeta || {} } : null,
     campaign,
     days: days.results,
     choices: choices.results,

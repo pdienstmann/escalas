@@ -1,0 +1,7 @@
+.app-dialog-backdrop{position:fixed;inset:0;z-index:1500;display:grid;place-items:center;padding:max(14px,env(safe-area-inset-top)) max(14px,env(safe-area-inset-right)) max(14px,env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left));background:#071d3275;overscroll-behavior:contain}
+.app-dialog-backdrop [role="dialog"]{outline:0}
+.app-dialog-backdrop button:focus-visible,.app-dialog-backdrop input:focus-visible,.app-dialog-backdrop select:focus-visible,.app-dialog-backdrop textarea:focus-visible{outline:3px solid #72b6ef;outline-offset:1px}
+@media(max-width:700px){.app-dialog-backdrop{align-items:end;padding:0}.app-dialog-backdrop :is(.catalog-editor,.movement-dialog,.operation-dialog,.operation-suggest-dialog,.quick-create-dialog,.quick-extension-dialog,.resource-crew-dialog,.guard-swap-dialog,.redeploy-quick-editor,.vehicle-quick-editor,.resource-remove-dialog,.he-settings-dialog,.notice-editor-dialog){width:100vw;max-height:94dvh;border-radius:14px 14px 0 0}.app-dialog-backdrop :is(.pattern-preview){width:100vw;height:100dvh;max-height:100dvh;border-radius:0}}
+@media print{.app-dialog-backdrop{display:none!important}}
+.movement-filters .movement-clear-filters{align-self:end;padding:9px 11px;border:1px solid #b7c8d8;border-radius:6px;background:#fff;color:#275879;font-weight:800;white-space:nowrap}
+@media(max-width:700px){.movement-filters .movement-clear-filters{width:100%}}
