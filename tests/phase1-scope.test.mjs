@@ -1458,7 +1458,8 @@ test("monthly planning aggregates patterns, absences and resource coverage in on
   assert.match(page, /Simulação rápida/);
   assert.match(page, /Adicionar e recalcular/);
   assert.match(page, /PDF panorama/);
-  assert.match(page, /Prioridade de conferência/);
+  assert.match(page, /Prioridades por período/);
+  assert.match(page, /planning-priority-period/);
   assert.match(page, /Com impacto/);
   assert.match(page, /scrollIntoView/);
   assert.match(page, /planning-day-detail/);
