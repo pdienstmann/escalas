@@ -19,6 +19,7 @@ Este arquivo transforma a revisao de UX em trabalho executavel. Nenhuma etapa de
 - Navegacao client-side, prefetch, feedback de transicao e fallback seguro.
 - Data `?date=` preservada entre modulos; data e posicao da grade sao restauradas.
 - Cache curto por modulo e respostas atrasadas ignoradas no planejamento.
+- Estado de filtros e pagina corrente salvo por modulo/data em Pendencias e Historico.
 
 ### Pendente
 
@@ -34,8 +35,8 @@ Este arquivo transforma a revisao de UX em trabalho executavel. Nenhuma etapa de
 
 ### Pendente
 
-- Criar `AppDialog`, `MobileSheet`, `FilterBar` e `ActionButton` reutilizaveis.
-- Padronizar foco, tecla Esc, travamento de rolagem, confirmacao destrutiva e area de toque.
+- `AppDialog` reutilizavel com foco inicial, ciclo de Tab, tecla Esc, travamento de rolagem e folha inferior no celular.
+- Ainda criar `MobileSheet`, `FilterBar` e `ActionButton` para concluir a padronizacao visual.
 - Converter dialogos antigos gradualmente sem interromper fluxos existentes.
 
 ## 3. Escala diaria
@@ -59,7 +60,7 @@ Este arquivo transforma a revisao de UX em trabalho executavel. Nenhuma etapa de
 
 ### Pendente
 
-- Paginar na API com `page`, `pageSize`, `type`, `query`, `dateFrom`, `dateTo` e totais por tipo.
+- Paginacao remota concluida com `page`, `pageSize`, `type`, `query`, `dateFrom`, `dateTo` e totais por tipo.
 - Adicionar filtros rapidos: ativos hoje, proximos 7 dias, encerrados, com conflito e sem requerimento.
 - Manter lista estavel durante scroll e permitir duplicar/continuar cadastro de afastamentos.
 
@@ -109,7 +110,7 @@ Este arquivo transforma a revisao de UX em trabalho executavel. Nenhuma etapa de
 
 ### Pendente
 
-- Paginar historico de HE e auditoria no servidor; permitir intervalo de datas, usuario e selecao multipla de sugestoes.
+- Auditoria geral paginada no servidor; falta paginar o historico de HE e incluir intervalo de datas, usuario e selecao multipla de sugestoes.
 - Fazer validacao abrir o problema diretamente na celula; separar validacao diurna/noturna.
 - Testar PDF com escala real de mais de 200 GMs em Chrome e Edge e ajustar quebras A4.
 

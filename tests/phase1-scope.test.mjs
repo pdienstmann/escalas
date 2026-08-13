@@ -118,6 +118,18 @@ test("large movement lists paginate remotely without mounting every record at on
   assert.match(styles, /\.movement-pagination/);
 });
 
+test("audit history uses the same server pagination and date-scoped filters", () => {
+  const dashboard = readFileSync(resolve("app/history-dashboard.tsx"), "utf8");
+  const api = readFileSync(resolve("app/api/history/route.ts"), "utf8");
+  const dialog = readFileSync(resolve("app/app-dialog.tsx"), "utf8");
+  assert.match(dashboard, /useModuleUiState\("historico", date/);
+  assert.match(dashboard, /pageSize: "40"/);
+  assert.match(dashboard, /history-pagination/);
+  assert.match(api, /LIMIT \? OFFSET \?/);
+  assert.match(api, /meta:\{page,pageSize,total/);
+  assert.match(dialog, /keepFocusInside/);
+});
+
 test("shared dialogs and saved module filters work across the operational pages", () => {
   const dialog = readFileSync(resolve("app/app-dialog.tsx"), "utf8");
   const state = readFileSync(resolve("app/use-module-ui-state.ts"), "utf8");
