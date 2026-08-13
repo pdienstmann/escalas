@@ -24,7 +24,23 @@ export type OperationalGroupMember = {
   group_short_name?: string | null;
   group_color?: string | null;
   group_sort_order?: number;
+  pattern_id?: number | null;
+  vehicle_id?: number | null;
 };
+
+/** Vehicles owned by the applied group composition have one visual home. */
+export function operationalGroupVehicleIds(members: OperationalGroupMember[]) {
+  const ids = new Set<number>();
+  for (const member of members) {
+    if (String(member.resource_kind) === "vehicle" && Number(member.resource_id) > 0) {
+      ids.add(Number(member.resource_id));
+    }
+    if (member.pattern_id != null && Number(member.vehicle_id) > 0) {
+      ids.add(Number(member.vehicle_id));
+    }
+  }
+  return ids;
+}
 
 export const OPERATIONAL_GROUP_DEFAULTS = [
   { name: "GESCOM", short_name: "GESCOM", color: "#1769aa", sort_order: 10 },

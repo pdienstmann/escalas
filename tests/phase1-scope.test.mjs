@@ -17,7 +17,7 @@ import { orderAssignmentsInResourceCell, orderedResourceGuardIds } from "../lib/
 import { suggestionPosition } from "../lib/suggestion-position.ts";
 import { compactRequestReference } from "../lib/request-reference.ts";
 import { copiedBlockStatus } from "../lib/copy-rules.ts";
-import { operationalGroupLabel, operationalGroupOrder, operationalTeamLabel } from "../lib/operational-groups.ts";
+import { operationalGroupLabel, operationalGroupOrder, operationalGroupVehicleIds, operationalTeamLabel } from "../lib/operational-groups.ts";
 import { operationalGroupAnchorShift, operationalGroupDurationHours, operationalGroupInterval, operationalGroupMemberCoversShift, timeAfterHours } from "../lib/operational-group-schedule.ts";
 import { normalizeLeaveDisplayName, normalizeLeaveName, preferredLeaveNameMatch } from "../lib/leave-name.ts";
 
@@ -253,6 +253,30 @@ test("operational groups are editable and can classify existing resources", () =
   assert.match(catalog, /Grupamentos e equipes/);
   assert.match(catalog, /Vincular recurso/);
   assert.match(readFileSync(resolve("app/live-schedule.tsx"), "utf8"), /Filtrar por grupamento operacional/);
+});
+
+test("vehicles used by the applied operational group appear only in the group section", () => {
+  assert.deepEqual(
+    [...operationalGroupVehicleIds([
+      { id: 1, group_id: 1, resource_kind: "vehicle", resource_id: 637 },
+      { id: 2, group_id: 1, resource_kind: "guard", resource_id: 10, pattern_id: 2, vehicle_id: 638 },
+      { id: 3, group_id: 1, resource_kind: "guard", resource_id: 11, vehicle_id: 639 },
+    ])].sort((a, b) => a - b),
+    [637, 638],
+  );
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  assert.match(schedule, /operationalGroupOwnedVehicleIds\.has\(Number\(x\.r\.id\)\)/);
+});
+
+test("pattern vehicles expose a direct removable action with grouped undo", () => {
+  const dashboard = readFileSync(resolve("app/patterns-dashboard.tsx"), "utf8");
+  const api = readFileSync(resolve("app/api/patterns/route.ts"), "utf8");
+  const history = readFileSync(resolve("app/api/history/route.ts"), "utf8");
+  assert.match(dashboard, /className="pattern-resource-remove"/);
+  assert.match(dashboard, /action: "delete_resource_slots"/);
+  assert.match(api, /entityType: "pattern_resource_slots"/);
+  assert.match(history, /type === "pattern_resource_slots"/);
+  assert.match(history, /patternSlotRestore/);
 });
 
 test("section headers expose resource counts without removing their inline actions", () => {

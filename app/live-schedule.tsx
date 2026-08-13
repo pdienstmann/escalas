@@ -5,7 +5,7 @@ import { ScheduleNav } from "./schedule-nav";
 import { useScheduleDate } from "./use-schedule-date";
 import { formatScheduleDate } from "../lib/schedule-date";
 import { orderScheduleResources } from "../lib/schedule-sections";
-import { operationalGroupLabel, operationalGroupOrder, operationalTeamLabel, operationalTeamOrder } from "../lib/operational-groups";
+import { operationalGroupLabel, operationalGroupOrder, operationalGroupVehicleIds, operationalTeamLabel, operationalTeamOrder } from "../lib/operational-groups";
 import {
   groupRedeploymentAssignments,
   mergeScheduleAssignments,
@@ -303,6 +303,10 @@ export function LiveSchedule() {
     }
     return map;
   }, [operationalGroupMembers]);
+  const operationalGroupOwnedVehicleIds = useMemo(
+    () => operationalGroupVehicleIds((operationalGroupMembers || []) as Parameters<typeof operationalGroupVehicleIds>[0]),
+    [operationalGroupMembers],
+  );
   const resourceOperationalMeta = useCallback((kind: "post" | "vehicle", resource: Rec) => {
     const member = operationalGroupByResource.get(`${kind}:${resource.id}`);
     return {
@@ -401,6 +405,9 @@ export function LiveSchedule() {
     if (!data) return [];
     const q = deferredQuery.toLowerCase().trim();
     const filtered = orderScheduleResources(data.vehicles, data.posts, data.sections).filter((x) => {
+      // Recursos da composição aplicada do grupamento aparecem somente na
+      // seção do próprio grupamento, sem uma segunda linha convencional.
+      if (x.kind === "vehicle" && operationalGroupOwnedVehicleIds.has(Number(x.r.id))) return false;
       const meta = resourceOperationalMeta(x.kind, x.r);
       if (activeGroupFilter !== "all" && meta.group !== activeGroupFilter) return false;
       const text = `${x.r.name || ""} ${x.r.prefix || ""} ${x.r.zone || ""} ${x.r.group_name || ""} ${x.section} ${meta.group || ""} ${meta.team || ""}`
@@ -429,7 +436,7 @@ export function LiveSchedule() {
       operationalTeamOrder({ ...left.r, name: resourceOperationalMeta(left.kind, left.r).team }) - operationalTeamOrder({ ...right.r, name: resourceOperationalMeta(right.kind, right.r).team }) ||
       String(left.r.prefix || left.r.name || "").localeCompare(String(right.r.prefix || right.r.name || ""), "pt-BR"),
     );
-  }, [activeGroupFilter, assignmentIndex, data, deferredQuery, resourceOperationalMeta, view]);
+  }, [activeGroupFilter, assignmentIndex, data, deferredQuery, operationalGroupOwnedVehicleIds, resourceOperationalMeta, view]);
   const gridResources = useMemo(() => {
     const firstSectionOrder = new Map<string, number>();
     let nextSectionOrder = 0;

@@ -90,6 +90,8 @@ export async function POST(request: Request) {
     else if (action === "update" && before) statements.push(patternSlotUpdate(before,id));
     else if (action === "delete" && before) statements.push(patternSlotInsert(before,id));
     else return Response.json({error:"Não foi possível reconstruir esta posição do padrão."},{status:409});
+  } else if (type === "pattern_resource_slots" && action === "delete" && before && Array.isArray(before.slots)) {
+    for (const slot of before.slots as Row[]) statements.push(patternSlotRestore(slot));
   } else if (type === "pattern_config" && before) {
     statements.push(env.DB.prepare("UPDATE shift_patterns SET anchor_date=?,updated_at=CURRENT_TIMESTAMP WHERE active=1").bind(before.anchor_date));
   } else if (type === "notice") {
@@ -147,5 +149,8 @@ function catalogRestore(type:string,row:Row,id:number) {
 }
 function patternSlotUpdate(row:Row,id:number){return env.DB.prepare("UPDATE pattern_slots SET pattern_id=?,guard_id=?,post_id=?,vehicle_id=?,shift=?,role=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(row.pattern_id,row.guard_id,row.post_id,row.vehicle_id,row.shift||null,row.role,id)}
 function patternSlotInsert(row:Row,id:number){return env.DB.prepare("INSERT INTO pattern_slots (id,pattern_id,guard_id,post_id,vehicle_id,shift,role) VALUES (?,?,?,?,?,?,?)").bind(id,row.pattern_id,row.guard_id,row.post_id,row.vehicle_id,row.shift||null,row.role)}
+function patternSlotRestore(row:Row){return env.DB.prepare(`INSERT INTO pattern_slots (id,pattern_id,guard_id,post_id,vehicle_id,shift,role)
+  VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET pattern_id=excluded.pattern_id,guard_id=excluded.guard_id,post_id=excluded.post_id,vehicle_id=excluded.vehicle_id,shift=excluded.shift,role=excluded.role,updated_at=CURRENT_TIMESTAMP`)
+  .bind(row.id,row.pattern_id,row.guard_id,row.post_id,row.vehicle_id,row.shift||null,row.role)}
 function noticeUpdate(row:Row,id:number){return env.DB.prepare("UPDATE operational_notices SET effective_date=?,title=?,details=?,status=?,acknowledged_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(row.effective_date,row.title,row.details,row.status,row.acknowledged_at,id)}
 function noticeInsert(row:Row,id:number){return env.DB.prepare("INSERT INTO operational_notices (id,effective_date,title,details,status,acknowledged_at) VALUES (?,?,?,?,?,?)").bind(id,row.effective_date,row.title,row.details,row.status,row.acknowledged_at)}

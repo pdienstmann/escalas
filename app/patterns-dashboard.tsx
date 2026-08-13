@@ -360,6 +360,12 @@ export function PatternsDashboard() {
                   onAddSlot={addSlot}
                   onAddResource={addResource}
                   onDelete={(slot) => confirm(`Remover ${slot.guard_name} deste padrão?`) && void action({ action: "delete_slot", id: slot.id })}
+                  onDeleteResource={(resource) => {
+                    const occupants = resource.members.length === 1 ? "1 GM" : `${resource.members.length} GMs`;
+                    if (confirm(`Remover a viatura ${resource.label} deste padrão? ${occupants} vinculados também serão retirados do padrão, sem apagar seus cadastros.`)) {
+                      void action({ action: "delete_resource_slots", patternId: pattern.id, resourceKind: resource.kind, resourceId: Number(resource.key.split(":")[1]) });
+                    }
+                  }}
                   onMove={moveSlot}
                 />
               ))}
@@ -377,7 +383,7 @@ export function PatternsDashboard() {
   );
 }
 
-function PatternBoard({ pattern, data, search, showEmpty, busy, memberEditing, addDestination, onEdit, onAdd, onSave, onAddSlot, onAddResource, onDelete, onMove }: {
+function PatternBoard({ pattern, data, search, showEmpty, busy, memberEditing, addDestination, onEdit, onAdd, onSave, onAddSlot, onAddResource, onDelete, onDeleteResource, onMove }: {
   pattern: Rec;
   data: Data;
   search: string;
@@ -391,6 +397,7 @@ function PatternBoard({ pattern, data, search, showEmpty, busy, memberEditing, a
   onAddSlot: (event: FormEvent<HTMLFormElement>, patternId: number) => void;
   onAddResource: (body: Record<string, unknown>) => Promise<boolean>;
   onDelete: (slot: Rec) => void;
+  onDeleteResource: (resource: Resource) => void;
   onMove: (slotId: number, patternId: number, destination: string) => void;
 }) {
   const [resourceEditing, setResourceEditing] = useState<{ kind: "post" | "vehicle"; section: string } | null>(null);
@@ -412,7 +419,7 @@ function PatternBoard({ pattern, data, search, showEmpty, busy, memberEditing, a
           const resourceIssues = issuesForResource(issues, resource.key);
           const addKey = `${addKeyPrefix}${resource.key}`;
           return <article className={`pattern-resource kind-${resource.kind} ${resourceIssues.length ? "has-warning" : ""}`} key={resource.key} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; }} onDrop={(event) => dropPatternMember(event, patternId, resource.key, onMove)}>
-            <header><span aria-hidden="true">{resource.kind === "vehicle" ? "🚓" : "●"}</span><div><b>{resource.label}</b><small>{resource.detail}</small></div><strong>{resource.members.length}</strong></header>
+            <header><span aria-hidden="true">{resource.kind === "vehicle" ? patternVehicleIcon(String(resource.type || "other")) : "●"}</span><div><b>{resource.label}</b><small>{resource.detail}</small></div><span className="pattern-resource-head-actions"><strong>{resource.members.length}</strong>{resource.kind === "vehicle" && resource.members.length > 0 && <button type="button" className="pattern-resource-remove" disabled={busy} aria-label={`Remover ${resource.label} deste padrão`} title="Remover viatura deste padrão" onClick={() => onDeleteResource(resource)}>×</button>}</span></header>
             {resourceIssues.length > 0 && <div className="pattern-resource-alert">{resourceIssues.map((issue) => issue.message).join(" · ")}</div>}
             <div className="pattern-resource-members">{resource.members.map((member) => memberEditing === Number(member.id) ? <form className="pattern-member-edit" key={String(member.id)} onSubmit={(event) => onSave(event, Number(member.id))}><select name="guardId" defaultValue={String(member.guard_id)} aria-label="GM">{data.guards.map((guard) => <option key={String(guard.id)} value={String(guard.id)}>{guard.name} · {guard.registration}</option>)}</select><select name="destination" defaultValue={resource.key} aria-label="Destino"><DestinationOptions data={data} /></select><select name="shift" defaultValue={String(member.shift || "")} aria-label="Turno do período"><option value="">Ambos os turnos</option>{pattern.period === "day" ? <><option value="2">2º turno (07–13)</option><option value="3">3º turno (13–19)</option></> : <><option value="4">4º turno (19–01)</option><option value="1">1º turno (01–07)</option></>}</select><select name="role" defaultValue={String(member.role)} aria-label="Função"><RoleOptions /></select><footer><button type="button" onClick={() => onEdit(null)}>Cancelar</button><button className="save" disabled={busy}>Salvar</button><button type="button" className="remove-slot" disabled={busy} onClick={() => onDelete(member)}>Remover</button></footer></form> : <button type="button" draggable className="pattern-member" key={String(member.id)} onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/pattern-slot", String(member.id)); }} onClick={() => onEdit(Number(member.id))}><span className={`pattern-role ${String(member.role)}`}>{roleLabel(String(member.role))}</span><b>{member.guard_name}</b><small>{member.registration} · {member.shift ? shiftLabel(String(member.shift)) : "ambos os turnos"} · arraste ou clique para editar</small></button>)}</div>
             {addDestination === addKey ? <form className="pattern-resource-add" onSubmit={(event) => onAddSlot(event, patternId)}><input type="hidden" name="destination" value={resource.key} /><select name="guardId" required defaultValue=""><option value="">Selecione o GM</option>{data.guards.filter((guard) => !members.some((member) => Number(member.guard_id) === Number(guard.id))).map((guard) => <option key={String(guard.id)} value={String(guard.id)}>{guard.name} · {guard.registration}</option>)}</select><select name="shift" defaultValue="" aria-label="Turno do período"><option value="">Ambos os turnos</option>{pattern.period === "day" ? <><option value="2">2º turno (07–13)</option><option value="3">3º turno (13–19)</option></> : <><option value="4">4º turno (19–01)</option><option value="1">1º turno (01–07)</option></>}</select><select name="role" defaultValue={suggestRole(resource)}><RoleOptions /></select><footer><button type="button" onClick={() => onAdd("")}>Cancelar</button><button className="save" disabled={busy}>Adicionar</button></footer></form> : <button type="button" className="pattern-add-here" onClick={() => onAdd(addKey)}>+ Adicionar GM neste local</button>}

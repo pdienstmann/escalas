@@ -324,6 +324,25 @@ export async function POST(request: Request) {
       const auditId = await writeAudit(request,{action:"delete",entityType:"pattern_slot",entityId:Number(body.id),summary:"Removeu uma posição do padrão 12x36",before,undoable:true});
       return Response.json({ ok: true, auditId, undoable: true });
     }
+    if (body.action === "delete_resource_slots") {
+      const patternId = Number(body.patternId), resourceId = Number(body.resourceId), resourceKind = String(body.resourceKind || "");
+      if (!patternId || !resourceId || !["post", "vehicle"].includes(resourceKind)) {
+        return Response.json({ error: "Destino do padrão inválido." }, { status: 400 });
+      }
+      const column = resourceKind === "vehicle" ? "vehicle_id" : "post_id";
+      const before = (await env.DB.prepare(`SELECT * FROM pattern_slots WHERE pattern_id=? AND ${column}=? ORDER BY id`).bind(patternId, resourceId).all<Record<string, unknown>>()).results;
+      if (!before.length) return Response.json({ error: "Este recurso já não possui GMs neste padrão." }, { status: 404 });
+      await env.DB.prepare(`DELETE FROM pattern_slots WHERE pattern_id=? AND ${column}=?`).bind(patternId, resourceId).run();
+      const auditId = await writeAudit(request, {
+        action: "delete",
+        entityType: "pattern_resource_slots",
+        entityId: `${patternId}:${resourceKind}:${resourceId}`,
+        summary: `Removeu ${resourceKind === "vehicle" ? "uma viatura" : "um posto"} e sua composição do padrão 12x36`,
+        before: { slots: before },
+        undoable: true,
+      });
+      return Response.json({ ok: true, auditId, undoable: true, message: "Viatura removida somente deste padrão. Os GMs e o cadastro da viatura foram preservados." });
+    }
     if(body.action==="weekly_save") {
       const d=destination(body),id=Number(body.id||0),guardId=Number(body.guardId);
       const activeGuard=await env.DB.prepare("SELECT id FROM guards WHERE id=? AND active=1").bind(guardId).first();
