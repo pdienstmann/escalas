@@ -12,7 +12,7 @@ import {
 import { orderScheduleResources } from "../lib/schedule-sections.ts";
 import { assignmentOverlapsShift, coveredOperationalShifts, formatHoursDuration, fullPeriodWindow, fullPeriodShifts, mapAssignmentSegmentToShift, splitExtensionWindow } from "../lib/shift-rules.ts";
 import { rankGuardSuggestions, describeReasons } from "../lib/suggest-gm.ts";
-import { groupRedeploymentAssignments, mergeScheduleAssignments } from "../lib/schedule-state.ts";
+import { dailyScheduleResourceKeys, groupRedeploymentAssignments, mergeScheduleAssignments } from "../lib/schedule-state.ts";
 import { orderAssignmentsInResourceCell, orderedResourceGuardIds } from "../lib/schedule-lanes.ts";
 import { suggestionPosition } from "../lib/suggestion-position.ts";
 import { compactRequestReference } from "../lib/request-reference.ts";
@@ -1739,12 +1739,33 @@ test("operational group GM cards keep contextual actions and offer same-group HE
   assert.match(schedule, /\|\| memberAssignments\[0\]/);
   assert.match(schedule, /draggable=\{Boolean\(actionAssignment\)\}/);
   assert.match(schedule, /dataTransfer\.setData\("text\/assignment"/);
+  assert.match(schedule, /onMoveCell: \(assignment: Rec, targetShift: string, sourceShift\?: string\)/);
+  assert.match(schedule, /onMoveCell\(dragged, shift\.id, sourceShift\)/);
+  assert.match(schedule, /memberVisibleInShift\(member, shift\.id\)/);
+  assert.match(schedule, /live-person operational-groups-grid-gm/);
   assert.match(schedule, /assignment \? assignmentDisplayInShift\(assignment, date, shift\.id\) : configuredTime/);
   assert.match(schedule, /const teamVehicleIds = \[\.\.\.new Set/);
   assert.match(schedule, /NÃO LANÇADO NESTA ESCALA/);
   assert.doesNotMatch(schedule, /\+ VTR \/ dupla/);
   assert.doesNotMatch(schedule, /"Selecionar destino"/);
   assert.match(styles, /\.group-he-suggestions/);
+});
+
+test("daily scale hides catalog resources that are absent from the applied pattern and day adjustments", () => {
+  const keys = dailyScheduleResourceKeys(
+    [
+      { id: 1, post_id: 10, vehicle_id: null },
+      { id: 2, post_id: null, vehicle_id: 1302 },
+    ],
+    [
+      { id: 3, resource_kind: "vehicle", resource_id: 640 },
+      { id: 4, resource_kind: "guard", resource_id: 9, pattern_id: 2, vehicle_id: 641 },
+    ],
+  );
+  assert.deepEqual([...keys].sort(), ["post:10", "vehicle:1302", "vehicle:640", "vehicle:641"]);
+  assert.equal(keys.has("vehicle:9999"), false);
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  assert.match(schedule, /dailyResourceKeys\.has\(`\$\{x\.kind\}:\$\{Number\(x\.r\.id\)\}`\)/);
 });
 
 test("pattern editor separates day and night comparison and protects replacement", () => {

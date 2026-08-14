@@ -50,6 +50,27 @@ function hasDestination(assignment: AssignmentRecord) {
   return assignment.post_id != null || assignment.vehicle_id != null;
 }
 
+export function dailyScheduleResourceKeys(
+  assignments: AssignmentRecord[],
+  operationalGroupMembers: AssignmentRecord[],
+) {
+  const keys = new Set<string>();
+  for (const assignment of assignments) {
+    if (assignment.post_id != null) keys.add(`post:${Number(assignment.post_id)}`);
+    if (assignment.vehicle_id != null) keys.add(`vehicle:${Number(assignment.vehicle_id)}`);
+  }
+  for (const member of operationalGroupMembers) {
+    const kind = String(member.resource_kind || "");
+    if (["post", "vehicle"].includes(kind) && Number(member.resource_id) > 0) {
+      keys.add(`${kind}:${Number(member.resource_id)}`);
+    }
+    if (member.pattern_id != null && Number(member.vehicle_id) > 0) {
+      keys.add(`vehicle:${Number(member.vehicle_id)}`);
+    }
+  }
+  return keys;
+}
+
 export function mergeScheduleAssignments(
   active: AssignmentRecord[],
   availableForRedeployment: AssignmentRecord[],
