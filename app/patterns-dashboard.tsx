@@ -72,6 +72,18 @@ function writePatternCache(date: string, value: Data) {
   }
 }
 
+function invalidateScheduleCaches() {
+  if (typeof window === "undefined") return;
+  try {
+    for (let index = window.sessionStorage.length - 1; index >= 0; index -= 1) {
+      const key = window.sessionStorage.key(index);
+      if (key?.startsWith("gmnh:schedule:")) window.sessionStorage.removeItem(key);
+    }
+  } catch {
+    // Cache is optional. A storage restriction must not block weekly updates.
+  }
+}
+
 export function PatternsDashboard() {
   const { date, setDate, hrefFor } = useScheduleDate();
   const [data, setData] = useState<Data | null>(null);
@@ -143,6 +155,9 @@ export function PatternsDashboard() {
       const json = (await response.json()) as { error?: string; message?: string; auditId?: number; undoable?: boolean };
       setMessage(response.ok ? json.message || "Padrão atualizado." : json.error || "Não foi possível salvar.");
       if (response.ok) {
+        if (body.action === "weekly_save" || body.action === "weekly_delete") {
+          invalidateScheduleCaches();
+        }
         if (json.undoable && json.auditId) setLastUndo({ id: Number(json.auditId), label: "Desfazer última alteração" });
         else setLastUndo(null);
         await load(true);

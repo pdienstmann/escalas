@@ -18,6 +18,7 @@ import { ensureOperationalGroups } from "../../../lib/operational-groups-db";
 export const dynamic = "force-dynamic";
 
 let dailyGroupContextReady: Promise<void> | null = null;
+let scheduleDisplaySettingsReady: Promise<void> | null = null;
 
 
 const demoGuards = [
@@ -335,6 +336,7 @@ async function seedSchedule(date: string, scheduleId: number) {
 
 async function ensureBase(date: string) {
   await ensureDailyGroupContext();
+  await ensureScheduleDisplaySettings();
   // An already generated schedule only needs the small, date-specific weekly
   // reconciliation. Re-running every schema/catalog check on each page visit
   // made ordinary date changes take several seconds on D1.
@@ -393,6 +395,29 @@ async function ensureBase(date: string) {
       ).bind("Local retirado desta escala — aguardando remanejamento", schedule.id, item.resource_id)));
     }
   }
+}
+
+async function ensureScheduleDisplaySettings() {
+  if (!scheduleDisplaySettingsReady) {
+    scheduleDisplaySettingsReady = (async () => {
+      const columns = new Set(
+        (await env.DB.prepare("PRAGMA table_info(schedules)").all<{ name: string }>()).results.map((column) => column.name),
+      );
+      if (!columns.has("hide_empty_resources")) {
+        try {
+          await env.DB.prepare("ALTER TABLE schedules ADD COLUMN hide_empty_resources INTEGER NOT NULL DEFAULT 0").run();
+        } catch (error) {
+          // Two cold Worker isolates may observe the old schema together. The
+          // second ALTER is harmless once the first isolate created the column.
+          if (!String(error).toLowerCase().includes("duplicate column")) throw error;
+        }
+      }
+    })().catch((error) => {
+      scheduleDisplaySettingsReady = null;
+      throw error;
+    });
+  }
+  await scheduleDisplaySettingsReady;
 }
 
 async function ensureDailyGroupContext() {
@@ -865,7 +890,18 @@ export async function POST(request: Request) {
     return Response.json({ error: "Não autorizado" }, { status: 401 });
   await ensureAssignmentLaneOrder();
   await ensureDailyGroupContext();
+  await ensureScheduleDisplaySettings();
   const b = (await request.json()) as Record<string, string | number | boolean | null>;
+  if (b.action === "set_empty_resource_visibility") {
+    const scheduleId = Number(b.scheduleId || 0);
+    const hide = Boolean(b.hide);
+    const before = await env.DB.prepare("SELECT id,date,hide_empty_resources FROM schedules WHERE id=?").bind(scheduleId).first<Record<string,unknown>>();
+    if (!before) return Response.json({ error: "Escala não encontrada." }, { status: 404 });
+    await env.DB.prepare("UPDATE schedules SET hide_empty_resources=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(hide ? 1 : 0,scheduleId).run();
+    const schedule = await env.DB.prepare("SELECT id,date,hide_empty_resources,updated_at FROM schedules WHERE id=?").bind(scheduleId).first<Record<string,unknown>>();
+    const auditEventId = await writeAudit(request,{action:"update",entityType:"schedule_display",entityId:scheduleId,summary:hide?"Ocultou locais sem GM na escala e no PDF":"Exibiu todos os locais previstos na escala e no PDF",before,after:schedule,undoable:false});
+    return Response.json({ok:true,schedule,auditEventId,message:hide?"Locais sem GM foram recolhidos e também não aparecerão no PDF.":"Todos os locais previstos voltaram a aparecer na escala e no PDF."});
+  }
   if (b.action === "create_service_adjustment") {
     await ensureServiceAdjustmentsTable();
     const subtype = String(b.subtype || "");

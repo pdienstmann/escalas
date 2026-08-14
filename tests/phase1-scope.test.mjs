@@ -1834,3 +1834,23 @@ test("group cards can move across shifts, add a vehicle crew and extend night wo
   assert.match(api, /dailyOperationalGroupMembers/);
   assert.match(api, /operationalGroupId/);
 });
+
+test("weekly regime changes invalidate previously viewed daily schedules", () => {
+  const dashboard = readFileSync(resolve("app/patterns-dashboard.tsx"), "utf8");
+  assert.match(dashboard, /function invalidateScheduleCaches\(\)/);
+  assert.match(dashboard, /key\?\.startsWith\("gmnh:schedule:"\)/);
+  assert.match(dashboard, /body\.action === "weekly_save" \|\| body\.action === "weekly_delete"/);
+});
+
+test("empty resources can be collapsed per schedule and stay out of the PDF", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const api = readFileSync(resolve("app/api/schedule/route.ts"), "utf8");
+  const print = readFileSync(resolve("app/print-schedule.tsx"), "utf8");
+  assert.match(api, /hide_empty_resources/);
+  assert.match(api, /set_empty_resource_visibility/);
+  assert.match(schedule, /const emptyResourceCount = useMemo/);
+  assert.match(schedule, /Recolher \$\{emptyResourceCount\} locais vazios/);
+  assert.match(schedule, /hideEmptyResources && \(resourceAssignmentIndex/);
+  assert.match(print, /data\.schedule\?\.hide_empty_resources/);
+  assert.match(print, /orderedResources\.filter/);
+});

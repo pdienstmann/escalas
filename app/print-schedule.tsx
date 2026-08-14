@@ -5,7 +5,7 @@ import { useScheduleDate } from "./use-schedule-date";
 import { formatScheduleDate, withScheduleDate } from "../lib/schedule-date";
 import { orderScheduleResources } from "../lib/schedule-sections";
 import { compactRequestReference } from "../lib/request-reference";
-import { assignmentOverlapsShift, operationalShiftWindow } from "../lib/shift-rules";
+import { assignmentOverlapsShift, operationalShiftWindow, SHIFT_DEFS } from "../lib/shift-rules";
 import { isMotorcycleType } from "../lib/crew-rules";
 import { operationalGroupMemberCoversShift } from "../lib/operational-group-schedule";
 type Rec = Record<string, string | number | null>;
@@ -14,6 +14,7 @@ type OperationVehicle = Rec & { id:number; prefix:string; type:string; zone?:str
 type PrintOperation = Rec & { id:number; title:string; starts_at:string; ends_at:string; vehicles:OperationVehicle[]; generalSlots:OperationSlot[] };
 type State = {
   date: string;
+  schedule?: Rec;
   guards?: Rec[];
   posts: Rec[];
   vehicles: Rec[];
@@ -94,11 +95,17 @@ function PrintPage({
   period: "day" | "night";
   title: string;
 }) {
-  const resources = orderScheduleResources(
+  const orderedResources = orderScheduleResources(
     data.vehicles,
     data.posts,
     data.sections || [],
   );
+  const resources = Number(data.schedule?.hide_empty_resources || 0) === 1
+    ? orderedResources.filter(({kind,r}) => data.assignments.some((assignment) =>
+        (kind === "vehicle" ? Number(assignment.vehicle_id) === Number(r.id) : Number(assignment.post_id) === Number(r.id)) &&
+        SHIFT_DEFS.some((shift) => assignmentOverlapsShift(assignment,data.date,shift.id) && !isGroupOwnedAssignment(data,assignment,shift.id)),
+      ))
+    : orderedResources;
   return (
     <section className="print-page">
       <header>

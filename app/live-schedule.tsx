@@ -423,6 +423,15 @@ export function LiveSchedule() {
       data.operationalGroupMembers || [],
     );
   }, [data]);
+  const hideEmptyResources = Number(data?.schedule?.hide_empty_resources || 0) === 1;
+  const emptyResourceCount = useMemo(() => {
+    if (!data) return 0;
+    return orderScheduleResources(data.vehicles, data.posts, data.sections).filter((item) => {
+      if (!dailyResourceKeys.has(`${item.kind}:${Number(item.r.id)}`)) return false;
+      if (item.kind === "vehicle" && (operationalGroupOwnedVehicleIds.has(Number(item.r.id)) || operationalGroupDailyOwnedVehicleIds.has(Number(item.r.id)))) return false;
+      return (resourceAssignmentIndex.get(resourceAssignmentKey(item.kind,Number(item.r.id))) || []).length === 0;
+    }).length;
+  },[dailyResourceKeys,data,operationalGroupDailyOwnedVehicleIds,operationalGroupOwnedVehicleIds,resourceAssignmentIndex]);
   const resources = useMemo(() => {
     if (!data) return [];
     const q = deferredQuery.toLowerCase().trim();
@@ -433,6 +442,7 @@ export function LiveSchedule() {
       // Recursos da composição aplicada do grupamento aparecem somente na
       // seção do próprio grupamento, sem uma segunda linha convencional.
       if (x.kind === "vehicle" && (operationalGroupOwnedVehicleIds.has(Number(x.r.id)) || operationalGroupDailyOwnedVehicleIds.has(Number(x.r.id)))) return false;
+      if (hideEmptyResources && (resourceAssignmentIndex.get(resourceAssignmentKey(x.kind,Number(x.r.id))) || []).length === 0) return false;
       const meta = resourceOperationalMeta(x.kind, x.r);
       if (activeGroupFilter !== "all" && meta.group !== activeGroupFilter) return false;
       const text = `${x.r.name || ""} ${x.r.prefix || ""} ${x.r.zone || ""} ${x.r.group_name || ""} ${x.section} ${meta.group || ""} ${meta.team || ""}`
@@ -461,7 +471,7 @@ export function LiveSchedule() {
       operationalTeamOrder({ ...left.r, name: resourceOperationalMeta(left.kind, left.r).team }) - operationalTeamOrder({ ...right.r, name: resourceOperationalMeta(right.kind, right.r).team }) ||
       String(left.r.prefix || left.r.name || "").localeCompare(String(right.r.prefix || right.r.name || ""), "pt-BR"),
     );
-  }, [activeGroupFilter, assignmentIndex, dailyResourceKeys, data, deferredQuery, operationalGroupDailyOwnedVehicleIds, operationalGroupOwnedVehicleIds, resourceOperationalMeta, view]);
+  }, [activeGroupFilter, assignmentIndex, dailyResourceKeys, data, deferredQuery, hideEmptyResources, operationalGroupDailyOwnedVehicleIds, operationalGroupOwnedVehicleIds, resourceAssignmentIndex, resourceOperationalMeta, view]);
   const gridResources = useMemo(() => {
     const firstSectionOrder = new Map<string, number>();
     let nextSectionOrder = 0;
@@ -543,6 +553,7 @@ export function LiveSchedule() {
             current
               ? {
                   ...current,
+                  schedule: j.schedule ? { ...current.schedule, ...j.schedule } : current.schedule,
                   ...mergeScheduleAssignments(
                     current.assignments,
                     current.availableForRedeployment,
@@ -1404,6 +1415,7 @@ export function LiveSchedule() {
           <button type="button" className={density==="compact"?"active":""} aria-pressed={density==="compact"} onClick={()=>setDensity("compact")}>Compacto</button>
           <button type="button" className={density==="detailed"?"active":""} aria-pressed={density==="detailed"} onClick={()=>setDensity("detailed")}>Detalhado</button>
         </div>
+        <button type="button" className={`empty-resource-toggle ${hideEmptyResources?"active":""}`} aria-pressed={hideEmptyResources} disabled={saving||emptyResourceCount===0} title="A preferência vale para esta escala e para o PDF" onClick={()=>void postAssignment({action:"set_empty_resource_visibility",scheduleId:data.schedule.id,hide:!hideEmptyResources})}>{hideEmptyResources?`Mostrar ${emptyResourceCount} locais vazios`:`Recolher ${emptyResourceCount} locais vazios`}</button>
         <label className="section-jump">
           <span>Ir para área</span>
           <select
