@@ -265,6 +265,37 @@ export async function applyWeeklyToSchedule(db:D1Database,date:string,scheduleId
   return statements.length;
 }
 
+/** Keep an existing day synchronized with the current weekly registry. */
+export async function reconcileWeeklySchedule(db:D1Database,date:string,scheduleId:number) {
+  const weekday=new Date(`${date}T12:00:00Z`).getUTCDay();
+  const mismatch=await db.prepare(`SELECT
+    (SELECT COUNT(*) FROM assignments a WHERE a.schedule_id=? AND (
+      a.work_kind='weekly' AND NOT EXISTS (
+        SELECT 1 FROM weekly_slots w JOIN guards g ON g.id=w.guard_id AND g.active=1
+        WHERE w.active=1 AND w.guard_id=a.guard_id AND instr(','||w.weekdays||',',','||?||',')>0
+          AND COALESCE(w.post_id,0)=COALESCE(a.post_id,0) AND COALESCE(w.vehicle_id,0)=COALESCE(a.vehicle_id,0)
+          AND a.starts_at=?||'T'||w.starts_at AND substr(a.regular_ends_at,12,5)=w.regular_end
+          AND substr(a.ends_at,12,5)=COALESCE(w.overtime_end,w.regular_end)
+      )
+      OR COALESCE(a.work_kind,'shift') NOT IN ('weekly','overtime_extension','time_bank_positive') AND EXISTS (
+        SELECT 1 FROM weekly_slots w WHERE w.active=1 AND w.guard_id=a.guard_id
+      )
+    )) +
+    (SELECT COUNT(*) FROM weekly_slots w JOIN guards g ON g.id=w.guard_id AND g.active=1
+      WHERE w.active=1 AND instr(','||w.weekdays||',',','||?||',')>0 AND NOT EXISTS (
+        SELECT 1 FROM assignments a WHERE a.schedule_id=? AND a.guard_id=w.guard_id AND a.work_kind='weekly'
+          AND COALESCE(a.post_id,0)=COALESCE(w.post_id,0) AND COALESCE(a.vehicle_id,0)=COALESCE(w.vehicle_id,0)
+          AND a.starts_at=?||'T'||w.starts_at AND substr(a.regular_ends_at,12,5)=w.regular_end
+          AND substr(a.ends_at,12,5)=COALESCE(w.overtime_end,w.regular_end)
+      )) total`).bind(scheduleId,String(weekday),date,String(weekday),scheduleId,date).first<{total:number}>();
+  if(Number(mismatch?.total||0)===0)return 0;
+  await db.prepare(`DELETE FROM assignments WHERE schedule_id=? AND (
+    work_kind='weekly' OR guard_id IN (SELECT guard_id FROM weekly_slots WHERE active=1)
+      AND COALESCE(work_kind,'shift') NOT IN ('overtime_extension','time_bank_positive')
+  )`).bind(scheduleId).run();
+  return applyWeeklyToSchedule(db,date,scheduleId);
+}
+
 /** Replace already generated 12x36 blocks with this GM's weekly routine. */
 export async function reconcileWeeklyGuardSchedules(db:D1Database,guardId:number) {
   await db.prepare(

@@ -1674,6 +1674,10 @@ test("leave imports stay 12x36 while the weekly editor can explicitly convert a 
   const scheduleApi = readFileSync(resolve("app/api/schedule/route.ts"), "utf8");
   assert.match(scheduleApi, /COALESCE\(g\.work_regime,'12x36'\)!='weekly'/);
   assert.match(scheduleApi, /COALESCE\(a\.work_kind,'shift'\) IN \('weekly','overtime_extension','time_bank_positive'\)/);
+  assert.match(scheduleApi, /reconcileWeeklySchedule\(env\.DB, date, existingSchedule\.id\)/);
+  const engine = readFileSync(resolve("lib/pattern-engine.ts"), "utf8");
+  assert.match(engine, /Keep an existing day synchronized with the current weekly registry/);
+  assert.match(engine, /work_kind='weekly' OR guard_id IN \(SELECT guard_id FROM weekly_slots WHERE active=1\)/);
   assert.match(patterns, /Mais de um GM pode ocupar o mesmo posto/);
   assert.match(patterns, /GMs atualmente na escala semanal/);
   assert.match(patterns, /unassignedGuards = shiftGuards\(data\.guards\)/);

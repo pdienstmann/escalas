@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import {
   applyPatternsToSchedule,
-  applyWeeklyToSchedule,
+  reconcileWeeklySchedule,
   ensurePatterns,
   resolvePatternCodes,
 } from "../../../lib/pattern-engine";
@@ -339,7 +339,7 @@ async function ensureBase(date: string) {
     .bind(date)
     .first<{ id: number }>();
   if (existingSchedule) {
-    await applyWeeklyToSchedule(env.DB, date, existingSchedule.id);
+    await reconcileWeeklySchedule(env.DB, date, existingSchedule.id);
     return;
   }
   await ensureServiceAdjustmentsTable();
@@ -379,7 +379,7 @@ async function ensureBase(date: string) {
     .first<{ id: number }>();
   if (schedule) {
     await applyPatternsToSchedule(env.DB, date, schedule.id);
-    await applyWeeklyToSchedule(env.DB,date,schedule.id);
+    await reconcileWeeklySchedule(env.DB,date,schedule.id);
     await seedSchedule(date, schedule.id);
     const exclusions = (await env.DB.prepare(
       "SELECT resource_kind,resource_id FROM schedule_resource_exclusions WHERE schedule_id=?",
