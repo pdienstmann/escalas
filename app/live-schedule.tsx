@@ -5,7 +5,7 @@ import { ScheduleNav } from "./schedule-nav";
 import { useScheduleDate } from "./use-schedule-date";
 import { formatScheduleDate } from "../lib/schedule-date";
 import { orderScheduleResources } from "../lib/schedule-sections";
-import { operationalGroupLabel, operationalGroupOrder, operationalGroupVehicleIds, operationalTeamLabel, operationalTeamOrder } from "../lib/operational-groups";
+import { operationalGroupDailyVehicleIds, operationalGroupLabel, operationalGroupOrder, operationalGroupVehicleIds, operationalTeamLabel, operationalTeamOrder } from "../lib/operational-groups";
 import {
   dailyScheduleResourceKeys,
   groupRedeploymentAssignments,
@@ -94,7 +94,10 @@ type ResourceDialogState = {
   initialShift?: "2" | "4";
   initialMode?: "existing" | "new";
   initialSection?: string;
+  groupId?: number;
+  groupTeamLabel?: string;
 };
+type GroupMovePick = { assignment: Rec; targetShift: string; sourceShift: string; groupId: number; teamLabel: string };
 type OperationalGroupGridProps = {
   date: string;
   groups: Rec[];
@@ -120,6 +123,8 @@ type OperationalGroupGridProps = {
   onDragStart: (assignment: Rec) => void;
   onDragEnd: () => void;
   onMoveCell: (assignment: Rec, targetShift: string, sourceShift?: string) => void;
+  onAddGuard: (groupId: number, teamLabel: string, shift: string, vehicleId?: number) => void;
+  onAddVehicle: (groupId: number, teamLabel: string, shift: string) => void;
   onCloseActions: () => void;
 };
 type SmartEditorCandidate = {
@@ -173,6 +178,7 @@ export function LiveSchedule() {
     [createOpen, setCreateOpen] = useState(false),
     [createKind, setCreateKind] = useState<"guard" | "post" | "vehicle" | "section">("guard"),
     [resourceDialog, setResourceDialog] = useState<ResourceDialogState | null>(null),
+    [groupMovePick, setGroupMovePick] = useState<GroupMovePick | null>(null),
     [addMenuOpen, setAddMenuOpen] = useState(false),
     [movementsExpanded, setMovementsExpanded] = useState(false),
     [redeploymentExpanded, setRedeploymentExpanded] = useState(false),
@@ -309,6 +315,13 @@ export function LiveSchedule() {
     () => operationalGroupVehicleIds((operationalGroupMembers || []) as Parameters<typeof operationalGroupVehicleIds>[0]),
     [operationalGroupMembers],
   );
+  const operationalGroupDailyOwnedVehicleIds = useMemo(
+    () => operationalGroupDailyVehicleIds(
+      (operationalGroupMembers || []) as Parameters<typeof operationalGroupDailyVehicleIds>[0],
+      scheduleAssignments || [],
+    ),
+    [operationalGroupMembers, scheduleAssignments],
+  );
   const resourceOperationalMeta = useCallback((kind: "post" | "vehicle", resource: Rec) => {
     const member = operationalGroupByResource.get(`${kind}:${resource.id}`);
     return {
@@ -419,7 +432,7 @@ export function LiveSchedule() {
       if (!dailyResourceKeys.has(`${x.kind}:${Number(x.r.id)}`)) return false;
       // Recursos da composição aplicada do grupamento aparecem somente na
       // seção do próprio grupamento, sem uma segunda linha convencional.
-      if (x.kind === "vehicle" && operationalGroupOwnedVehicleIds.has(Number(x.r.id))) return false;
+      if (x.kind === "vehicle" && (operationalGroupOwnedVehicleIds.has(Number(x.r.id)) || operationalGroupDailyOwnedVehicleIds.has(Number(x.r.id)))) return false;
       const meta = resourceOperationalMeta(x.kind, x.r);
       if (activeGroupFilter !== "all" && meta.group !== activeGroupFilter) return false;
       const text = `${x.r.name || ""} ${x.r.prefix || ""} ${x.r.zone || ""} ${x.r.group_name || ""} ${x.section} ${meta.group || ""} ${meta.team || ""}`
@@ -448,7 +461,7 @@ export function LiveSchedule() {
       operationalTeamOrder({ ...left.r, name: resourceOperationalMeta(left.kind, left.r).team }) - operationalTeamOrder({ ...right.r, name: resourceOperationalMeta(right.kind, right.r).team }) ||
       String(left.r.prefix || left.r.name || "").localeCompare(String(right.r.prefix || right.r.name || ""), "pt-BR"),
     );
-  }, [activeGroupFilter, assignmentIndex, dailyResourceKeys, data, deferredQuery, operationalGroupOwnedVehicleIds, resourceOperationalMeta, view]);
+  }, [activeGroupFilter, assignmentIndex, dailyResourceKeys, data, deferredQuery, operationalGroupDailyOwnedVehicleIds, operationalGroupOwnedVehicleIds, resourceOperationalMeta, view]);
   const gridResources = useMemo(() => {
     const firstSectionOrder = new Map<string, number>();
     let nextSectionOrder = 0;
@@ -705,7 +718,7 @@ export function LiveSchedule() {
          const [rawId, source] = value.split("|");
          return { guardId: Number(rawId), role: kind === "vehicle" ? roles[index] || "third" : "guard", source: source === "redeploy" ? "redeploy" : "overtime" };
        }).filter((member) => member.guardId > 0);
-      const assignResponse = await fetch("/api/schedule", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "assign_resource_group", scheduleId: data.schedule.id, shift: form.get("shift"), postId: kind === "post" ? resourceId : null, vehicleId: kind === "vehicle" ? resourceId : null, members }) });
+      const assignResponse = await fetch("/api/schedule", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "assign_resource_group", scheduleId: data.schedule.id, shift: form.get("shift"), postId: kind === "post" ? resourceId : null, vehicleId: kind === "vehicle" ? resourceId : null, operationalGroupId: resourceDialog?.groupId || null, operationalTeamLabel: resourceDialog?.groupTeamLabel || null, members }) });
       const assigned = await assignResponse.json();
       setMessage(assignResponse.ok ? assigned.message : assigned.error);
       if (!assignResponse.ok) {
@@ -722,6 +735,7 @@ export function LiveSchedule() {
           : { ...current, ...merged, posts: [...current.posts, entity] };
       });
       setResourceDialog(null);
+      if(resourceDialog?.groupId)await load();
     } catch {
       setMessage("Não foi possível adicionar a equipe. Verifique a conexão e tente novamente.");
     } finally {
@@ -1018,6 +1032,21 @@ export function LiveSchedule() {
     });
     if (moved && !independentOvertime) await reorder();
     else if (moved) setMessage(`${String(assignment.guard_name || "GM")} movido para ${String(kind === "vehicle" ? resource.prefix : resource.name)}.`);
+  }
+  async function moveGroupAssignment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!data || !groupMovePick) return;
+    const form = new FormData(event.currentTarget);
+    const [kindValue, resourceIdValue] = String(form.get("destination") || "").split(":");
+    const kind = kindValue === "post" ? "post" : "vehicle";
+    const resourceId = Number(resourceIdValue);
+    const resource = (kind === "vehicle" ? data.vehicles : data.posts).find((item) => Number(item.id) === resourceId);
+    if (!resource) {
+      setMessage("Selecione um destino disponível para este horário.");
+      return;
+    }
+    await move(groupMovePick.assignment, kind, resource, groupMovePick.targetShift, groupMovePick.sourceShift);
+    setGroupMovePick(null);
   }
   async function saveRedeployment(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -1544,10 +1573,17 @@ export function LiveSchedule() {
                  onDragStart={(assignment) => setDraggingAssignmentId(Number(assignment.id))}
                  onDragEnd={() => setDraggingAssignmentId(null)}
                  onMoveCell={(assignment, targetShift, sourceShift) => {
+                   if (sourceShift && sourceShift !== targetShift) {
+                     const groupMember=operationalGroupByGuardShift.get(`${Number(assignment.guard_id)}:${isDayShift(sourceShift)?"day":"night"}`)||operationalGroupByGuard.get(Number(assignment.guard_id));
+                     setGroupMovePick({assignment,targetShift,sourceShift,groupId:Number(groupMember?.group_id||0),teamLabel:String(groupMember?.team_label||"EQUIPE GERAL")});
+                     return;
+                   }
                    const kind = assignment.vehicle_id != null ? "vehicle" : "post";
                    const resource = (kind === "vehicle" ? [...data.vehicles, ...(data.allVehicles || [])] : data.posts).find((item) => Number(item.id) === Number(kind === "vehicle" ? assignment.vehicle_id : assignment.post_id));
                    if (resource) void move(assignment, kind, resource, targetShift, sourceShift);
                  }}
+                 onAddGuard={(groupId,teamLabel,shift,vehicleId)=>setResourceDialog({kind:"vehicle",initialMode:"existing",initialResourceId:vehicleId,initialShift:isDayShift(shift)?"2":"4",groupId,groupTeamLabel:teamLabel})}
+                 onAddVehicle={(groupId,teamLabel,shift)=>setResourceDialog({kind:"vehicle",initialMode:"existing",initialShift:isDayShift(shift)?"2":"4",groupId,groupTeamLabel:teamLabel})}
                  onCloseActions={() => setContextPick(null)}
                 />;
                 const first = index === 0 || gridResources[index - 1].displaySection !== displaySection;
@@ -1704,12 +1740,27 @@ export function LiveSchedule() {
                }}
                onQuickStatus={quickStatus}
                onCopy={copyAssignment}
+               onSuggestHe={(assignment,shift,member)=>{
+                 const kind=assignment.vehicle_id!=null?"vehicle":"post";
+                 const resource=(kind==="vehicle"?data.vehicles:data.posts).find(item=>Number(item.id)===Number(kind==="vehicle"?assignment.vehicle_id:assignment.post_id));
+                 if(resource)setPick({kind,resource,shift,manualAdd:true,groupId:Number(member.group_id)});
+               }}
                onDetails={(assignment, shift) => {
                  const kind = assignment.vehicle_id != null ? "vehicle" : "post";
                  const resource = (kind === "vehicle" ? data.vehicles : data.posts).find((item) => Number(item.id) === Number(kind === "vehicle" ? assignment.vehicle_id : assignment.post_id));
                  if (resource) setPick({ kind, resource, shift, assignment });
                }}
                onDelete={removeAssignmentSegment}
+               onDragStart={(assignment)=>setDraggingAssignmentId(Number(assignment.id))}
+               onDragEnd={()=>setDraggingAssignmentId(null)}
+               onMoveCell={(assignment,targetShift,sourceShift)=>{
+                 if(sourceShift&&sourceShift!==targetShift){const groupMember=operationalGroupByGuardShift.get(`${Number(assignment.guard_id)}:${isDayShift(sourceShift)?"day":"night"}`)||operationalGroupByGuard.get(Number(assignment.guard_id));setGroupMovePick({assignment,targetShift,sourceShift,groupId:Number(groupMember?.group_id||0),teamLabel:String(groupMember?.team_label||"EQUIPE GERAL")});return;}
+                 const kind=assignment.vehicle_id!=null?"vehicle":"post";
+                 const resource=(kind==="vehicle"?data.vehicles:data.posts).find(item=>Number(item.id)===Number(kind==="vehicle"?assignment.vehicle_id:assignment.post_id));
+                 if(resource)void move(assignment,kind,resource,targetShift,sourceShift);
+               }}
+               onAddGuard={(groupId,teamLabel,shift,vehicleId)=>setResourceDialog({kind:"vehicle",initialMode:"existing",initialResourceId:vehicleId,initialShift:isDayShift(shift)?"2":"4",groupId,groupTeamLabel:teamLabel})}
+               onAddVehicle={(groupId,teamLabel,shift)=>setResourceDialog({kind:"vehicle",initialMode:"existing",initialShift:isDayShift(shift)?"2":"4",groupId,groupTeamLabel:teamLabel})}
                onCloseActions={() => setContextPick(null)}
                />}
             </tbody>
@@ -1863,12 +1914,19 @@ export function LiveSchedule() {
       )}
       {createOpen&&<QuickCreateDialog key={createKind} initialKind={createKind} data={data} saving={saving} onClose={()=>setCreateOpen(false)} onSave={createCatalogItem}/>}
       {resourceDialog&&<ResourceCrewDialog
-        key={`${resourceDialog.kind}-${resourceDialog.initialResourceId||"new"}-${resourceDialog.initialShift||"2"}-${resourceDialog.initialSection||""}`}
+        key={`${resourceDialog.kind}-${resourceDialog.initialResourceId||"new"}-${resourceDialog.initialShift||"2"}-${resourceDialog.initialSection||""}-${resourceDialog.groupId||"regular"}-${resourceDialog.groupTeamLabel||""}`}
         {...resourceDialog}
         data={data}
         saving={saving}
         onClose={()=>setResourceDialog(null)}
         onSave={saveResourceCrew}
+      />}
+      {groupMovePick&&<GroupMoveDialog
+        data={data}
+        pick={groupMovePick}
+        saving={saving}
+        onClose={()=>setGroupMovePick(null)}
+        onSave={moveGroupAssignment}
       />}
       {resourceRemoval&&<ResourceRemovalDialog pick={resourceRemoval} saving={saving} onClose={()=>setResourceRemoval(null)} onConfirm={removeResourceFromDay}/>} 
       {movementEdit&&<MovementDialog data={data} edit={movementEdit} saving={saving} onClose={()=>setMovementEdit(null)} onSave={saveMovement}/>} 
@@ -1876,6 +1934,24 @@ export function LiveSchedule() {
       {extensionPick&&<QuickExtensionDialog key={String(extensionPick.assignment.id)} pick={extensionPick} data={data} saving={saving} onClose={()=>setExtensionPick(null)} onSave={saveQuickExtension}/>}
     </main>
   );
+}
+
+function GroupMoveDialog({data,pick,saving,onClose,onSave}:{data:State;pick:GroupMovePick;saving:boolean;onClose:()=>void;onSave:(event:FormEvent<HTMLFormElement>)=>void}){
+  const window=operationalShiftWindow(data.date,pick.targetShift);
+  const options=useMemo(()=>{
+    const currentId=Number(pick.assignment.id);
+    const resources=[
+      ...data.vehicles.map(resource=>({kind:"vehicle" as const,resource,label:`${vehicleIcon(String(resource.type))} ${resource.prefix}`,detail:String(resource.zone||"Sem zona")})),
+      ...data.posts.map(resource=>({kind:"post" as const,resource,label:String(resource.name),detail:String(resource.group_name||"Posto")})),
+    ];
+    return resources.map(item=>{
+      const occupants=data.assignments.filter(assignment=>Number(assignment.id)!==currentId&&(item.kind==="vehicle"?Number(assignment.vehicle_id)===Number(item.resource.id):Number(assignment.post_id)===Number(item.resource.id))&&String(assignment.starts_at)<window.end&&String(assignment.ends_at)>window.start);
+      const unavailable=item.kind==="vehicle"&&isMotorcycleType(item.resource.type)&&occupants.some(assignment=>Number(assignment.guard_id)!==Number(pick.assignment.guard_id));
+      return{...item,available:!unavailable,detail:unavailable?"Ocupada neste turno":occupants.length?`${item.detail} · ${occupants.length} GM(s) no período`:`${item.detail} · livre no período`};
+    }).sort((left,right)=>Number(right.available)-Number(left.available)||left.label.localeCompare(right.label,"pt-BR"));
+  },[data.assignments,data.posts,data.vehicles,pick.assignment.guard_id,pick.assignment.id,window.end,window.start]);
+  const firstAvailable=options.find(option=>option.available);
+  return <div className="quick-create-backdrop"><form className="group-move-dialog" role="dialog" aria-modal="true" aria-labelledby="group-move-title" onSubmit={onSave}><header><div><small>MOVER NO GRUPAMENTO · {pick.teamLabel}</small><h2 id="group-move-title">{String(pick.assignment.guard_name)}</h2><p>{pick.sourceShift}º → {pick.targetShift}º turno · o horário será ajustado automaticamente.</p></div><button type="button" onClick={onClose} aria-label="Fechar">×</button></header><div className="group-move-alert"><b>Escolha onde este quadradinho trabalhará</b><span>A moto atual não é reutilizada silenciosamente quando já houver outro condutor no turno.</span></div><div className="group-move-options">{options.map(option=><label className={option.available?"available":"busy"} key={`${option.kind}:${option.resource.id}`}><input type="radio" name="destination" value={`${option.kind}:${option.resource.id}`} defaultChecked={firstAvailable===option} disabled={!option.available}/><span>{option.label}<small>{option.detail}</small></span></label>)}</div><footer><button type="button" onClick={onClose}>Cancelar</button><button className="save" disabled={saving||!firstAvailable}>{saving?"Movendo…":"Mover quadradinho"}</button></footer></form></div>;
 }
 
 function QuickExtensionDialog({pick,data,saving,onClose,onSave}:{pick:ExtensionPick;data:State;saving:boolean;onClose:()=>void;onSave:(event:FormEvent<HTMLFormElement>)=>void}){
@@ -1905,7 +1981,7 @@ function QuickCreateDialog({initialKind,data,saving,onClose,onSave}:{initialKind
 
 type CrewCandidate = { id: number; name: string; registration: string; detail: string; source: "redeploy" | "overtime" };
 
-function ResourceCrewDialog({kind,initialResourceId,initialShift="2",initialMode,initialSection,data,saving,onClose,onSave}:ResourceDialogState&{data:State;saving:boolean;onClose:()=>void;onSave:(event:FormEvent<HTMLFormElement>,kind:"post"|"vehicle")=>void}){
+function ResourceCrewDialog({kind,initialResourceId,initialShift="2",initialMode,initialSection,groupId,groupTeamLabel,data,saving,onClose,onSave}:ResourceDialogState&{data:State;saving:boolean;onClose:()=>void;onSave:(event:FormEvent<HTMLFormElement>,kind:"post"|"vehicle")=>void}){
   const resources=kind==="vehicle"?data.vehicles:data.posts;
   const selectableResources=kind==="post"&&initialSection
     ? resources.filter(resource=>{
@@ -1972,7 +2048,7 @@ function ResourceCrewDialog({kind,initialResourceId,initialShift="2",initialMode
   }, [data.guards, smartData]);
   function chooseExisting(id:string){const nextVehicle=kind==="vehicle"?resources.find((resource)=>Number(resource.id)===Number(id)):null;const isMoto=kind==="vehicle"&&isMotorcycleType(nextVehicle?.type);setResourceId(id);setExtraCount(kind==="post"||isMoto||(mode==="existing"&&vehicleHasPair(data,Number(id),shift))?1:0)}
   function chooseShift(value:"2"|"4"){setShift(value);setExtraCount(kind==="post"||motorcycle||(mode==="existing"&&vehicleHasPair(data,Number(resourceId),value))?1:0)}
-  return <div className="quick-create-backdrop"><form className="resource-crew-dialog" role="dialog" aria-modal="true" aria-labelledby="resource-crew-title" onSubmit={event=>onSave(event,kind)}><header><div><small>INCLUIR DIRETAMENTE NA ESCALA</small><h2 id="resource-crew-title">{kind==="vehicle"?"Viatura e guarnição":"Posto e efetivo"}</h2><p>Use um cadastro existente ou crie outro e já posicione os GMs.</p></div><button type="button" onClick={onClose} aria-label="Fechar">×</button></header><nav className="resource-mode"><button type="button" className={mode==="existing"?"active":""} disabled={!selectableResources.length} onClick={()=>{setMode("existing");setExtraCount(kind==="post"||vehicleHasPair(data,Number(resourceId),shift)?1:0)}}>Usar {kind==="vehicle"?"VTR":"posto"} existente</button><button type="button" className={mode==="new"?"active":""} onClick={()=>{setMode("new");setExtraCount(kind==="post"?1:0)}}>＋ Criar {kind==="vehicle"?"nova VTR":"novo posto"}</button></nav><input type="hidden" name="resourceMode" value={mode}/>
+  return <div className="quick-create-backdrop"><form className={`resource-crew-dialog ${groupId?"for-operational-group":""}`} role="dialog" aria-modal="true" aria-labelledby="resource-crew-title" onSubmit={event=>onSave(event,kind)}><header><div><small>{groupId?`GRUPAMENTO · ${groupTeamLabel||"EQUIPE GERAL"}`:"INCLUIR DIRETAMENTE NA ESCALA"}</small><h2 id="resource-crew-title">{groupId?"Adicionar VTR e integrantes":kind==="vehicle"?"Viatura e guarnição":"Posto e efetivo"}</h2><p>{groupId?"Escolha qualquer viatura disponível e use somente GMs à disposição ou da equipe oposta em HE.":"Use um cadastro existente ou crie outro e já posicione os GMs."}</p></div><button type="button" onClick={onClose} aria-label="Fechar">×</button></header><nav className="resource-mode"><button type="button" className={mode==="existing"?"active":""} disabled={!selectableResources.length} onClick={()=>{setMode("existing");setExtraCount(kind==="post"||vehicleHasPair(data,Number(resourceId),shift)?1:0)}}>Usar {kind==="vehicle"?"VTR":"posto"} existente</button><button type="button" className={mode==="new"?"active":""} onClick={()=>{setMode("new");setExtraCount(kind==="post"?1:0)}}>＋ Criar {kind==="vehicle"?"nova VTR":"novo posto"}</button></nav><input type="hidden" name="resourceMode" value={mode}/>
     {mode==="existing"&&<label>{kind==="vehicle"?"Viatura disponível na escala":initialSection?`Posto existente em ${initialSection}`:"Posto existente"}<select name="resourceId" value={resourceId} onChange={event=>chooseExisting(event.target.value)} required>{selectableResources.map(resource=>{const crew=kind==="vehicle"?uniqueCrewCount(data,Number(resource.id)):0;return <option key={String(resource.id)} value={String(resource.id)}>{kind==="vehicle"?`${vehicleIcon(String(resource.type))} ${resource.prefix} · ${resource.zone||"Sem zona"} · ${crew} GM(s)`:`${resource.group_name} · ${resource.name}`}</option>})}</select></label>}
     {mode==="new"&&kind==="vehicle"&&<div className="new-resource-fields"><label>Prefixo<input name="prefix" required placeholder="Ex.: VTR 1400"/></label><label>Tipo<select name="type" value={newVehicleType} onChange={event=>setNewVehicleType(event.target.value)}><option value="sedan">Sedan</option><option value="pickup">Caminhonete</option><option value="suv">SUV</option><option value="van">Furgão</option><option value="moto">Moto</option><option value="other">Outro</option></select></label><label>Zona / área<input name="zone" placeholder="Área de atuação"/></label></div>}
     {mode==="new"&&kind==="post"&&<div className="new-resource-fields"><label>Nome do posto<input name="name" required placeholder="Ex.: Recepção"/></label><label>Seção<select name="groupName" required defaultValue={initialSection||""}><option value="">Selecionar seção</option>{sectionLabels.map(label=><option key={label} value={label}>{label}</option>)}</select></label><input type="hidden" name="sortOrder" value="99"/></div>}
@@ -2182,7 +2258,7 @@ function shiftLabel(shift: string) {
   return ({ "1": "01:00–07:00", "2": "07:00–13:00", "3": "13:00–19:00", "4": "19:00–01:00" } as Record<string, string>)[shift] || "horário do período";
 }
 
-function OperationalGroupsGrid({ date, groups, members, guards, posts, vehicles, assignments, movements = [], serviceAdjustments = [], shifts: visibleShifts, selectedGroup, selectedId, onOpenAssignment, onExtend, onAdjust, onSwap, onQuickStatus, onCopy, onSuggestHe, onDetails, onDelete, onDragStart, onDragEnd, onMoveCell, onCloseActions }: OperationalGroupGridProps) {
+function OperationalGroupsGrid({ date, groups, members, guards, posts, vehicles, assignments, movements = [], serviceAdjustments = [], shifts: visibleShifts, selectedGroup, selectedId, onOpenAssignment, onExtend, onAdjust, onSwap, onQuickStatus, onCopy, onSuggestHe, onDetails, onDelete, onDragStart, onDragEnd, onMoveCell, onAddGuard, onAddVehicle, onCloseActions }: OperationalGroupGridProps) {
   const guardById = useMemo(() => new Map(guards.map((guard) => [Number(guard.id), guard])), [guards]);
   const postById = useMemo(() => new Map(posts.map((post) => [Number(post.id), post])), [posts]);
   const vehicleById = useMemo(() => new Map(vehicles.map((vehicle) => [Number(vehicle.id), vehicle])), [vehicles]);
@@ -2260,7 +2336,7 @@ function OperationalGroupsGrid({ date, groups, members, guards, posts, vehicles,
     {groupSections.map((section) => <Fragment key={`grid-group-${String(section.group.id)}`}>
       <tr className="operational-groups-grid-group"><td colSpan={visibleShifts.length + 1}><span style={{ background: String(section.group.color || "#1769aa") }} /> <b>{String(section.group.name)}</b><small>{String(section.group.short_name || "Grupamento")} · composição do padrão</small></td></tr>
       {section.teams.map((team) => <tr className="operational-groups-grid-team" key={`grid-team-${String(section.group.id)}-${team.period}-${team.label}`}>
-        <td className="operational-groups-grid-team-label"><b>{team.label}</b><small>{team.period === "day" ? "DIURNO · D1/D2" : team.period === "night" ? "NOTURNO · N1/N2" : "TODOS OS TURNOS"}</small>{team.resources.length > 0 && <div className="operational-groups-grid-resources">{team.resources.map((resource) => <span key={`${resource.resource_kind}-${resource.resource_id}`}>{String(resource.resource_kind) === "vehicle" ? String(vehicleById.get(Number(resource.resource_id))?.prefix || "VTR") : String(postById.get(Number(resource.resource_id))?.name || "Posto")}</span>)}</div>}</td>
+        <td className="operational-groups-grid-team-label"><b>{team.label}</b><small>{team.period === "day" ? "DIURNO · D1/D2" : team.period === "night" ? "NOTURNO · N1/N2" : "TODOS OS TURNOS"}</small>{team.resources.length > 0 && <div className="operational-groups-grid-resources">{team.resources.map((resource) => <span key={`${resource.resource_kind}-${resource.resource_id}`}>{String(resource.resource_kind) === "vehicle" ? String(vehicleById.get(Number(resource.resource_id))?.prefix || "VTR") : String(postById.get(Number(resource.resource_id))?.name || "Posto")}</span>)}</div>}<div className="operational-group-inline-add"><button type="button" onClick={()=>onAddGuard(Number(section.group.id),team.label,team.period==="night"?"4":"2",team.resources.find(resource=>String(resource.resource_kind)==="vehicle")?.resource_id?Number(team.resources.find(resource=>String(resource.resource_kind)==="vehicle")?.resource_id):undefined)}>＋ GM</button><button type="button" onClick={()=>onAddVehicle(Number(section.group.id),team.label,team.period==="night"?"4":"2")}>＋ VTR/equipe</button></div></td>
         {visibleShifts.map((shift) => <td className={`operational-groups-grid-cell drop-cell period-${shift.period} ${shift.id === "4" ? "period-night-start" : ""}`} key={shift.id} onDragOver={(event) => { if (event.dataTransfer.types.includes("text/assignment")) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; } }} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); const assignmentId = Number(event.dataTransfer.getData("text/assignment")); const sourceShift = event.dataTransfer.getData("text/assignment-source-shift") || undefined; const dragged = assignments.find((assignment) => Number(assignment.id) === assignmentId); if (dragged) onMoveCell(dragged, shift.id, sourceShift); }}>
           {team.members.filter((member) => memberVisibleInShift(member, shift.id)).map((member) => {
             const teamVehicleIds = [...new Set(team.resources.filter((resource) => String(resource.resource_kind) === "vehicle").map((resource) => Number(resource.resource_id)).filter(Boolean))];
@@ -3305,10 +3381,10 @@ function statusInShift(a:Rec,date:string,shift:string){
 function isOvertimeExtensionCell(a:Rec,date:string,shift:string){const regular=String(a.regular_ends_at||"");return Boolean(regular)&&String(a.status)==="overtime"&&operationalShiftWindow(date,shift).start>=regular}
 function overtimeHoursLabel(a:Rec){const hours=Math.max(0,(Date.parse(String(a.ends_at))-Date.parse(String(a.starts_at)))/3600000);return `${String(Math.round(hours)).padStart(2,"0")} HE`}
 function extensionShortcutAvailable(assignment:Rec,shift:string,date:string,assignments:Rec[]){
-  if(!isDayShift(shift))return false;
   if(String(assignment.work_kind)==="overtime_extension")return false;
   if(String(assignment.status)==="overtime"&&assignment.regular_ends_at&&String(assignment.ends_at)>String(assignment.regular_ends_at))return false;
-  const related=assignments.filter(item=>Number(item.guard_id)===Number(assignment.guard_id)&&String(item.work_kind)!=="overtime_extension"&&coveredOperationalShifts(item,date).some(id=>isDayShift(id)));
+  const targetPeriod=isDayShift(shift)?"day":"night";
+  const related=assignments.filter(item=>Number(item.guard_id)===Number(assignment.guard_id)&&String(item.work_kind)!=="overtime_extension"&&coveredOperationalShifts(item,date).some(id=>(isDayShift(id)?"day":"night")===targetPeriod));
   const latest=related.reduce((value,item)=>{const end=String(item.regular_ends_at||item.ends_at);return end>value?end:value},String(assignment.regular_ends_at||assignment.ends_at));
   const window=operationalShiftWindow(date,shift);
   return window.start<latest&&window.end>=latest;

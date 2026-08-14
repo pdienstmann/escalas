@@ -42,6 +42,39 @@ export function operationalGroupVehicleIds(members: OperationalGroupMember[]) {
   return ids;
 }
 
+/**
+ * A daily remanejamento may put a group GM in a different vehicle than the
+ * one stored in the ideal pattern.  Hide that vehicle from the conventional
+ * section only when every regular occupant belongs to the applied group.
+ * This keeps a shared conventional crew visible while preventing empty,
+ * duplicated motorcycle rows after a group-only remanejamento.
+ */
+export function operationalGroupDailyVehicleIds(
+  members: OperationalGroupMember[],
+  assignments: Array<{ guard_id?: unknown; vehicle_id?: unknown; work_kind?: unknown }>,
+) {
+  const groupGuardIds = new Set(
+    members
+      .filter((member) => member.pattern_id != null && String(member.resource_kind) === "guard")
+      .map((member) => Number(member.resource_id))
+      .filter(Boolean),
+  );
+  const occupants = new Map<number, Set<number>>();
+  for (const assignment of assignments) {
+    if (assignment.vehicle_id == null || String(assignment.work_kind || "shift") === "overtime_extension") continue;
+    const vehicleId = Number(assignment.vehicle_id), guardId = Number(assignment.guard_id);
+    if (!vehicleId || !guardId) continue;
+    const guards = occupants.get(vehicleId) || new Set<number>();
+    guards.add(guardId);
+    occupants.set(vehicleId, guards);
+  }
+  return new Set(
+    [...occupants.entries()]
+      .filter(([, guardIds]) => guardIds.size > 0 && [...guardIds].every((guardId) => groupGuardIds.has(guardId)))
+      .map(([vehicleId]) => vehicleId),
+  );
+}
+
 export const OPERATIONAL_GROUP_DEFAULTS = [
   { name: "GESCOM", short_name: "GESCOM", color: "#1769aa", sort_order: 10 },
   { name: "CANIL", short_name: "CANIL", color: "#6a1b9a", sort_order: 20 },

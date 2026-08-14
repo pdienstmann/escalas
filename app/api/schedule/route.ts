@@ -17,6 +17,8 @@ import { ensureOperationalGroups } from "../../../lib/operational-groups-db";
 
 export const dynamic = "force-dynamic";
 
+let dailyGroupContextReady: Promise<void> | null = null;
+
 
 const demoGuards = [
   "ALMEIDA",
@@ -332,6 +334,7 @@ async function seedSchedule(date: string, scheduleId: number) {
 }
 
 async function ensureBase(date: string) {
+  await ensureDailyGroupContext();
   // An already generated schedule only needs the small, date-specific weekly
   // reconciliation. Re-running every schema/catalog check on each page visit
   // made ordinary date changes take several seconds on D1.
@@ -390,6 +393,24 @@ async function ensureBase(date: string) {
       ).bind("Local retirado desta escala — aguardando remanejamento", schedule.id, item.resource_id)));
     }
   }
+}
+
+async function ensureDailyGroupContext() {
+  if (!dailyGroupContextReady) {
+    dailyGroupContextReady = env.DB.prepare(`CREATE TABLE IF NOT EXISTS schedule_operational_group_members (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      schedule_id INTEGER NOT NULL REFERENCES schedules(id),
+      group_id INTEGER NOT NULL REFERENCES operational_groups(id),
+      team_label TEXT NOT NULL DEFAULT 'EQUIPE GERAL',
+      guard_id INTEGER NOT NULL REFERENCES guards(id),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(schedule_id,group_id,team_label,guard_id)
+    )`).run().then(() => undefined).catch((error) => {
+      dailyGroupContextReady = null;
+      throw error;
+    });
+  }
+  await dailyGroupContextReady;
 }
 
 async function ensureAssignmentLaneOrder() {
@@ -539,7 +560,25 @@ export async function GET(request: Request) {
         AND (m.resource_kind!='guard' OR EXISTS (SELECT 1 FROM guards gm WHERE gm.id=m.resource_id AND gm.active=1 AND COALESCE(gm.work_regime,'12x36')!='weekly'))
       ORDER BY g.sort_order,g.name,m.resource_kind,m.resource_id`).bind(schedule?.id,schedule?.id).all()
     : { results: [] as Record<string, unknown>[] };
-  const contextualMembers = [...operationalGroupMembers.results, ...patternOperationalGroupMembers.results];
+  const dailyOperationalGroupMembers = schedule
+    ? await env.DB.prepare(`SELECT MIN(d.id) id,-d.schedule_id pattern_id,d.group_id,'guard' resource_kind,d.guard_id resource_id,d.team_label,
+        CASE WHEN MIN(a.starts_at)<s.date||'T19:00' THEN 'day' ELSE 'night' END pattern_period,
+        CASE WHEN MIN(a.starts_at)<s.date||'T19:00' THEN '2' ELSE '4' END shift,
+        MAX(a.vehicle_id) vehicle_id,substr(MIN(a.starts_at),12,5) starts_at,substr(MAX(a.ends_at),12,5) ends_at,
+        g.name group_name,g.short_name group_short_name,g.color group_color,g.sort_order group_sort_order
+      FROM schedule_operational_group_members d
+      JOIN schedules s ON s.id=d.schedule_id
+      JOIN operational_groups g ON g.id=d.group_id AND g.active=1
+      JOIN assignments a ON a.schedule_id=d.schedule_id AND a.guard_id=d.guard_id
+      WHERE d.schedule_id=?
+      GROUP BY d.schedule_id,d.group_id,d.team_label,d.guard_id,g.name,g.short_name,g.color,g.sort_order`).bind(schedule.id).all<Record<string,unknown>>()
+    : { results: [] as Record<string, unknown>[] };
+  const contextualMembers = [...new Map(
+    [...operationalGroupMembers.results, ...patternOperationalGroupMembers.results, ...dailyOperationalGroupMembers.results].map((member) => [
+      `${member.group_id}:${member.resource_kind}:${member.resource_id}:${String(member.team_label || "").trim().toUpperCase()}:${member.pattern_period || "global"}`,
+      member,
+    ]),
+  ).values()];
   const suggested=appliedPattern?null:await resolvePatternCodes(env.DB,date);
   const weeklyCount=Number(weeklySlotCount?.total||0);
   const patternDay=String((appliedPattern||suggested)?.day_code||"");
@@ -825,6 +864,7 @@ export async function POST(request: Request) {
   if (!permitted(request))
     return Response.json({ error: "Não autorizado" }, { status: 401 });
   await ensureAssignmentLaneOrder();
+  await ensureDailyGroupContext();
   const b = (await request.json()) as Record<string, string | number | boolean | null>;
   if (b.action === "create_service_adjustment") {
     await ensureServiceAdjustmentsTable();
@@ -1309,6 +1349,8 @@ export async function POST(request: Request) {
   }
   if (b.action === "assign_resource_group") {
     const scheduleId = Number(b.scheduleId);
+    const operationalGroupId = Number(b.operationalGroupId || 0) || null;
+    const operationalTeamLabel = String(b.operationalTeamLabel || "EQUIPE GERAL").trim().toUpperCase() || "EQUIPE GERAL";
     const postId = Number(b.postId || 0) || null;
     const vehicleId = Number(b.vehicleId || 0) || null;
     const requestedShift = String(b.shift || "2");
@@ -1329,6 +1371,8 @@ export async function POST(request: Request) {
     const schedule = await env.DB.prepare("SELECT date FROM schedules WHERE id=?").bind(scheduleId).first<{ date: string }>();
     if (!schedule)
       return Response.json({ error: "Escala não encontrada." }, { status: 404 });
+    if (operationalGroupId && !await env.DB.prepare("SELECT id FROM operational_groups WHERE id=? AND active=1").bind(operationalGroupId).first())
+      return Response.json({ error: "O grupamento selecionado não está mais disponível." }, { status: 404 });
     let vehicleType: string | null = null;
     if (vehicleId) {
       const vehicle = await env.DB.prepare("SELECT id,type FROM vehicles WHERE id=? AND active=1").bind(vehicleId).first<{ id: number; type: string | null }>();
@@ -1356,6 +1400,13 @@ export async function POST(request: Request) {
     const periodShifts = fullPeriodShifts(requestedShift);
     const periodStart = periodShiftTimes(schedule.date, periodShifts[0]).start;
     const periodEnd = periodShiftTimes(schedule.date, periodShifts[periodShifts.length - 1]).end;
+    if (vehicleId && isMotorcycleType(vehicleType)) {
+      const occupied = await env.DB.prepare(
+        "SELECT id FROM assignments WHERE schedule_id=? AND vehicle_id=? AND starts_at<? AND ends_at>? LIMIT 1",
+      ).bind(scheduleId,vehicleId,periodEnd,periodStart).first();
+      if (occupied)
+        return Response.json({ error: "Esta moto já possui condutor no período. Escolha outra viatura disponível." }, { status: 409 });
+    }
     const redeploySources = new Map<number, Record<string, unknown>[]>();
     for (const member of members.filter((item) => item.source === "redeploy")) {
       const rows = (
@@ -1410,13 +1461,18 @@ export async function POST(request: Request) {
       }
     }
     const results = await env.DB.batch(statements);
+    if (operationalGroupId) {
+      await env.DB.batch(members.map((member) => env.DB.prepare(
+        "INSERT OR IGNORE INTO schedule_operational_group_members (schedule_id,group_id,team_label,guard_id) VALUES (?,?,?,?)",
+      ).bind(scheduleId,operationalGroupId,operationalTeamLabel,member.guardId)));
+    }
     const ids = [...changedIds, ...results.map((result) => Number(result.meta.last_row_id)).filter(Boolean)];
     const placeholders = ids.map(() => "?").join(",");
     const assignments = ids.length
       ? (await env.DB.prepare(`SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.id IN (${placeholders}) ORDER BY a.starts_at,a.role`).bind(...ids).all<Record<string, unknown>>()).results
       : [];
     const auditEventId = await writeAudit(request, { action: "create", entityType: "assignment_group", entityId: ids.join(","), summary: `Escalou ${members.length} GM(s) em ${vehicleId ? "viatura" : "posto"}`, after: { assignments }, undoable: true });
-    return Response.json({ ok: true, assignments, auditEventId, message: vehicleId ? `Guarnição criada com ${members.length} integrantes.` : `${members.length} GM(s) adicionados ao posto.` });
+    return Response.json({ ok: true, assignments, reload: Boolean(operationalGroupId), auditEventId, message: operationalGroupId ? `${members.length} GM(s) adicionados ao ${operationalTeamLabel}.` : vehicleId ? `Guarnição criada com ${members.length} integrantes.` : `${members.length} GM(s) adicionados ao posto.` });
   }
   if (b.action === "redeploy_group") {
     const assignmentIds = [

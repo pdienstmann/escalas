@@ -17,7 +17,7 @@ import { orderAssignmentsInResourceCell, orderedResourceGuardIds } from "../lib/
 import { suggestionPosition } from "../lib/suggestion-position.ts";
 import { compactRequestReference } from "../lib/request-reference.ts";
 import { copiedBlockStatus } from "../lib/copy-rules.ts";
-import { operationalGroupLabel, operationalGroupOrder, operationalGroupVehicleIds, operationalTeamLabel } from "../lib/operational-groups.ts";
+import { operationalGroupDailyVehicleIds, operationalGroupLabel, operationalGroupOrder, operationalGroupVehicleIds, operationalTeamLabel } from "../lib/operational-groups.ts";
 import { operationalGroupAnchorShift, operationalGroupDurationHours, operationalGroupInterval, operationalGroupMemberCoversShift, timeAfterHours } from "../lib/operational-group-schedule.ts";
 import { normalizeLeaveDisplayName, normalizeLeaveName, preferredLeaveNameMatch } from "../lib/leave-name.ts";
 
@@ -1465,7 +1465,8 @@ test("pattern group links are exposed to the applied daily scale", () => {
   const dashboard = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
   assert.match(api, /pattern_operational_group_members/);
   assert.match(api, /pattern_period/);
-  assert.match(api, /const contextualMembers = \[\.\.\.operationalGroupMembers\.results, \.\.\.patternOperationalGroupMembers\.results\]/);
+  assert.match(api, /const contextualMembers = \[\.\.\.new Map\(/);
+  assert.match(api, /dailyOperationalGroupMembers\.results/);
   assert.match(api, /operationalGroupMembers: contextualMembers/);
   assert.match(dashboard, /operationalGroupByResource/);
   assert.match(dashboard, /operationalGroupByGuard/);
@@ -1803,4 +1804,33 @@ test("pattern editor separates day and night comparison and protects replacement
   assert.match(styles, /\.pattern-period-switcher/);
   assert.match(styles, /\.pattern-group-board/);
   assert.match(styles, /\.pattern-preview-warning/);
+});
+
+test("daily group vehicles have one visual home after a day-specific remanejamento", () => {
+  const members = [
+    { id: 1, pattern_id: 1, group_id: 1, resource_kind: "guard", resource_id: 10 },
+    { id: 2, pattern_id: 1, group_id: 1, resource_kind: "guard", resource_id: 11 },
+  ];
+  const hidden = operationalGroupDailyVehicleIds(members, [
+    { guard_id: 10, vehicle_id: 643, work_kind: "shift" },
+    { guard_id: 11, vehicle_id: 646, work_kind: "shift" },
+    { guard_id: 10, vehicle_id: 700, work_kind: "shift" },
+    { guard_id: 99, vehicle_id: 700, work_kind: "shift" },
+    { guard_id: 99, vehicle_id: 701, work_kind: "overtime_extension" },
+  ]);
+  assert.deepEqual([...hidden].sort((a, b) => a - b), [643, 646]);
+});
+
+test("group cards can move across shifts, add a vehicle crew and extend night work", () => {
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const api = readFileSync(resolve("app/api/schedule/route.ts"), "utf8");
+  assert.match(schedule, /function GroupMoveDialog/);
+  assert.match(schedule, /MOVER NO GRUPAMENTO/);
+  assert.match(schedule, /＋ VTR\/equipe/);
+  assert.match(schedule, /operationalGroupId: resourceDialog\?\.groupId/);
+  assert.match(schedule, /const targetPeriod=isDayShift\(shift\)\?"day":"night"/);
+  assert.doesNotMatch(schedule, /function extensionShortcutAvailable[\s\S]{0,120}if\(!isDayShift\(shift\)\)return false/);
+  assert.match(api, /schedule_operational_group_members/);
+  assert.match(api, /dailyOperationalGroupMembers/);
+  assert.match(api, /operationalGroupId/);
 });
