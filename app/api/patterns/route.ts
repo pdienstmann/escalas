@@ -3,6 +3,7 @@ import {
   applyPatternsToSchedule,
   applyWeeklyToSchedule,
   ensurePatterns,
+  reconcileWeeklyGuardSchedules,
   resolvePatternCodes,
 } from "../../../lib/pattern-engine";
 import { writeAudit } from "../../../lib/audit";
@@ -46,10 +47,10 @@ export async function GET(request: Request) {
   const [patterns, slots, guards, posts, vehicles, preview, weeklySlots, operationalGroups, operationalGroupMembers, patternOperationalGroupMembers] = await Promise.all(
     [
       env.DB.prepare(
-        "SELECT p.*,COUNT(s.id) member_count FROM shift_patterns p LEFT JOIN pattern_slots s ON s.pattern_id=p.id WHERE p.active=1 GROUP BY p.id ORDER BY p.period,p.parity",
+        "SELECT p.*,(SELECT COUNT(*) FROM pattern_slots s JOIN guards g ON g.id=s.guard_id AND COALESCE(g.work_regime,'12x36')='12x36' WHERE s.pattern_id=p.id) member_count FROM shift_patterns p WHERE p.active=1 ORDER BY p.period,p.parity",
       ).all(),
       env.DB.prepare(
-        "SELECT s.*,g.name guard_name,g.registration,p.name post_name,p.group_name,v.prefix,v.zone FROM pattern_slots s JOIN guards g ON g.id=s.guard_id LEFT JOIN posts p ON p.id=s.post_id LEFT JOIN vehicles v ON v.id=s.vehicle_id ORDER BY s.pattern_id,p.group_name,p.name,v.prefix,s.role",
+        "SELECT s.*,g.name guard_name,g.registration,p.name post_name,p.group_name,v.prefix,v.zone FROM pattern_slots s JOIN guards g ON g.id=s.guard_id AND COALESCE(g.work_regime,'12x36')='12x36' LEFT JOIN posts p ON p.id=s.post_id LEFT JOIN vehicles v ON v.id=s.vehicle_id ORDER BY s.pattern_id,p.group_name,p.name,v.prefix,s.role",
       ).all(),
       env.DB.prepare(
         "SELECT id,name,registration,platoon,base_shift,work_regime FROM guards WHERE active=1 ORDER BY name",
@@ -70,6 +71,7 @@ export async function GET(request: Request) {
         FROM pattern_operational_group_members m
         JOIN shift_patterns p ON p.id=m.pattern_id AND p.active=1
         JOIN operational_groups g ON g.id=m.group_id AND g.active=1
+        WHERE m.resource_kind!='guard' OR EXISTS (SELECT 1 FROM guards gm WHERE gm.id=m.resource_id AND gm.active=1 AND COALESCE(gm.work_regime,'12x36')='12x36')
         ORDER BY p.period,p.parity,g.sort_order,g.name,m.resource_kind,m.resource_id`).all(),
     ],
   );
@@ -345,6 +347,7 @@ export async function POST(request: Request) {
     }
     if(body.action==="weekly_save") {
       const d=destination(body),id=Number(body.id||0),guardId=Number(body.guardId);
+      if ((d.postId ? 1 : 0) + (d.vehicleId ? 1 : 0) !== 1) return Response.json({ error: "Selecione um posto ou viatura para o GM semanal." }, { status: 400 });
       const activeGuard=await env.DB.prepare("SELECT id FROM guards WHERE id=? AND active=1").bind(guardId).first();
       if (!activeGuard) return Response.json({ error: "Selecione um GM ativo para a escala semanal." }, { status: 409 });
       const duplicateWeekly=await env.DB.prepare("SELECT id FROM weekly_slots WHERE guard_id=? AND active=1 AND id<>? LIMIT 1").bind(guardId,id).first();
@@ -352,10 +355,17 @@ export async function POST(request: Request) {
       const before=id?await env.DB.prepare("SELECT * FROM weekly_slots WHERE id=?").bind(id).first<Record<string,unknown>>():null;
       let weeklyId=id;
       if(id)await env.DB.prepare("UPDATE weekly_slots SET guard_id=?,weekdays=?,post_id=?,vehicle_id=?,role=?,starts_at=?,break_start=?,break_end=?,regular_end=?,overtime_end=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(guardId,body.weekdays||"1,2,3,4,5",d.postId,d.vehicleId,body.role,body.startsAt,body.breakStart||null,body.breakEnd||null,body.regularEnd,body.overtimeEnd||null,id).run();
-      else {const created=await env.DB.prepare("INSERT INTO weekly_slots (guard_id,weekdays,post_id,vehicle_id,role,starts_at,break_start,break_end,regular_end,overtime_end) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(guardId,body.weekdays||"1,2,3,4,5",d.postId,d.vehicleId,body.role,body.startsAt,body.breakStart||null,body.breakEnd||null,body.regularEnd,body.overtimeEnd||null).run();weeklyId=Number(created.meta.last_row_id)}
+      else {const created=await env.DB.prepare(`INSERT INTO weekly_slots (guard_id,weekdays,post_id,vehicle_id,role,starts_at,break_start,break_end,regular_end,overtime_end,active)
+        VALUES (?,?,?,?,?,?,?,?,?,?,1)
+        ON CONFLICT(guard_id) DO UPDATE SET weekdays=excluded.weekdays,post_id=excluded.post_id,vehicle_id=excluded.vehicle_id,role=excluded.role,starts_at=excluded.starts_at,break_start=excluded.break_start,break_end=excluded.break_end,regular_end=excluded.regular_end,overtime_end=excluded.overtime_end,active=1,updated_at=CURRENT_TIMESTAMP`).bind(guardId,body.weekdays||"1,2,3,4,5",d.postId,d.vehicleId,body.role,body.startsAt,body.breakStart||null,body.breakEnd||null,body.regularEnd,body.overtimeEnd||null).run();weeklyId=Number(created.meta.last_row_id)||Number((await env.DB.prepare("SELECT id FROM weekly_slots WHERE guard_id=?").bind(guardId).first<{id:number}>())?.id||0)}
       await env.DB.prepare("UPDATE guards SET work_regime='weekly',base_shift='Semanal' WHERE id=?").bind(guardId).run();
       await env.DB.prepare("DELETE FROM pattern_slots WHERE guard_id=?").bind(guardId).run();
-      if(before&&Number(before.guard_id)!==guardId)await env.DB.prepare("UPDATE guards SET work_regime='12x36',base_shift=CASE WHEN upper(COALESCE(platoon,'')) LIKE 'N%' THEN '12x36 noite' ELSE '12x36 dia' END WHERE id=?").bind(before.guard_id).run();
+      await env.DB.prepare("DELETE FROM pattern_operational_group_members WHERE resource_kind='guard' AND resource_id=?").bind(guardId).run();
+      await reconcileWeeklyGuardSchedules(env.DB,guardId);
+      if(before&&Number(before.guard_id)!==guardId)await env.DB.batch([
+        env.DB.prepare("UPDATE guards SET work_regime='12x36',base_shift=CASE WHEN upper(COALESCE(platoon,'')) LIKE 'N%' THEN '12x36 noite' ELSE '12x36 dia' END WHERE id=?").bind(before.guard_id),
+        env.DB.prepare("DELETE FROM assignments WHERE guard_id=? AND work_kind='weekly'").bind(before.guard_id),
+      ]);
       const after=await env.DB.prepare("SELECT * FROM weekly_slots WHERE id=?").bind(weeklyId).first();
       await writeAudit(request,{action:id?"update":"create",entityType:"weekly_slot",entityId:weeklyId,summary:`${id?"Alterou":"Criou"} escala semanal`,before,after:after as Record<string,unknown>});
       return Response.json({ok:true,message:"Escala semanal salva e integrada aos dias úteis."});
@@ -363,7 +373,10 @@ export async function POST(request: Request) {
     if(body.action==="weekly_delete") {
       const before=await env.DB.prepare("SELECT * FROM weekly_slots WHERE id=?").bind(body.id).first<Record<string,unknown>>();
       await env.DB.prepare("DELETE FROM weekly_slots WHERE id=?").bind(body.id).run();
-      if(before)await env.DB.prepare("UPDATE guards SET work_regime='12x36',base_shift=CASE WHEN upper(COALESCE(platoon,'')) LIKE 'N%' THEN '12x36 noite' ELSE '12x36 dia' END WHERE id=?").bind(before.guard_id).run();
+      if(before)await env.DB.batch([
+        env.DB.prepare("UPDATE guards SET work_regime='12x36',base_shift=CASE WHEN upper(COALESCE(platoon,'')) LIKE 'N%' THEN '12x36 noite' ELSE '12x36 dia' END WHERE id=?").bind(before.guard_id),
+        env.DB.prepare("DELETE FROM assignments WHERE guard_id=? AND work_kind='weekly'").bind(before.guard_id),
+      ]);
       await writeAudit(request,{action:"delete",entityType:"weekly_slot",entityId:Number(body.id),summary:"Removeu escala semanal",before});
       return Response.json({ok:true});
     }

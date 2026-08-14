@@ -58,7 +58,7 @@ function readPatternCache(date: string): Data | null {
     if (!raw) return null;
     const cached = JSON.parse(raw) as Data;
     if (!Array.isArray(cached.patterns) || !Array.isArray(cached.slots) || !Array.isArray(cached.guards)) return null;
-    return { ...cached, operationalGroups: cached.operationalGroups || [], operationalGroupMembers: cached.operationalGroupMembers || [], patternOperationalGroupMembers: cached.patternOperationalGroupMembers || [] };
+    return { ...cached, weeklySlots: cached.weeklySlots || [], operationalGroups: cached.operationalGroups || [], operationalGroupMembers: cached.operationalGroupMembers || [], patternOperationalGroupMembers: cached.patternOperationalGroupMembers || [] };
   } catch {
     return null;
   }
@@ -104,7 +104,7 @@ export function PatternsDashboard() {
       if (!response.ok || !Array.isArray(json.patterns)) {
         throw new Error(json.error || "Não foi possível consultar os padrões.");
       }
-      const normalized = { ...json, operationalGroups: json.operationalGroups || [], operationalGroupMembers: json.operationalGroupMembers || [], patternOperationalGroupMembers: json.patternOperationalGroupMembers || [] } as Data;
+      const normalized = { ...json, weeklySlots: json.weeklySlots || [], operationalGroups: json.operationalGroups || [], operationalGroupMembers: json.operationalGroupMembers || [], patternOperationalGroupMembers: json.patternOperationalGroupMembers || [] } as Data;
       setData(normalized);
       writePatternCache(date, normalized);
       setSelected((current) =>
@@ -639,14 +639,22 @@ function PatternPreview({ data, date, dayCode, nightCode, busy, onClose, onApply
 
 function WeeklyEditor({ data, busy, onSave, onDelete }: { data: Data; busy: boolean; onSave: (event: FormEvent<HTMLFormElement>, id?: number) => void; onDelete: (slot: Rec) => void }) {
   const eligibleGuards = data.guards;
-  const grouped = [...new Map(data.weeklySlots.map((slot) => {
+  const [query,setQuery]=useState("");
+  const normalizedQuery=query.trim().toLocaleLowerCase("pt-BR");
+  const visibleSlots=data.weeklySlots.filter((slot)=>!normalizedQuery||String(slot.guard_name||"").toLocaleLowerCase("pt-BR").includes(normalizedQuery)||weeklyDestinationLabel(slot,data).toLocaleLowerCase("pt-BR").includes(normalizedQuery));
+  const grouped = [...new Map(visibleSlots.map((slot) => {
     const key = slot.vehicle_id ? `vehicle:${slot.vehicle_id}` : `post:${slot.post_id}`;
-    return [key, { key, label: weeklyDestinationLabel(slot, data), slots: data.weeklySlots.filter((item) => (item.vehicle_id ? `vehicle:${item.vehicle_id}` : `post:${item.post_id}`) === key) }];
+    return [key, { key, label: weeklyDestinationLabel(slot, data), slots: visibleSlots.filter((item) => (item.vehicle_id ? `vehicle:${item.vehicle_id}` : `post:${item.post_id}`) === key) }];
   })).values()];
+  const addableGuards=eligibleGuards.filter((guard) => !data.weeklySlots.some((slot) => Number(slot.guard_id) === Number(guard.id)));
+  const withFixedHe=data.weeklySlots.filter((slot)=>Boolean(slot.overtime_end)).length;
   return <section className="weekly-patterns">
-    <header><div><span>SEGUNDA A SEXTA · INSERÇÃO AUTOMÁTICA</span><h2>Escala semanal</h2><p>Cadastre expediente, intervalo e a quantidade fixa de HE. O GM será inserido automaticamente nas escalas de segunda a sexta.</p></div><b>{data.weeklySlots.length} integrantes</b></header>
-    <aside className="weekly-flow-note"><strong>Como funciona</strong><span>Horário normal e intervalo permanecem visíveis. A HE começa na saída normal, e sua quantidade aparece em vermelho no cartão diário.</span></aside>
+    <header><div><span>SEGUNDA A SEXTA · INSERÇÃO AUTOMÁTICA</span><h2>Gerenciar escala semanal</h2><p>Esta é a lista oficial do expediente semanal. Cada GM aparece somente de segunda a sexta e deixa de integrar os padrões 12x36.</p></div><div className="weekly-summary"><b>{data.weeklySlots.length}<small>GMs semanais</small></b><b>{grouped.length}<small>locais</small></b><b>{withFixedHe}<small>com HE fixa</small></b></div></header>
+    <aside className="weekly-flow-note"><strong>Regra automática</strong><span>Ao adicionar um GM aqui, os plantões 12x36 já gerados são retirados. A HE fixa aparece apenas no quadrante em que realmente ocorre — por exemplo, 17h–19h no 3º turno.</span></aside>
+    <form className="weekly-add" onSubmit={(event) => onSave(event)}><b>＋ Adicionar novo GM semanal</b><small className="weekly-add-help">Ao salvar, o GM passa para o regime semanal e deixa de ocupar os padrões 12x36. Mais de um GM pode ocupar o mesmo posto: cada inclusão cria um cartão próprio e não substitui quem já está cadastrado.</small><label>GM<select name="guardId" required defaultValue=""><option value="">Selecione o GM</option>{addableGuards.map((guard) => <option key={String(guard.id)} value={String(guard.id)}>{guard.name} · {guard.platoon || "Sem equipe"}</option>)}</select></label><label>Posto ou viatura<select name="destination" required defaultValue=""><option value="">Selecione o destino</option><DestinationOptions data={data} /></select></label><input type="hidden" name="weekdays" value="1,2,3,4,5" /><div className="weekly-weekdays"><small>DIAS</small><b>SEG · TER · QUA · QUI · SEX</b></div><label>Entrada<input name="startsAt" type="time" defaultValue="08:00" required aria-label="Entrada" /></label><label>Saída normal<input name="regularEnd" type="time" defaultValue="17:00" required aria-label="Fim normal" /></label><label>Início intervalo<input name="breakStart" type="time" defaultValue="12:00" aria-label="Início do intervalo" /></label><label>Fim intervalo<input name="breakEnd" type="time" defaultValue="13:00" aria-label="Fim do intervalo" /></label><label className="weekly-he-field">HE fixa/dia<input name="overtimeHours" type="number" min="0" max="8" step="0.5" defaultValue="0" aria-label="Quantidade de horas extras fixas por dia" /></label><label>Função<select name="role"><RoleOptions /></select></label><button className="save" disabled={busy || addableGuards.length === 0}>{busy?"Salvando…":"Adicionar sem substituir"}</button></form>
+    <div className="weekly-current-head"><div><b>GMs atualmente na escala semanal</b><small>Edite horários e destinos diretamente nos cartões abaixo.</small></div><label>Buscar<input value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="Nome do GM, posto ou VTR…" /></label></div>
     {!data.weeklySlots.length && <div className="weekly-empty">Nenhum GM semanal cadastrado. Use o formulário abaixo para criar o primeiro expediente.</div>}
+    {data.weeklySlots.length>0&&!visibleSlots.length&&<div className="weekly-empty">Nenhum cadastro semanal corresponde à busca.</div>}
     <div className="weekly-slot-groups">{grouped.map((group) => <article className="weekly-slot-group" key={group.key}>
       <header><div><span>DESTINO</span><b>{group.label}</b></div><small>{group.slots.length} GM(s)</small></header>
       <div className="weekly-slot-list">{group.slots.map((slot) => <form className="weekly-slot-card" key={String(slot.id)} onSubmit={(event) => onSave(event, Number(slot.id))}>
@@ -657,7 +665,6 @@ function WeeklyEditor({ data, busy, onSave, onDelete }: { data: Data; busy: bool
         <div className="weekly-slot-summary"><span>Normal: {weeklyHoursLabel(slot)}</span>{slot.overtime_end && <strong>+ {weeklyOvertimeHours(slot)}HE · {String(slot.regular_end).slice(0,5)}–{String(slot.overtime_end).slice(0,5)}</strong>}<button disabled={busy}>Salvar alteração</button><button type="button" className="remove-slot" onClick={() => onDelete(slot)}>Remover</button></div>
       </form>)}</div>
     </article>)}</div>
-    <form className="weekly-add" onSubmit={(event) => onSave(event)}><b>Adicionar GM à escala semanal</b><small className="weekly-add-help">Ao salvar, o GM passa para o regime semanal e deixa de ocupar os padrões 12x36. Ele será incluído nos dias úteis automaticamente.</small><label>GM<select name="guardId" required defaultValue=""><option value="">Selecione o GM</option>{eligibleGuards.filter((guard) => !data.weeklySlots.some((slot) => Number(slot.guard_id) === Number(guard.id))).map((guard) => <option key={String(guard.id)} value={String(guard.id)}>{guard.name} · {guard.platoon}</option>)}</select></label><label>Destino<select name="destination" required defaultValue=""><option value="">Selecione posto ou VTR</option><DestinationOptions data={data} /></select></label><input type="hidden" name="weekdays" value="1,2,3,4,5" /><div className="weekly-weekdays"><small>DIAS</small><b>SEG · TER · QUA · QUI · SEX</b></div><label>Entrada<input name="startsAt" type="time" defaultValue="08:00" aria-label="Entrada" /></label><label>Saída normal<input name="regularEnd" type="time" defaultValue="17:00" aria-label="Fim normal" /></label><label>Início intervalo<input name="breakStart" type="time" defaultValue="12:00" aria-label="Início do intervalo" /></label><label>Fim intervalo<input name="breakEnd" type="time" defaultValue="13:00" aria-label="Fim do intervalo" /></label><label className="weekly-he-field">HE fixa/dia<input name="overtimeHours" type="number" min="0" max="8" step="0.5" defaultValue="0" aria-label="Quantidade de horas extras fixas por dia" /></label><label>Função<select name="role"><RoleOptions /></select></label><button className="save" disabled={busy || eligibleGuards.length === 0}>Adicionar semanal</button></form>
   </section>;
 }
 

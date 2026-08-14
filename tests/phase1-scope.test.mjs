@@ -385,6 +385,14 @@ test("weekly overtime extension is also visible in the night period", () => {
   assert.deepEqual(coveredOperationalShifts(assignment, "2026-08-12"), ["2", "3", "4"]);
 });
 
+test("weekly fixed overtime ending at 19h stays in the third turn", () => {
+  const assignment = { shift: "W", starts_at: "2026-08-12T08:00", ends_at: "2026-08-12T19:00" };
+  assert.deepEqual(coveredOperationalShifts(assignment, "2026-08-12"), ["2", "3"]);
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  assert.match(schedule, /fixedWeeklyOvertimeLabel\(a,date,s\.id\)/);
+  assert.match(schedule, /weeklyDisplayInShift\(a,date,shift\)/);
+});
+
 test("overtime shortcut lives inside the GM card and stays distinct from add actions", () => {
   const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
   const density = readFileSync(resolve("app/schedule-density.css"), "utf8");
@@ -1661,6 +1669,13 @@ test("leave imports stay 12x36 while the weekly editor can explicitly convert a 
   assert.match(patternsApi, /guardUsesRegime\(guardId, "12x36"\)/);
   assert.match(patterns, /eligibleGuards = data\.guards/);
   assert.match(patterns, /o GM passa para o regime semanal e deixa de ocupar os padrões 12x36/);
+  assert.match(patternsApi, /reconcileWeeklyGuardSchedules\(env\.DB,guardId\)/);
+  assert.match(patternsApi, /DELETE FROM pattern_operational_group_members WHERE resource_kind='guard' AND resource_id=\?/);
+  const scheduleApi = readFileSync(resolve("app/api/schedule/route.ts"), "utf8");
+  assert.match(scheduleApi, /COALESCE\(g\.work_regime,'12x36'\)!='weekly'/);
+  assert.match(scheduleApi, /COALESCE\(a\.work_kind,'shift'\) IN \('weekly','overtime_extension','time_bank_positive'\)/);
+  assert.match(patterns, /Mais de um GM pode ocupar o mesmo posto/);
+  assert.match(patterns, /GMs atualmente na escala semanal/);
   assert.match(patterns, /unassignedGuards = shiftGuards\(data\.guards\)/);
 });
 

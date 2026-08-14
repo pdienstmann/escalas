@@ -161,7 +161,7 @@ export async function GET(request: Request) {
     env.DB.prepare(`SELECT s.id,s.pattern_id,s.guard_id,s.post_id,s.vehicle_id,s.shift,s.role,p.code pattern_code,p.period pattern_period,g.name guard_name,g.registration,po.name post_name,po.group_name post_group_name,v.prefix vehicle_prefix,v.zone vehicle_zone
       FROM pattern_slots s JOIN shift_patterns p ON p.id=s.pattern_id JOIN guards g ON g.id=s.guard_id
       LEFT JOIN posts po ON po.id=s.post_id LEFT JOIN vehicles v ON v.id=s.vehicle_id
-      WHERE p.active=1 AND g.active=1`),
+      WHERE p.active=1 AND g.active=1 AND COALESCE(g.work_regime,'12x36')='12x36'`),
     env.DB.prepare(`SELECT w.id,w.guard_id,w.post_id,w.vehicle_id,w.role,w.weekdays,w.starts_at,w.regular_end,w.overtime_end,g.name guard_name,g.registration,po.name post_name,po.group_name post_group_name,v.prefix vehicle_prefix,v.zone vehicle_zone
       FROM weekly_slots w JOIN guards g ON g.id=w.guard_id AND g.active=1
       LEFT JOIN posts po ON po.id=w.post_id LEFT JOIN vehicles v ON v.id=w.vehicle_id WHERE w.active=1`),
@@ -173,7 +173,8 @@ export async function GET(request: Request) {
     env.DB.prepare(`SELECT a.*,s.date schedule_date,g.name guard_name,g.registration,p.name post_name,p.group_name post_group_name,v.prefix vehicle_prefix,v.zone vehicle_zone
       FROM assignments a JOIN schedules s ON s.id=a.schedule_id JOIN guards g ON g.id=a.guard_id
       LEFT JOIN posts p ON p.id=a.post_id LEFT JOIN vehicles v ON v.id=a.vehicle_id
-      WHERE s.date>=? AND s.date<?`).bind(bounds.start,bounds.end),
+      WHERE s.date>=? AND s.date<?
+        AND (COALESCE(g.work_regime,'12x36')!='weekly' OR COALESCE(a.work_kind,'shift') IN ('weekly','overtime_extension','time_bank_positive'))`).bind(bounds.start,bounds.end),
     env.DB.prepare("SELECT o.*,v.prefix,v.type,v.zone FROM vehicle_outages o JOIN vehicles v ON v.id=o.vehicle_id WHERE o.active=1 AND o.starts_on<? AND (o.ends_on IS NULL OR o.ends_on>=?)").bind(bounds.end,bounds.start),
     env.DB.prepare("SELECT * FROM service_adjustments WHERE status='active' AND ((service_date>=? AND service_date<?) OR (counterpart_service_date>=? AND counterpart_service_date<?))").bind(bounds.start,bounds.end,bounds.start,bounds.end),
     env.DB.prepare("SELECT id,name,short_name,color,sort_order FROM operational_groups WHERE active=1 ORDER BY sort_order,name"),
@@ -224,8 +225,14 @@ export async function GET(request: Request) {
   const groupById = new Map(groups.results.map((group) => [Number(group.id), group]));
   const globalLinks = new Map<string, Row[]>();
   const patternLinks = new Map<string, Row[]>();
-  for (const link of groupMembers.results) globalLinks.set(resourceKey(String(link.resource_kind), link.resource_id), [...(globalLinks.get(resourceKey(String(link.resource_kind), link.resource_id)) || []), link]);
-  for (const link of patternGroupMembers.results) patternLinks.set(`${Number(link.pattern_id)}:${resourceKey(String(link.resource_kind), link.resource_id)}`, [...(patternLinks.get(`${Number(link.pattern_id)}:${resourceKey(String(link.resource_kind), link.resource_id)}`) || []), link]);
+  for (const link of groupMembers.results) {
+    if (String(link.resource_kind)==="guard"&&String(guardById.get(Number(link.resource_id))?.work_regime||"12x36")==="weekly") continue;
+    globalLinks.set(resourceKey(String(link.resource_kind), link.resource_id), [...(globalLinks.get(resourceKey(String(link.resource_kind), link.resource_id)) || []), link]);
+  }
+  for (const link of patternGroupMembers.results) {
+    if (String(link.resource_kind)==="guard"&&String(guardById.get(Number(link.resource_id))?.work_regime||"12x36")==="weekly") continue;
+    patternLinks.set(`${Number(link.pattern_id)}:${resourceKey(String(link.resource_kind), link.resource_id)}`, [...(patternLinks.get(`${Number(link.pattern_id)}:${resourceKey(String(link.resource_kind), link.resource_id)}`) || []), link]);
+  }
   const anchor = String(patternByCode.get("D1")?.anchor_date || "2026-08-12");
 
   function patternCode(date: string, period: PeriodKey) {

@@ -474,7 +474,11 @@ export async function GET(request: Request) {
         "SELECT id,prefix,type,zone FROM vehicles v WHERE active=1 AND NOT EXISTS (SELECT 1 FROM schedule_resource_exclusions e WHERE e.schedule_id=? AND e.resource_kind='vehicle' AND e.resource_id=v.id) AND NOT EXISTS (SELECT 1 FROM vehicle_return_reconciliations r WHERE r.schedule_id=? AND r.vehicle_id=v.id AND r.status IN ('pending','kept')) ORDER BY prefix",
       ).bind(schedule?.id,schedule?.id).all(),
       env.DB.prepare(
-        "SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id WHERE a.schedule_id=? ORDER BY a.shift,a.role,g.name",
+        `SELECT a.*,g.name guard_name FROM assignments a JOIN guards g ON g.id=a.guard_id
+         WHERE a.schedule_id=?
+           AND (COALESCE(g.work_regime,'12x36')!='weekly'
+             OR COALESCE(a.work_kind,'shift') IN ('weekly','overtime_extension','time_bank_positive'))
+         ORDER BY a.shift,a.role,g.name`,
       )
         .bind(schedule?.id)
         .all(),
@@ -502,7 +506,7 @@ export async function GET(request: Request) {
       env.DB.prepare("SELECT id,name,short_name,color,sort_order,active FROM operational_groups WHERE active=1 ORDER BY sort_order,name").all(),
       env.DB.prepare(`SELECT m.id,m.group_id,m.resource_kind,m.resource_id,m.team_label,g.name group_name,g.short_name group_short_name,g.color group_color,g.sort_order group_sort_order
         FROM operational_group_members m JOIN operational_groups g ON g.id=m.group_id
-        WHERE g.active=1 ORDER BY g.sort_order,g.name,m.resource_kind,m.resource_id`).all(),
+        WHERE g.active=1 AND (m.resource_kind!='guard' OR EXISTS (SELECT 1 FROM guards gm WHERE gm.id=m.resource_id AND gm.active=1 AND COALESCE(gm.work_regime,'12x36')!='weekly')) ORDER BY g.sort_order,g.name,m.resource_kind,m.resource_id`).all(),
       env.DB.prepare("SELECT COUNT(*) total FROM weekly_slots WHERE active=1").first<{ total: number }>(),
     ]);
   const operationAssignments=(await env.DB.prepare(`SELECT os.guard_id,o.starts_at,o.ends_at FROM operation_slots os JOIN operations o ON o.id=os.operation_id WHERE o.schedule_id=? AND o.status!='cancelled' AND os.guard_id IS NOT NULL`).bind(schedule?.id).all<{guard_id:number;starts_at:string;ends_at:string}>()).results;
@@ -532,6 +536,7 @@ export async function GET(request: Request) {
     ? await env.DB.prepare(`SELECT m.id,m.pattern_id,m.group_id,m.resource_kind,m.resource_id,m.team_label,m.shift,m.vehicle_id,m.starts_at,m.ends_at,p.code pattern_code,p.period pattern_period,g.name group_name,g.short_name group_short_name,g.color group_color,g.sort_order group_sort_order
       FROM pattern_operational_group_members m JOIN shift_patterns p ON p.id=m.pattern_id AND p.active=1 JOIN operational_groups g ON g.id=m.group_id AND g.active=1
       WHERE m.pattern_id IN (SELECT day_pattern_id FROM schedule_patterns WHERE schedule_id=? UNION SELECT night_pattern_id FROM schedule_patterns WHERE schedule_id=?)
+        AND (m.resource_kind!='guard' OR EXISTS (SELECT 1 FROM guards gm WHERE gm.id=m.resource_id AND gm.active=1 AND COALESCE(gm.work_regime,'12x36')!='weekly'))
       ORDER BY g.sort_order,g.name,m.resource_kind,m.resource_id`).bind(schedule?.id,schedule?.id).all()
     : { results: [] as Record<string, unknown>[] };
   const contextualMembers = [...operationalGroupMembers.results, ...patternOperationalGroupMembers.results];

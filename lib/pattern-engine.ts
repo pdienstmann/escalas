@@ -161,7 +161,7 @@ export async function applyPatternsToSchedule(
   const groupAssignmentsByPattern = new Map<number, Record<string, unknown>[]>();
   for (const pattern of patterns) {
     const rows = (
-      await db.prepare("SELECT resource_id,shift,vehicle_id,starts_at,ends_at FROM pattern_operational_group_members WHERE pattern_id=? AND resource_kind='guard'")
+      await db.prepare("SELECT m.resource_id,m.shift,m.vehicle_id,m.starts_at,m.ends_at FROM pattern_operational_group_members m JOIN guards g ON g.id=m.resource_id AND g.active=1 AND COALESCE(g.work_regime,'12x36')='12x36' WHERE m.pattern_id=? AND m.resource_kind='guard'")
         .bind(pattern.id)
         .all<Record<string, unknown>>()
     ).results;
@@ -175,7 +175,7 @@ export async function applyPatternsToSchedule(
   for (const pattern of patterns) {
     const slots = (
         await db
-          .prepare("SELECT * FROM pattern_slots WHERE pattern_id=?")
+          .prepare("SELECT s.* FROM pattern_slots s JOIN guards g ON g.id=s.guard_id AND g.active=1 AND COALESCE(g.work_regime,'12x36')='12x36' WHERE s.pattern_id=?")
           .bind(pattern.id)
           .all<Record<string, unknown>>()
       ).results,
@@ -252,10 +252,10 @@ export async function applyPatternsToSchedule(
   return { ...automatic, dayCode, nightCode, applied: commands.length > 0 };
 }
 
-export async function applyWeeklyToSchedule(db:D1Database,date:string,scheduleId:number) {
+export async function applyWeeklyToSchedule(db:D1Database,date:string,scheduleId:number,guardId?:number) {
   const weekday=new Date(`${date}T12:00:00Z`).getUTCDay();
   if(weekday===0||weekday===6)return 0;
-  const slots=(await db.prepare("SELECT w.* FROM weekly_slots w JOIN guards g ON g.id=w.guard_id WHERE w.active=1 AND g.active=1 AND instr(','||w.weekdays||',',','||?||',')>0 AND (w.vehicle_id IS NULL OR NOT EXISTS (SELECT 1 FROM vehicle_outages o WHERE o.vehicle_id=w.vehicle_id AND o.active=1 AND o.starts_on<=? AND (o.ends_on IS NULL OR o.ends_on>=?)))").bind(String(weekday),date,date).all<Record<string,unknown>>()).results;
+  const slots=(await db.prepare("SELECT w.* FROM weekly_slots w JOIN guards g ON g.id=w.guard_id WHERE w.active=1 AND g.active=1 AND (? IS NULL OR w.guard_id=?) AND instr(','||w.weekdays||',',','||?||',')>0 AND (w.vehicle_id IS NULL OR NOT EXISTS (SELECT 1 FROM vehicle_outages o WHERE o.vehicle_id=w.vehicle_id AND o.active=1 AND o.starts_on<=? AND (o.ends_on IS NULL OR o.ends_on>=?)))").bind(guardId||null,guardId||null,String(weekday),date,date).all<Record<string,unknown>>()).results;
   const statements:D1PreparedStatement[]=[];
   for(const slot of slots){
     const end=String(slot.overtime_end||slot.regular_end);
@@ -263,4 +263,26 @@ export async function applyWeeklyToSchedule(db:D1Database,date:string,scheduleId
   }
   if(statements.length)await db.batch(statements);
   return statements.length;
+}
+
+/** Replace already generated 12x36 blocks with this GM's weekly routine. */
+export async function reconcileWeeklyGuardSchedules(db:D1Database,guardId:number) {
+  await db.prepare(
+    "DELETE FROM assignments WHERE guard_id=? AND COALESCE(work_kind,'shift') NOT IN ('overtime_extension','time_bank_positive')",
+  ).bind(guardId).run();
+  const result=await db.prepare(`INSERT OR IGNORE INTO assignments
+    (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,regular_ends_at,break_starts_at,break_ends_at,work_kind,status,request_ref)
+    SELECT s.id,w.guard_id,w.post_id,w.vehicle_id,'W',w.role,
+      s.date||'T'||w.starts_at,
+      (CASE WHEN COALESCE(w.overtime_end,w.regular_end)<=w.starts_at THEN date(s.date,'+1 day') ELSE s.date END)||'T'||COALESCE(w.overtime_end,w.regular_end),
+      (CASE WHEN w.regular_end<=w.starts_at THEN date(s.date,'+1 day') ELSE s.date END)||'T'||w.regular_end,
+      CASE WHEN w.break_start IS NULL THEN NULL ELSE s.date||'T'||w.break_start END,
+      CASE WHEN w.break_end IS NULL THEN NULL ELSE s.date||'T'||w.break_end END,
+      'weekly',CASE WHEN w.overtime_end IS NOT NULL THEN 'overtime' ELSE 'normal' END,
+      CASE WHEN w.overtime_end IS NOT NULL THEN 'HE semanal após '||w.regular_end ELSE NULL END
+    FROM schedules s JOIN weekly_slots w ON w.guard_id=? AND w.active=1
+    JOIN guards g ON g.id=w.guard_id AND g.active=1
+    WHERE instr(','||w.weekdays||',',','||CAST(strftime('%w',s.date) AS TEXT)||',')>0
+      AND (w.vehicle_id IS NULL OR NOT EXISTS (SELECT 1 FROM vehicle_outages o WHERE o.vehicle_id=w.vehicle_id AND o.active=1 AND o.starts_on<=s.date AND (o.ends_on IS NULL OR o.ends_on>=s.date)))`).bind(guardId).run();
+  return { inserted:Number(result.meta.changes||0) };
 }

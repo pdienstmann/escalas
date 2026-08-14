@@ -2856,7 +2856,7 @@ function Row({
               onDragOver={(e) => { if (canReceiveDrag(s.id)) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; } }}
                onDrop={(e) => { if (canReceiveDrag(s.id)) drop(e, s.id); else { e.preventDefault(); e.stopPropagation(); setDropTargetId(null); } }}
             >
-              {list.map((a) => {const visualStatus=statusInShift(a,date,s.id),adjustmentBadge=assignmentAdjustmentBadge(a,serviceAdjustments,date),weeklyFixedHe=fixedWeeklyOvertimeLabel(a),canExtendAfter=extensionShortcutAvailable(a,s.id,date,allScheduleAssignments),canExtendBefore=earlyExtensionShortcutAvailable(a,s.id,date);return (<Fragment key={String(a.id)}><Fragment>
+              {list.map((a) => {const visualStatus=statusInShift(a,date,s.id),adjustmentBadge=assignmentAdjustmentBadge(a,serviceAdjustments,date),weeklyFixedHe=fixedWeeklyOvertimeLabel(a,date,s.id),canExtendAfter=extensionShortcutAvailable(a,s.id,date,allScheduleAssignments),canExtendBefore=earlyExtensionShortcutAvailable(a,s.id,date);return (<Fragment key={String(a.id)}><Fragment>
                 <div className={`live-person-card ${canExtendAfter||canExtendBefore?"has-he-action":""} ${dropTargetId===Number(a.id)?"drop-target":""} ${draggingAssignmentId===Number(a.id)?"dragging-source":""}`} onDragEnter={()=>{if(canDropOnCard(a))setDropTargetId(Number(a.id))}} onDragLeave={(event)=>{const next=event.relatedTarget;if(next instanceof Node&&event.currentTarget.contains(next))return;setDropTargetId(current=>current===Number(a.id)?null:current)}} onDragOver={(event)=>{if(!draggingAssignment)return;event.preventDefault();event.stopPropagation();event.dataTransfer.dropEffect=canDropOnCard(a)?"move":"none"}} onDrop={(event)=>{if(!draggingAssignment)return;event.preventDefault();event.stopPropagation();if(canDropOnCard(a))drop(event,s.id,Number(a.id))}}>
                 <button
                   type="button"
@@ -3296,7 +3296,6 @@ const statusClass = (s: string) =>
   s === "overtime" ? "he" : s === "time_bank" ? "bh" : "troca";
 const statusShort = (s: string) =>
   s === "overtime" ? "HE" : s === "time_bank" ? "BH" : "TROCA";
-function weeklyDisplay(a:Rec){const start=String(a.starts_at).slice(11,16),regular=String(a.regular_ends_at||"").slice(11,16),end=String(a.ends_at).slice(11,16),breakStart=String(a.break_starts_at||"").slice(11,16),breakEnd=String(a.break_ends_at||"").slice(11,16);if(String(a.work_kind)!=="weekly")return `${start}–${end}`;const base=breakStart&&breakEnd?`${start}–${breakStart} / ${breakEnd}–${regular}`:`${start}–${regular}`;return end!==regular?`${base} + HE semanal ${regular}–${end}`:base}
 function statusInShift(a:Rec,date:string,shift:string){
   const status=String(a.status||"normal"),regular=String(a.regular_ends_at||"");
   if(status!=="overtime"||!regular)return status;
@@ -3318,16 +3317,37 @@ function earlyExtensionShortcutAvailable(assignment:Rec,shift:string,date:string
   if(shift!=="4"||String(assignment.work_kind)==="overtime_extension")return false;
   return assignmentOverlapsShift(assignment,date,"4");
 }
-function fixedWeeklyOvertimeLabel(a:Rec){
+function fixedWeeklyOvertimeLabel(a:Rec,date:string,shift:string){
   if(String(a.work_kind)!=="weekly"||!a.regular_ends_at)return "";
-  const hours=Math.max(0,(Date.parse(String(a.ends_at))-Date.parse(String(a.regular_ends_at)))/3600000);
+  const regularStart=Date.parse(String(a.regular_ends_at)),end=Date.parse(String(a.ends_at));
+  const window=operationalShiftWindow(date,shift),windowStart=Date.parse(window.start),windowEnd=Date.parse(window.end);
+  const hours=Math.max(0,(Math.min(end,windowEnd)-Math.max(regularStart,windowStart))/3600000);
   if(!hours)return "";
   return `${Number(hours.toFixed(1))}HE`;
 }
 function assignmentDisplayInShift(a:Rec,date:string,shift:string){
-  if(String(a.work_kind)==="weekly"&&(shift==="2"||shift==="3"))return weeklyDisplay(a);
+  if(String(a.work_kind)==="weekly")return weeklyDisplayInShift(a,date,shift);
   const window=operationalShiftWindow(date,shift),start=String(a.starts_at),end=String(a.ends_at);
   const segmentStart=start>window.start?start:window.start,segmentEnd=end<window.end?end:window.end;
   const range=`${segmentStart.slice(11,16)}–${segmentEnd.slice(11,16)}`;
   return statusInShift(a,date,shift)==="overtime"&&a.regular_ends_at?`Extensão HE ${range}`:range;
+}
+function weeklyDisplayInShift(a:Rec,date:string,shift:string){
+  const window=operationalShiftWindow(date,shift),start=String(a.starts_at),end=String(a.ends_at),regular=String(a.regular_ends_at||a.ends_at);
+  const segmentStart=start>window.start?start:window.start,segmentEnd=end<window.end?end:window.end;
+  const regularEnd=regular<segmentEnd?regular:segmentEnd;
+  const parts:string[]=[];
+  if(segmentStart<regularEnd){
+    const breakStart=String(a.break_starts_at||""),breakEnd=String(a.break_ends_at||"");
+    if(breakStart&&breakEnd&&breakStart<regularEnd&&breakEnd>segmentStart){
+      if(segmentStart<breakStart)parts.push(`${segmentStart.slice(11,16)}–${breakStart.slice(11,16)}`);
+      if(breakEnd<regularEnd)parts.push(`${breakEnd.slice(11,16)}–${regularEnd.slice(11,16)}`);
+    }else parts.push(`${segmentStart.slice(11,16)}–${regularEnd.slice(11,16)}`);
+  }
+  if(segmentEnd>regular){
+    const overtimeStart=regular>segmentStart?regular:segmentStart;
+    const hours=Math.max(0,(Date.parse(segmentEnd)-Date.parse(overtimeStart))/3600000);
+    parts.push(`+${Number(hours.toFixed(1))}HE ${overtimeStart.slice(11,16)}–${segmentEnd.slice(11,16)}`);
+  }
+  return parts.join(" / ")||`${segmentStart.slice(11,16)}–${segmentEnd.slice(11,16)}`;
 }
