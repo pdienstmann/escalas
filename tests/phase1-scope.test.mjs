@@ -1854,3 +1854,28 @@ test("empty resources can be collapsed per schedule and stay out of the PDF", ()
   assert.match(print, /data\.schedule\?\.hide_empty_resources/);
   assert.match(print, /orderedResources\.filter/);
 });
+
+test("weekly cards explain active absences instead of looking missing", () => {
+  const dashboard = readFileSync(resolve("app/patterns-dashboard.tsx"), "utf8");
+  const api = readFileSync(resolve("app/api/patterns/route.ts"), "utf8");
+  assert.match(api, /active_movement_type/);
+  assert.match(api, /O GM está em \$\{movementLabel\(activeMovement\.type\)\}/);
+  assert.match(dashboard, /weekly-away-notice/);
+  assert.match(dashboard, /weeklyMovementText\(slot\)/);
+  assert.match(dashboard, /fica em “efetivo retirado” durante este período/);
+});
+
+test("removing a weekly GM restores the saved 12x36 origin and existing schedules", () => {
+  const api = readFileSync(resolve("app/api/patterns/route.ts"), "utf8");
+  const engine = readFileSync(resolve("lib/pattern-engine.ts"), "utf8");
+  const dashboard = readFileSync(resolve("app/patterns-dashboard.tsx"), "utf8");
+  const migration = readFileSync(resolve("drizzle/0020_weekly_return_contexts.sql"), "utf8");
+  assert.match(api, /captureWeeklyReturnContext\(guardId\)/);
+  assert.match(api, /weeklyRemovalPlan\(before\)/);
+  assert.match(api, /INSERT INTO pattern_slots/);
+  assert.match(api, /restore12x36GuardSchedules\(env\.DB,guardId\)/);
+  assert.match(dashboard, /Nenhum GM ficará sem escala/);
+  assert.match(engine, /export async function restore12x36GuardSchedules/);
+  assert.match(engine, /JOIN schedule_patterns sp ON sp\.schedule_id=s\.id/);
+  assert.match(migration, /weekly_return_contexts/);
+});

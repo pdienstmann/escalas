@@ -61,6 +61,12 @@ export const overtimeMonthClosures = sqliteTable("overtime_month_closures", {
   updatedAt:text("updated_at").notNull().default("CURRENT_TIMESTAMP"),
 },t=>[index("idx_overtime_month_closures_status").on(t.status)]);
 export const weeklySlots = sqliteTable("weekly_slots", {id:integer("id").primaryKey({autoIncrement:true}),guardId:integer("guard_id").notNull().references(()=>guards.id),weekdays:text("weekdays").notNull().default("1,2,3,4,5"),postId:integer("post_id").references(()=>posts.id),vehicleId:integer("vehicle_id").references(()=>vehicles.id),role:text("role").notNull().default("guard"),startsAt:text("starts_at").notNull().default("08:00"),breakStart:text("break_start"),breakEnd:text("break_end"),regularEnd:text("regular_end").notNull().default("17:00"),overtimeEnd:text("overtime_end"),active:integer("active",{mode:"boolean"}).notNull().default(true),...audit},t=>[uniqueIndex("idx_weekly_slots_guard").on(t.guardId)]);
+export const weeklyReturnContexts = sqliteTable("weekly_return_contexts", {
+  guardId:integer("guard_id").primaryKey().references(()=>guards.id),
+  patternSlotsJson:text("pattern_slots_json").notNull().default("[]"),
+  patternGroupsJson:text("pattern_groups_json").notNull().default("[]"),
+  ...audit,
+});
 export const vehicleOutages = sqliteTable("vehicle_outages", {id:integer("id").primaryKey({autoIncrement:true}),vehicleId:integer("vehicle_id").notNull().references(()=>vehicles.id),startsOn:text("starts_on").notNull(),endsOn:text("ends_on"),reason:text("reason"),active:integer("active",{mode:"boolean"}).notNull().default(true),...audit});
 export const vehicleReturnReconciliations = sqliteTable("vehicle_return_reconciliations", {
   id:integer("id").primaryKey({autoIncrement:true}),

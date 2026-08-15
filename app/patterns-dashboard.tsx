@@ -235,6 +235,7 @@ export function PatternsDashboard() {
       overtimeEnd: overtimeHours > 0 ? timeAfterHours(regularEnd, overtimeHours) : "",
       action: "weekly_save",
       id: id || null,
+      date,
     })) {
       if (!id) form.reset();
     }
@@ -389,7 +390,7 @@ export function PatternsDashboard() {
         </section>
       )}
 
-      {workspace === "weekly" && <WeeklyEditor data={data} busy={busy} onSave={saveWeekly} onDelete={(slot) => confirm(`Remover escala semanal de ${slot.guard_name}?`) && void action({ action: "weekly_delete", id: slot.id })} />}
+      {workspace === "weekly" && <WeeklyEditor data={data} busy={busy} onSave={saveWeekly} onDelete={(slot) => confirm(`Remover ${slot.guard_name} da escala semanal? O GM voltará automaticamente ao padrão ${slot.platoon || "12x36"}, em ${weeklyDestinationLabel(slot,data)}. Nenhum GM ficará sem escala.`) && void action({ action: "weekly_delete", id: slot.id })} />}
 
       <PatternGroupsPanel data={data} busy={busy} onAction={action} />
 
@@ -674,6 +675,7 @@ function WeeklyEditor({ data, busy, onSave, onDelete }: { data: Data; busy: bool
       <header><div><span>DESTINO</span><b>{group.label}</b></div><small>{group.slots.length} GM(s)</small></header>
       <div className="weekly-slot-list">{group.slots.map((slot) => <form className="weekly-slot-card" key={String(slot.id)} onSubmit={(event) => onSave(event, Number(slot.id))}>
         <div className="weekly-slot-card-head"><label>GM<select name="guardId" defaultValue={String(slot.guard_id)} aria-label="GM semanal">{eligibleGuards.filter((guard) => Number(guard.id) === Number(slot.guard_id) || !data.weeklySlots.some((weekly) => Number(weekly.guard_id) === Number(guard.id))).map((guard) => <option key={String(guard.id)} value={String(guard.id)}>{guard.name}</option>)}</select></label><label>Destino<select name="destination" defaultValue={slot.vehicle_id ? `vehicle:${slot.vehicle_id}` : `post:${slot.post_id}`} aria-label="Destino semanal"><DestinationOptions data={data} /></select></label><label>Função<select name="role" defaultValue={String(slot.role)}><RoleOptions /></select></label><span className={slot.overtime_end ? "weekly-he-badge" : "weekly-normal-badge"}>{slot.overtime_end ? `${weeklyOvertimeHours(slot)}HE fixa/dia` : "Sem HE fixa"}</span></div>
+        {slot.active_movement_type && <div className="weekly-away-notice"><b>{weeklyMovementText(slot)}</b><span>O cadastro semanal está correto; o cartão diário fica em “efetivo retirado” durante este período e retorna automaticamente depois.</span></div>}
         <input type="hidden" name="weekdays" value="1,2,3,4,5" />
         <div className="weekly-slot-row"><div className="weekly-weekdays"><small>DIAS</small><b>SEG · TER · QUA · QUI · SEX</b></div><label>Entrada<input name="startsAt" type="time" required defaultValue={String(slot.starts_at)} aria-label="Entrada" /></label><label>Saída normal<input name="regularEnd" type="time" required defaultValue={String(slot.regular_end)} aria-label="Fim normal" /></label></div>
         <div className="weekly-slot-row"><label>Início intervalo<input name="breakStart" type="time" defaultValue={String(slot.break_start || "")} aria-label="Início do intervalo" /></label><label>Fim intervalo<input name="breakEnd" type="time" defaultValue={String(slot.break_end || "")} aria-label="Fim do intervalo" /></label><label className="weekly-he-field">HE fixa por dia<input name="overtimeHours" type="number" min="0" max="8" step="0.5" defaultValue={weeklyOvertimeHours(slot) || ""} placeholder="Ex.: 2" aria-label="Quantidade de horas extras fixas por dia" /></label></div>
@@ -704,6 +706,17 @@ function weeklyOvertimeHours(slot: Rec) {
   const [regularHour, regularMinute] = regular.split(":").map(Number), [overtimeHour, overtimeMinute] = overtime.split(":").map(Number);
   const minutes = (overtimeHour * 60 + overtimeMinute - regularHour * 60 - regularMinute + 1440) % 1440;
   return Number((minutes / 60).toFixed(1));
+}
+
+function weeklyMovementText(slot: Rec) {
+  const labels: Record<string,string>={day_off:"FOLGA",vacation:"FÉRIAS",course:"CURSO",medical_leave:"ATESTADO/LICENÇA",technical_reserve:"RESERVA TÉCNICA",time_bank:"BANCO DE HORAS",other_leave:"AFASTAMENTO"};
+  const rawEnd=String(slot.active_movement_ends_at||"").slice(0,10);
+  let period="nesta data";
+  if(rawEnd){
+    const end=new Date(`${rawEnd}T12:00:00Z`);end.setUTCDate(end.getUTCDate()-1);
+    period=`até ${end.toLocaleDateString("pt-BR",{timeZone:"UTC"})}`;
+  }
+  return `${labels[String(slot.active_movement_type)]||"AFASTAMENTO"} · ${period}`;
 }
 
 function shiftGuards(guards: Rec[]) {

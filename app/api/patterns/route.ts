@@ -4,6 +4,7 @@ import {
   applyWeeklyToSchedule,
   ensurePatterns,
   reconcileWeeklyGuardSchedules,
+  restore12x36GuardSchedules,
   resolvePatternCodes,
 } from "../../../lib/pattern-engine";
 import { writeAudit } from "../../../lib/audit";
@@ -12,6 +13,69 @@ import { ensureOperationalGroups } from "../../../lib/operational-groups-db";
 import { operationalGroupAnchorShift, operationalGroupDurationHours } from "../../../lib/operational-group-schedule";
 import { isMotorcycleType } from "../../../lib/crew-rules";
 export const dynamic = "force-dynamic";
+
+let weeklyReturnContextsReady: Promise<void> | null = null;
+
+async function ensureWeeklyReturnContexts() {
+  if (!weeklyReturnContextsReady) {
+    weeklyReturnContextsReady = env.DB.prepare(`CREATE TABLE IF NOT EXISTS weekly_return_contexts (
+      guard_id INTEGER PRIMARY KEY REFERENCES guards(id),
+      pattern_slots_json TEXT NOT NULL DEFAULT '[]',
+      pattern_groups_json TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`).run().then(() => undefined).catch((error) => {
+      weeklyReturnContextsReady = null;
+      throw error;
+    });
+  }
+  await weeklyReturnContextsReady;
+}
+
+function parseRows(value: unknown) {
+  try {
+    const parsed = JSON.parse(String(value || "[]"));
+    return Array.isArray(parsed) ? parsed as Record<string,unknown>[] : [];
+  } catch {
+    return [] as Record<string,unknown>[];
+  }
+}
+
+function movementLabel(type: unknown) {
+  const labels: Record<string,string> = { day_off:"folga", vacation:"férias", course:"curso", medical_leave:"atestado/licença", technical_reserve:"reserva técnica", time_bank:"banco de horas", other_leave:"afastamento" };
+  return labels[String(type || "")] || "afastamento";
+}
+
+async function captureWeeklyReturnContext(guardId: number) {
+  const existing = await env.DB.prepare("SELECT guard_id FROM weekly_return_contexts WHERE guard_id=?").bind(guardId).first();
+  if (existing) return;
+  const [slots, groups] = await Promise.all([
+    env.DB.prepare("SELECT pattern_id,post_id,vehicle_id,shift,role FROM pattern_slots WHERE guard_id=? ORDER BY id").bind(guardId).all<Record<string,unknown>>(),
+    env.DB.prepare(`SELECT pattern_id,group_id,resource_kind,resource_id,team_label,shift,vehicle_id,starts_at,ends_at
+      FROM pattern_operational_group_members WHERE resource_kind='guard' AND resource_id=? ORDER BY id`).bind(guardId).all<Record<string,unknown>>(),
+  ]);
+  if (!slots.results.length && !groups.results.length) return;
+  await env.DB.prepare(`INSERT INTO weekly_return_contexts (guard_id,pattern_slots_json,pattern_groups_json)
+    VALUES (?,?,?) ON CONFLICT(guard_id) DO NOTHING`).bind(guardId,JSON.stringify(slots.results),JSON.stringify(groups.results)).run();
+}
+
+async function weeklyRemovalPlan(slot: Record<string,unknown>) {
+  const guardId=Number(slot.guard_id||0);
+  const [guard, context] = await Promise.all([
+    env.DB.prepare("SELECT id,name,platoon FROM guards WHERE id=? AND active=1").bind(guardId).first<{id:number;name:string;platoon:string|null}>(),
+    env.DB.prepare("SELECT * FROM weekly_return_contexts WHERE guard_id=?").bind(guardId).first<Record<string,unknown>>(),
+  ]);
+  if(!guard)return {error:"O GM deste cadastro semanal não está mais ativo."};
+  let slots=parseRows(context?.pattern_slots_json);
+  const groups=parseRows(context?.pattern_groups_json);
+  if(!slots.length){
+    const code=String(guard.platoon||"").toUpperCase();
+    const pattern=await env.DB.prepare("SELECT id,code FROM shift_patterns WHERE active=1 AND code=? LIMIT 1").bind(code).first<{id:number;code:string}>();
+    if(!pattern)return {error:`Antes de remover ${guard.name}, defina sua equipe 12x36 (D1, D2, N1 ou N2) no cadastro.`};
+    slots=[{pattern_id:pattern.id,post_id:slot.post_id||null,vehicle_id:slot.vehicle_id||null,shift:null,role:slot.role||"guard"}];
+  }
+  return {guard,slots,groups};
+}
 
 function destination(body: Record<string, string | number | boolean | null>) {
   const [type, id] = String(body.destination || "").split(":");
@@ -41,9 +105,14 @@ export async function GET(request: Request) {
     return Response.json({ error: "Não autorizado" }, { status: 401 });
   await ensurePatterns(env.DB);
   await ensureOperationalGroups(env.DB);
+  await ensureWeeklyReturnContexts();
   const previewDate =
     new URL(request.url).searchParams.get("date") ||
     new Date().toISOString().slice(0, 10);
+  const previewNext = new Date(`${previewDate}T12:00:00Z`);
+  previewNext.setUTCDate(previewNext.getUTCDate() + 1);
+  const previewStartsAt = `${previewDate}T00:00`;
+  const previewEndsAt = `${previewNext.toISOString().slice(0,10)}T00:00`;
   const [patterns, slots, guards, posts, vehicles, preview, weeklySlots, operationalGroups, operationalGroupMembers, patternOperationalGroupMembers] = await Promise.all(
     [
       env.DB.prepare(
@@ -62,7 +131,12 @@ export async function GET(request: Request) {
         "SELECT id,prefix,type,zone FROM vehicles WHERE active=1 ORDER BY prefix",
       ).all(),
       resolvePatternCodes(env.DB, previewDate),
-      env.DB.prepare("SELECT w.*,g.name guard_name,g.platoon,p.name post_name,p.group_name,v.prefix,v.zone FROM weekly_slots w JOIN guards g ON g.id=w.guard_id LEFT JOIN posts p ON p.id=w.post_id LEFT JOIN vehicles v ON v.id=w.vehicle_id WHERE w.active=1 ORDER BY p.group_name,p.name,v.prefix,g.name").all(),
+      env.DB.prepare(`SELECT w.*,g.name guard_name,g.platoon,p.name post_name,p.group_name,v.prefix,v.zone,
+        (SELECT m.type FROM movements m WHERE m.guard_id=w.guard_id AND m.status='approved' AND m.starts_at<? AND m.ends_at>? ORDER BY m.starts_at LIMIT 1) active_movement_type,
+        (SELECT m.starts_at FROM movements m WHERE m.guard_id=w.guard_id AND m.status='approved' AND m.starts_at<? AND m.ends_at>? ORDER BY m.starts_at LIMIT 1) active_movement_starts_at,
+        (SELECT m.ends_at FROM movements m WHERE m.guard_id=w.guard_id AND m.status='approved' AND m.starts_at<? AND m.ends_at>? ORDER BY m.starts_at LIMIT 1) active_movement_ends_at
+        FROM weekly_slots w JOIN guards g ON g.id=w.guard_id LEFT JOIN posts p ON p.id=w.post_id LEFT JOIN vehicles v ON v.id=w.vehicle_id
+        WHERE w.active=1 ORDER BY p.group_name,p.name,v.prefix,g.name`).bind(previewEndsAt,previewStartsAt,previewEndsAt,previewStartsAt,previewEndsAt,previewStartsAt).all(),
       env.DB.prepare("SELECT id,name,short_name,color,sort_order,active FROM operational_groups WHERE active=1 ORDER BY sort_order,name").all(),
       env.DB.prepare(`SELECT m.id,m.group_id,m.resource_kind,m.resource_id,m.team_label,g.name group_name,g.short_name group_short_name,g.color group_color,g.sort_order group_sort_order
         FROM operational_group_members m JOIN operational_groups g ON g.id=m.group_id
@@ -113,6 +187,7 @@ export async function POST(request: Request) {
   >;
   await ensurePatterns(env.DB);
   await ensureOperationalGroups(env.DB);
+  await ensureWeeklyReturnContexts();
   try {
     if (body.action === "anchor") {
       const before = await env.DB.prepare("SELECT anchor_date FROM shift_patterns WHERE active=1 LIMIT 1").first<Record<string,unknown>>();
@@ -353,6 +428,9 @@ export async function POST(request: Request) {
       const duplicateWeekly=await env.DB.prepare("SELECT id FROM weekly_slots WHERE guard_id=? AND active=1 AND id<>? LIMIT 1").bind(guardId,id).first();
       if (duplicateWeekly) return Response.json({ error: "Este GM já possui um cadastro na escala semanal." }, { status: 409 });
       const before=id?await env.DB.prepare("SELECT * FROM weekly_slots WHERE id=?").bind(id).first<Record<string,unknown>>():null;
+      if(id&&!before)return Response.json({error:"Cadastro semanal não encontrado."},{status:404});
+      if(before&&Number(before.guard_id)!==guardId)return Response.json({error:"Para trocar o GM, remova este cadastro e adicione o outro. Assim o retorno ao 12x36 permanece seguro."},{status:409});
+      if(!id)await captureWeeklyReturnContext(guardId);
       let weeklyId=id;
       if(id)await env.DB.prepare("UPDATE weekly_slots SET guard_id=?,weekdays=?,post_id=?,vehicle_id=?,role=?,starts_at=?,break_start=?,break_end=?,regular_end=?,overtime_end=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(guardId,body.weekdays||"1,2,3,4,5",d.postId,d.vehicleId,body.role,body.startsAt,body.breakStart||null,body.breakEnd||null,body.regularEnd,body.overtimeEnd||null,id).run();
       else {const created=await env.DB.prepare(`INSERT INTO weekly_slots (guard_id,weekdays,post_id,vehicle_id,role,starts_at,break_start,break_end,regular_end,overtime_end,active)
@@ -362,23 +440,35 @@ export async function POST(request: Request) {
       await env.DB.prepare("DELETE FROM pattern_slots WHERE guard_id=?").bind(guardId).run();
       await env.DB.prepare("DELETE FROM pattern_operational_group_members WHERE resource_kind='guard' AND resource_id=?").bind(guardId).run();
       await reconcileWeeklyGuardSchedules(env.DB,guardId);
-      if(before&&Number(before.guard_id)!==guardId)await env.DB.batch([
-        env.DB.prepare("UPDATE guards SET work_regime='12x36',base_shift=CASE WHEN upper(COALESCE(platoon,'')) LIKE 'N%' THEN '12x36 noite' ELSE '12x36 dia' END WHERE id=?").bind(before.guard_id),
-        env.DB.prepare("DELETE FROM assignments WHERE guard_id=? AND work_kind='weekly'").bind(before.guard_id),
-      ]);
       const after=await env.DB.prepare("SELECT * FROM weekly_slots WHERE id=?").bind(weeklyId).first();
       await writeAudit(request,{action:id?"update":"create",entityType:"weekly_slot",entityId:weeklyId,summary:`${id?"Alterou":"Criou"} escala semanal`,before,after:after as Record<string,unknown>});
-      return Response.json({ok:true,message:"Escala semanal salva e integrada aos dias úteis."});
+      const selectedDate=/^\d{4}-\d{2}-\d{2}$/.test(String(body.date||""))?String(body.date):new Date().toISOString().slice(0,10);
+      const nextDate=new Date(`${selectedDate}T12:00:00Z`);nextDate.setUTCDate(nextDate.getUTCDate()+1);
+      const activeMovement=await env.DB.prepare(`SELECT type,starts_at,ends_at FROM movements
+        WHERE guard_id=? AND status='approved' AND starts_at<? AND ends_at>? ORDER BY starts_at LIMIT 1`).bind(guardId,`${nextDate.toISOString().slice(0,10)}T00:00`,`${selectedDate}T00:00`).first<Record<string,unknown>>();
+      return Response.json({ok:true,message:activeMovement?`Escala semanal salva. O GM está em ${movementLabel(activeMovement.type)} nesta data e aparecerá após o término do afastamento.`:"Escala semanal salva e integrada de segunda a sexta."});
     }
     if(body.action==="weekly_delete") {
       const before=await env.DB.prepare("SELECT * FROM weekly_slots WHERE id=?").bind(body.id).first<Record<string,unknown>>();
-      await env.DB.prepare("DELETE FROM weekly_slots WHERE id=?").bind(body.id).run();
-      if(before)await env.DB.batch([
-        env.DB.prepare("UPDATE guards SET work_regime='12x36',base_shift=CASE WHEN upper(COALESCE(platoon,'')) LIKE 'N%' THEN '12x36 noite' ELSE '12x36 dia' END WHERE id=?").bind(before.guard_id),
-        env.DB.prepare("DELETE FROM assignments WHERE guard_id=? AND work_kind='weekly'").bind(before.guard_id),
-      ]);
+      if(!before)return Response.json({error:"Cadastro semanal não encontrado."},{status:404});
+      const plan=await weeklyRemovalPlan(before);
+      if("error" in plan)return Response.json({error:plan.error},{status:409});
+      const guardId=Number(before.guard_id);
+      const commands:D1PreparedStatement[]=[
+        env.DB.prepare("DELETE FROM weekly_slots WHERE id=?").bind(body.id),
+        env.DB.prepare("UPDATE guards SET work_regime='12x36',base_shift=CASE WHEN upper(COALESCE(platoon,'')) LIKE 'N%' THEN '12x36 noite' ELSE '12x36 dia' END WHERE id=?").bind(guardId),
+        env.DB.prepare("DELETE FROM assignments WHERE guard_id=? AND work_kind='weekly'").bind(guardId),
+      ];
+      for(const slot of plan.slots)commands.push(env.DB.prepare(`INSERT INTO pattern_slots (pattern_id,guard_id,post_id,vehicle_id,shift,role)
+        SELECT ?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM pattern_slots WHERE pattern_id=? AND guard_id=?)`).bind(slot.pattern_id,guardId,slot.post_id||null,slot.vehicle_id||null,slot.shift||null,slot.role||"guard",slot.pattern_id,guardId));
+      for(const group of plan.groups)commands.push(env.DB.prepare(`INSERT OR IGNORE INTO pattern_operational_group_members
+        (pattern_id,group_id,resource_kind,resource_id,team_label,shift,vehicle_id,starts_at,ends_at) VALUES (?,?,?,?,?,?,?,?,?)`).bind(group.pattern_id,group.group_id,"guard",guardId,group.team_label||null,group.shift||null,group.vehicle_id||null,group.starts_at||null,group.ends_at||null));
+      commands.push(env.DB.prepare("DELETE FROM weekly_return_contexts WHERE guard_id=?").bind(guardId));
+      await env.DB.batch(commands);
+      await restore12x36GuardSchedules(env.DB,guardId);
       await writeAudit(request,{action:"delete",entityType:"weekly_slot",entityId:Number(body.id),summary:"Removeu escala semanal",before});
-      return Response.json({ok:true});
+      const patternCodes=(await env.DB.prepare(`SELECT DISTINCT p.code FROM pattern_slots ps JOIN shift_patterns p ON p.id=ps.pattern_id WHERE ps.guard_id=? ORDER BY p.code`).bind(guardId).all<{code:string}>()).results.map(item=>item.code).join(", ");
+      return Response.json({ok:true,message:`${plan.guard.name} saiu da escala semanal e voltou ao padrão ${patternCodes||plan.guard.platoon||"12x36"}. As escalas já abertas foram sincronizadas.`});
     }
     if (body.action === "apply") {
       if (!body.confirm)

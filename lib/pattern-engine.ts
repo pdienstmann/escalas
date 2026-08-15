@@ -317,3 +317,48 @@ export async function reconcileWeeklyGuardSchedules(db:D1Database,guardId:number
       AND (w.vehicle_id IS NULL OR NOT EXISTS (SELECT 1 FROM vehicle_outages o WHERE o.vehicle_id=w.vehicle_id AND o.active=1 AND o.starts_on<=s.date AND (o.ends_on IS NULL OR o.ends_on>=s.date)))`).bind(guardId).run();
   return { inserted:Number(result.meta.changes||0) };
 }
+
+/** Restore a GM removed from the weekly registry to every already generated
+ * schedule that uses the GM's recovered 12x36 pattern. Existing day-specific
+ * assignments are preserved and prevent a duplicate automatic block. */
+export async function restore12x36GuardSchedules(db:D1Database,guardId:number) {
+  const slots=(await db.prepare(`SELECT ps.*,p.period FROM pattern_slots ps
+    JOIN shift_patterns p ON p.id=ps.pattern_id AND p.active=1
+    WHERE ps.guard_id=?`).bind(guardId).all<Record<string,unknown>>()).results;
+  if(!slots.length)return {inserted:0};
+  const groupRows=(await db.prepare(`SELECT m.pattern_id,m.shift,m.vehicle_id,m.starts_at,m.ends_at
+    FROM pattern_operational_group_members m
+    WHERE m.resource_kind='guard' AND m.resource_id=?`).bind(guardId).all<Record<string,unknown>>()).results;
+  const groupsByPattern=new Map(groupRows.map(row=>[Number(row.pattern_id),row]));
+  const statements:D1PreparedStatement[]=[];
+  for(const slot of slots){
+    const schedules=(await db.prepare(`SELECT s.id,s.date FROM schedules s
+      JOIN schedule_patterns sp ON sp.schedule_id=s.id
+      WHERE (sp.day_pattern_id=? OR sp.night_pattern_id=?)
+        AND NOT EXISTS (SELECT 1 FROM assignments a WHERE a.schedule_id=s.id AND a.guard_id=? AND COALESCE(a.work_kind,'shift') NOT IN ('weekly','overtime_extension','time_bank_positive'))
+      ORDER BY s.date`).bind(slot.pattern_id,slot.pattern_id,guardId).all<{id:number;date:string}>()).results;
+    const group=groupsByPattern.get(Number(slot.pattern_id));
+    for(const schedule of schedules){
+      if(group){
+        const start=String(group.starts_at||defaultOperationalGroupStart(String(slot.period)));
+        const end=String(group.ends_at||timeAfterHours(start,12));
+        const interval=operationalGroupInterval(schedule.date,String(slot.period),start,end);
+        if(!interval)continue;
+        statements.push(db.prepare(`INSERT OR IGNORE INTO assignments
+          (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,status,work_kind)
+          VALUES (?,?,?,?,?,?,?,?,?,'shift')`).bind(schedule.id,guardId,null,group.vehicle_id||null,operationalGroupAnchorShift(start),slot.role,interval.start,interval.end,"normal"));
+        continue;
+      }
+      const shifts=String(slot.period)==="night"?["4","1"]:["2","3"];
+      const target=slot.shift&&shifts.includes(String(slot.shift))?[String(slot.shift)]:shifts;
+      for(const shift of target){
+        const interval=times(schedule.date,shift);
+        statements.push(db.prepare(`INSERT OR IGNORE INTO assignments
+          (schedule_id,guard_id,post_id,vehicle_id,shift,role,starts_at,ends_at,status,work_kind)
+          VALUES (?,?,?,?,?,?,?,?,?,'shift')`).bind(schedule.id,guardId,slot.post_id||null,slot.vehicle_id||null,shift,slot.role,interval.start,interval.end,"normal"));
+      }
+    }
+  }
+  if(statements.length)await db.batch(statements);
+  return {inserted:statements.length};
+}
