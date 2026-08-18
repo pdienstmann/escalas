@@ -38,6 +38,8 @@ import "./unified-navigation.css";
 import "./operational-clarity.css";
 import "./interaction-system.css";
 import "./app-ui.css";
+import "./error-handling.css";
+import { AppErrorBoundary } from "./app-error-boundary";
 
 export const metadata: Metadata = { title:"Escala GMNH", description:"Gestão integrada de escalas da Guarda Municipal", icons:{icon:"/favicon.svg"}, openGraph:{title:"Escala GMNH",description:"Gestão integrada de efetivo",images:["/og.png"]} };
-export default function RootLayout({children}:{children:React.ReactNode}){return <html lang="pt-BR"><body>{children}</body></html>}
+export default function RootLayout({children}:{children:React.ReactNode}){return <html lang="pt-BR"><body><AppErrorBoundary>{children}</AppErrorBoundary></body></html>}

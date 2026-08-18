@@ -2,6 +2,7 @@
 
 import { FullPageLink as Link } from "./full-page-link";
 import { withScheduleDate } from "../lib/schedule-date";
+import { useSessionProfile } from "./use-session-profile";
 
 const primaryItems = [
   { href: "/", label: "Início", exact: true },
@@ -52,6 +53,7 @@ export function ScheduleNav({
   date: string;
   active?: string;
 }) {
+  const session = useSessionProfile();
   const activeMoreItem = moreItems.find((item) => active.startsWith(item.href));
   return <>
     <nav className="tabs operational-tabs" aria-label="Módulos da escala">
@@ -79,6 +81,7 @@ export function ScheduleNav({
           })}
         </section>)}</div>
       </details>
+      {session&&<span className={`session-role role-${session.role||"viewer"}`} title={session.source==="compatibility"?"Modo compatível; perfis ficam prontos ao ativar Cloudflare Access":String(session.name||"")}><i aria-hidden="true">●</i>{session.role==="admin"?"Administrador":session.role==="editor"?"Escalante":"Consulta"}</span>}
     </nav>
     <nav className="mobile-module-nav" aria-label="Navegação principal">
       {mobileItems.map((item) => {

@@ -499,7 +499,8 @@ test("selected regular GM cards use drop-on-card to choose lane position", () =>
   assert.doesNotMatch(schedule, /quick-position-trigger|Ajustar posição/);
   assert.doesNotMatch(schedule, /inline-position-picker|Colocar no final/);
   assert.match(schedule, /targetAssignmentId\?: number/);
-  assert.match(schedule, /if\(canDropOnCard\(a\)\)drop\(event,s\.id,Number\(a\.id\)\)/);
+  assert.match(schedule, /position: "before" \| "after"/);
+  assert.match(schedule, /if\(canDropOnCard\(a\)\)drop\(event,s\.id,dropBeforeId\(\)\)/);
   assert.match(schedule, /const sameShift = sourceShift \? sourceShift === shift/);
 });
 

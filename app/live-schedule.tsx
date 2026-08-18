@@ -2651,7 +2651,7 @@ function Row({
     });
     return [shift.id, orderAssignmentsInResourceCell(visible,resourceAssignments,kind)] as const;
   })),[assignmentIndex,guardOperationalMetaByShift,kind,resource.id,resourceAssignments,visibleShifts]);
-  const [dropTargetId, setDropTargetId] = useState<number | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ id: number; position: "before" | "after" } | null>(null);
   const [addShift, setAddShift] = useState<string | null>(null);
   const [addQuery, setAddQuery] = useState("");
   const quickAddAvailableIds = useMemo(() => {
@@ -2766,7 +2766,7 @@ function Row({
   function drop(e: DragEvent, shift: string, targetAssignmentId?: number) {
     e.preventDefault();
     e.stopPropagation();
-    setDropTargetId(null);
+    setDropTarget(null);
     const groupIds = e.dataTransfer
       .getData("text/assignment-group")
       .split(",")
@@ -2942,10 +2942,10 @@ function Row({
               aria-label={`${kind === "vehicle" ? String(resource.prefix) : String(resource.name)} · ${s.label} · ${list.length ? `${list.length} GM(s)` : "Furo"}`}
               onKeyDown={(event) => navigateCell(event, s.id, list)}
               onDragOver={(e) => { if (canReceiveDrag(s.id)) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; } }}
-               onDrop={(e) => { if (canReceiveDrag(s.id)) drop(e, s.id); else { e.preventDefault(); e.stopPropagation(); setDropTargetId(null); } }}
+               onDrop={(e) => { if (canReceiveDrag(s.id)) drop(e, s.id); else { e.preventDefault(); e.stopPropagation(); setDropTarget(null); } }}
             >
-              {list.map((a) => {const visualStatus=statusInShift(a,date,s.id),adjustmentBadge=assignmentAdjustmentBadge(a,serviceAdjustments,date),weeklyFixedHe=fixedWeeklyOvertimeLabel(a,date,s.id),canExtendAfter=extensionShortcutAvailable(a,s.id,date,allScheduleAssignments),canExtendBefore=earlyExtensionShortcutAvailable(a,s.id,date);return (<Fragment key={String(a.id)}><Fragment>
-                <div className={`live-person-card ${canExtendAfter||canExtendBefore?"has-he-action":""} ${dropTargetId===Number(a.id)?"drop-target":""} ${draggingAssignmentId===Number(a.id)?"dragging-source":""}`} onDragEnter={()=>{if(canDropOnCard(a))setDropTargetId(Number(a.id))}} onDragLeave={(event)=>{const next=event.relatedTarget;if(next instanceof Node&&event.currentTarget.contains(next))return;setDropTargetId(current=>current===Number(a.id)?null:current)}} onDragOver={(event)=>{if(!draggingAssignment)return;event.preventDefault();event.stopPropagation();event.dataTransfer.dropEffect=canDropOnCard(a)?"move":"none"}} onDrop={(event)=>{if(!draggingAssignment)return;event.preventDefault();event.stopPropagation();if(canDropOnCard(a))drop(event,s.id,Number(a.id))}}>
+              {list.map((a) => {const visualStatus=statusInShift(a,date,s.id),adjustmentBadge=assignmentAdjustmentBadge(a,serviceAdjustments,date),weeklyFixedHe=fixedWeeklyOvertimeLabel(a,date,s.id),canExtendAfter=extensionShortcutAvailable(a,s.id,date,allScheduleAssignments),canExtendBefore=earlyExtensionShortcutAvailable(a,s.id,date);const targetPosition=dropTarget?.id===Number(a.id)?dropTarget.position:null;const dropBeforeId=()=>{if(targetPosition!=="after")return Number(a.id);const regular=list.filter(item=>String(item.work_kind||"shift")!=="overtime_extension");const index=regular.findIndex(item=>Number(item.id)===Number(a.id));return index>=0&&regular[index+1]?Number(regular[index+1].id):undefined};return (<Fragment key={String(a.id)}><Fragment>
+                <div className={`live-person-card ${canExtendAfter||canExtendBefore?"has-he-action":""} ${targetPosition?`drop-target drop-${targetPosition}`:""} ${draggingAssignmentId===Number(a.id)?"dragging-source":""}`} onDragLeave={(event)=>{const next=event.relatedTarget;if(next instanceof Node&&event.currentTarget.contains(next))return;setDropTarget(current=>current?.id===Number(a.id)?null:current)}} onDragOver={(event)=>{if(!draggingAssignment)return;event.preventDefault();event.stopPropagation();const allowed=canDropOnCard(a);event.dataTransfer.dropEffect=allowed?"move":"none";if(allowed){const bounds=event.currentTarget.getBoundingClientRect();setDropTarget({id:Number(a.id),position:event.clientY<bounds.top+bounds.height/2?"before":"after"})}}} onDrop={(event)=>{if(!draggingAssignment)return;event.preventDefault();event.stopPropagation();if(canDropOnCard(a))drop(event,s.id,dropBeforeId())}}>
                 <button
                   type="button"
                   draggable

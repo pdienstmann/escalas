@@ -5,3 +5,4 @@
 @media print{.app-dialog-backdrop{display:none!important}}
 .movement-filters .movement-clear-filters{align-self:end;padding:9px 11px;border:1px solid #b7c8d8;border-radius:6px;background:#fff;color:#275879;font-weight:800;white-space:nowrap}
 @media(max-width:700px){.movement-filters .movement-clear-filters{width:100%}}
+.session-role{margin-left:auto;display:inline-flex;align-items:center;gap:5px;padding:5px 8px;border:1px solid #bed0df;border-radius:999px;background:#fff;color:#38536b;font-size:10px;font-weight:800;white-space:nowrap}.session-role i{color:#24854b;font-size:8px}.session-role.role-viewer i{color:#bd7a00}@media(max-width:900px){.session-role{display:none}}

@@ -431,11 +431,13 @@ export function GestaoClient({
   }
   async function movementAction(action:"movement_update"|"movement_delete",body:Record<string,string|number|null>) {
     if(action==="movement_delete"&&!confirm("Remover esta movimentação? A escala será recalculada imediatamente."))return;
-    setMessage("");
-    const r=await fetch("/api/admin",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({...body,action})});
-    const j=await r.json();
-    setMessage(r.ok?(action==="movement_delete"?"Movimentação removida.":"Movimentação atualizada."):j.error);
-    if(r.ok){setMovementEditing(null);await load()}
+    if(saving)return;setSaving(true);setMessage("");
+    try{
+      const r=await fetch("/api/admin",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({...body,action})});
+      const j=await r.json().catch(()=>({}));
+      setMessage(r.ok?(action==="movement_delete"?"Movimentação removida.":"Movimentação atualizada."):String(j.error||"Não foi possível concluir a alteração."));
+      if(r.ok){setMovementEditing(null);await load()}
+    }catch(error){setMessage(error instanceof Error?`Falha de conexão: ${error.message}`:"Falha de conexão. Tente novamente.")}finally{setSaving(false)}
   }
   async function saveServiceAdjustment(event:FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -450,9 +452,11 @@ export function GestaoClient({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ action: "create_service_adjustment", ...values }),
       });
-      const result = await response.json();
+      const result = await response.json().catch(() => ({}));
       setMessage(response.ok ? result.message : result.error);
       if (response.ok) { form.reset(); setAdjustmentSubtype("negative_early"); setNegativeHoursInput("2"); setSettleNegative(false); await load(); }
+    } catch (error) {
+      setMessage(error instanceof Error ? `Falha de conexão: ${error.message}` : "Não foi possível registrar o banco de horas.");
     } finally { setSaving(false); }
   }
   async function cancelServiceAdjustment(item:Item) {
@@ -460,9 +464,11 @@ export function GestaoClient({
     setSaving(true); setMessage("");
     try {
       const response = await fetch("/api/schedule", { method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify({action:"cancel_service_adjustment",id:item.id}) });
-      const result = await response.json();
+      const result = await response.json().catch(() => ({}));
       setMessage(response.ok ? result.message : result.error);
       if (response.ok) await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? `Falha de conexão: ${error.message}` : "Não foi possível cancelar o lançamento.");
     } finally { setSaving(false); }
   }
   if (busy)

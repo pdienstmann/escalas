@@ -60,6 +60,8 @@ export function OvertimeDashboard() {
   const [hoursBand, setHoursBand] = useState<"all" | "zero" | "under12" | "over12">("all");
   const [visibleLimit, setVisibleLimit] = useState(60);
   const [suggestionsExpanded, setSuggestionsExpanded] = useState(false);
+  const [historyQuery, setHistoryQuery] = useState("");
+  const [historySource, setHistorySource] = useState<"all" | "manual" | "adjustment" | "legacy">("all");
 
   const load = useCallback(async (background = false) => {
     const cached = readOvertimeCache(month);
@@ -117,6 +119,14 @@ export function OvertimeDashboard() {
     if(rankingSort==="name")rows.sort((a,b)=>String(a.name).localeCompare(String(b.name),"pt-BR"));
     return rows;
   }, [data, eligibility, hoursBand, query, rankingSort, teamFilter]);
+  const filteredEntries = useMemo(() => {
+    const value = historyQuery.trim().toLowerCase();
+    return (data?.entries || []).filter((entry) => {
+      const source = String(entry.source || "legacy");
+      if (historySource !== "all" && source !== historySource) return false;
+      return !value || `${entry.guard_name || ""} ${entry.location || ""} ${entry.request_ref || ""} ${entry.notes || ""}`.toLowerCase().includes(value);
+    });
+  }, [data, historyQuery, historySource]);
   if (!data && loading)
     return <ModuleLoading area="horas extras" detail="Carregando livro mensal…" />;
   if (!data && loadError)
@@ -148,10 +158,13 @@ export function OvertimeDashboard() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       });
-      const result = await response.json();
+      const result = await response.json().catch(() => ({}));
       setMessage(response.ok ? result.message : result.error);
       if (response.ok) await load(true);
       return response.ok;
+    } catch (error) {
+      setMessage(error instanceof Error ? `Não foi possível salvar: ${error.message}` : "Não foi possível salvar. Verifique a conexão e tente novamente.");
+      return false;
     } finally {
       setSaving(false);
     }
@@ -236,7 +249,7 @@ export function OvertimeDashboard() {
       <table><thead><tr><th>Ordem</th><th>GM</th><th>Equipe</th><th>Total no mês</th><th>Mês anterior</th><th>Última HE</th><th>Participação / aviso</th><th>Ações</th></tr></thead><tbody>{ranking.slice(0,visibleLimit).map((guard,index)=>{const enabled=Number(guard.overtime_eligible)!==0;return <tr key={String(guard.id)} className={enabled?"":"he-disabled-row"}><td><strong className={enabled&&rankingSort==="priority"&&index<5?"priority":""}>{enabled?`${index+1}º`:"—"}</strong></td><td><b>{guard.name}</b><small>{guard.registration}</small></td><td><span className={`he-team ${String(guard.platoon||"other").toLowerCase()}`}>{guard.platoon||"Semanal"}</span></td><td><b>{formatHoursDuration(Number(guard.currentHours))}</b><div className="he-bar"><i style={{width:`${maximum?Number(guard.currentHours)/maximum*100:0}%`}}/></div></td><td>{formatHoursDuration(Number(guard.previousHours))}</td><td>{formatLastOvertime(guard.lastOvertime)}</td><td><button type="button" className={`he-setting ${enabled?"enabled":"blocked"}`} onClick={()=>setGuardEditing(guard)}><b>{enabled?"Realiza HE":"Não realiza HE"}</b><small>{guard.overtime_note||"Adicionar aviso ou observação"}</small></button></td><td><div className="he-row-actions"><button type="button" disabled={monthClosed||isRefreshing} onClick={()=>setManualOpen(guard)}>＋ Horas</button><button type="button" disabled={monthClosed||isRefreshing} onClick={()=>setBalanceEditing(guard)}>Ajustar total</button></div></td></tr>})}</tbody></table>
       {visibleLimit<ranking.length&&<button type="button" className="he-show-more" onClick={()=>setVisibleLimit(value=>value+60)}>Mostrar mais GMs ({ranking.length-visibleLimit} restantes)</button>}
     </section>
-    <section id="he-history" className="he-panel he-history"><div className="he-head"><div><h2>Histórico de lançamentos</h2><p>Registro simples das horas que efetivamente compõem o saldo.</p></div></div>{data.entries.length===0?<p className="he-empty">Nenhuma HE lançada neste mês.</p>:<div className="he-entry-table"><div className="he-entry-head"><span>Data / GM</span><span>Local</span><span>Horas</span><span>Origem</span><span>Observação</span><span>Ação</span></div>{data.entries.map(entry=><article key={String(entry.id)}><div><b>{entry.guard_name}</b><small>{new Date(`${entry.service_date}T12:00:00`).toLocaleDateString("pt-BR")}</small></div><div><span>{entry.location||"Sem local"}</span><small>{entry.request_ref||"Sem requerimento"}</small></div><b>{formatHoursDuration(Number(entry.confirmed_minutes||0)/60)}</b><span>{entry.source==="adjustment"?"Ajuste":entry.source==="manual"?"Manual":"Legado da escala"}</span><small>{entry.notes||"—"}</small><button type="button" disabled={monthClosed||isRefreshing||entry.source==="adjustment"} onClick={()=>setEntryEditing(entry)}>{entry.source==="adjustment"?"Ajuste":"Editar"}</button></article>)}</div>}</section>
+    <section id="he-history" className="he-panel he-history"><div className="he-head"><div><h2>Histórico de lançamentos</h2><p>Registro simples das horas que efetivamente compõem o saldo.</p></div><div className="he-history-filters"><label>Buscar<input value={historyQuery} onChange={(event)=>setHistoryQuery(event.target.value)} placeholder="GM, local ou requerimento…"/></label><label>Origem<select value={historySource} onChange={(event)=>setHistorySource(event.target.value as typeof historySource)}><option value="all">Todas</option><option value="manual">Manual</option><option value="adjustment">Ajustes</option><option value="legacy">Escala / legado</option></select></label><span>{filteredEntries.length} de {data.entries.length}</span></div></div>{data.entries.length===0?<p className="he-empty">Nenhuma HE lançada neste mês.</p>:filteredEntries.length===0?<p className="he-empty">Nenhum lançamento corresponde aos filtros.</p>:<div className="he-entry-table"><div className="he-entry-head"><span>Data / GM</span><span>Local</span><span>Horas</span><span>Origem</span><span>Observação</span><span>Ação</span></div>{filteredEntries.map(entry=><article key={String(entry.id)}><div><b>{entry.guard_name}</b><small>{new Date(`${entry.service_date}T12:00:00`).toLocaleDateString("pt-BR")}</small></div><div><span>{entry.location||"Sem local"}</span><small>{entry.request_ref||"Sem requerimento"}</small></div><b>{formatHoursDuration(Number(entry.confirmed_minutes||0)/60)}</b><span>{entry.source==="adjustment"?"Ajuste":entry.source==="manual"?"Manual":"Escala / legado"}</span><small>{entry.notes||"—"}</small><button type="button" disabled={monthClosed||isRefreshing||entry.source==="adjustment"} onClick={()=>setEntryEditing(entry)}>{entry.source==="adjustment"?"Ajuste":"Editar"}</button></article>)}</div>}</section>
     {guardEditing&&<div className="he-settings-backdrop"><form className="he-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="he-settings-title" onSubmit={saveGuardSettings}><header><div><small>PREFERÊNCIAS DE HE</small><h2 id="he-settings-title">{guardEditing.name}</h2><p>{guardEditing.registration} · {guardEditing.platoon||"Sem equipe"}</p></div><button type="button" onClick={()=>setGuardEditing(null)} aria-label="Fechar">×</button></header><div className="he-eligible-check"><input id="he-eligible" type="checkbox" name="eligible" defaultChecked={Number(guardEditing.overtime_eligible)!==0}/><label htmlFor="he-eligible"><b>Este GM realiza hora extra</b><small>Desmarque para removê-lo das sugestões automáticas.</small></label></div><label>Aviso ou observação<textarea name="note" defaultValue={String(guardEditing.overtime_note||"")} rows={4}/></label><footer><button type="button" onClick={()=>setGuardEditing(null)}>Cancelar</button><button className="save" disabled={saving}>{saving?"Salvando…":"Salvar preferência"}</button></footer></form></div>}
     {entryEditing&&<EntryEditDialog entry={entryEditing} saving={saving} onClose={()=>setEntryEditing(null)} onSave={saveEntry}/>}
     {manualOpen&&<ManualEntryDialog guards={data.ranking} month={month} initial={manualOpen==="blank"?null:manualOpen} saving={saving} onClose={()=>setManualOpen(null)} onSave={createManual}/>}
