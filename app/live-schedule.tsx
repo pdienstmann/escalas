@@ -2399,17 +2399,21 @@ function OperationalGroupsGrid({ date, groups, members, guards, posts, vehicles,
               </button>
               {actionAssignment && canExtendAfter && <button type="button" className="inline-he-extension operational-group-inline-he" title="Estender este GM em hora extra" onClick={() => onExtend(actionAssignment, shift.id, "after")}>+HE</button>}
               {actionAssignment && canExtendBefore && <button type="button" className="inline-he-extension operational-group-inline-he early" title="Antecipar este GM em hora extra" onClick={() => onExtend(actionAssignment, shift.id, "before")}>+HE antes</button>}
-              {actionAssignment && Number(actionAssignment.id) === selectedId && <div className="operational-group-quick-actions" role="group" aria-label={`Ações rápidas de ${String(guard?.name || "GM")}`}>
-                <header><b>{String(guard?.name || "GM")}</b><button type="button" aria-label="Fechar ações" onClick={onCloseActions}>×</button></header>
-                <button type="button" onClick={() => onAdjust(actionAssignment, shift.id)}><span aria-hidden="true">✎</span>Ajustar</button>
+              {actionAssignment && Number(actionAssignment.id) === selectedId && <div className="cell-quick-actions operational-group-quick-actions" role="group" aria-label={`Ações rápidas de ${String(guard?.name || "GM")}`}>
+                <div className="cell-quick-head">
+                  <span><b>{String(guard?.name || "GM")}</b><small>{destinationText} · {shift.label}</small></span>
+                  <button type="button" className="cell-quick-close" aria-label="Fechar ações" title="Fechar" onClick={onCloseActions}>×</button>
+                </div>
+                <button type="button" className="primary-action" onClick={() => onAdjust(actionAssignment, shift.id)}><span aria-hidden="true">✎</span> Ajustar</button>
                 <details className="cell-more-actions"><summary>Mais ações</summary><div>
-                  <button type="button" onClick={() => onSwap(actionAssignment, shift.id)}><span aria-hidden="true">⇄</span>Trocar</button>
-                  <button type="button" className={actionAssignment.status === "time_bank" ? "active" : ""} onClick={() => onQuickStatus(actionAssignment, actionAssignment.status === "time_bank" ? "normal" : "time_bank")}><span aria-hidden="true">◷</span>BH</button>
-                  <button type="button" onClick={() => onCopy(actionAssignment)}><span aria-hidden="true">▣</span>Copiar</button>
-                  <button type="button" className="group-he-suggestions" onClick={() => onSuggestHe(actionAssignment, shift.id, member)}><span aria-hidden="true">＋</span>HE do grupamento</button>
-                  <button type="button" onClick={() => onDetails(actionAssignment, shift.id)}><span aria-hidden="true">⋯</span>Detalhes</button>
-                  <button type="button" className="danger" onClick={() => onDelete(actionAssignment, shift.id)}><span aria-hidden="true">×</span>Remover</button>
+                  <button type="button" className="swap-action" onClick={() => onSwap(actionAssignment, shift.id)}><span aria-hidden="true">⇄</span> Trocar GM</button>
+                  <button type="button" className={actionAssignment.status === "time_bank" ? "active" : ""} onClick={() => onQuickStatus(actionAssignment, actionAssignment.status === "time_bank" ? "normal" : "time_bank")}><span aria-hidden="true">◷</span> BH</button>
+                  <button type="button" className="copy-action" onClick={() => onCopy(actionAssignment)}><span aria-hidden="true">▣</span> Copiar</button>
+                  <button type="button" className="group-he-suggestions" onClick={() => onSuggestHe(actionAssignment, shift.id, member)}><span aria-hidden="true">✦</span> Sugestões de HE</button>
+                  <button type="button" className="advanced-action" onClick={() => onDetails(actionAssignment, shift.id)}><span aria-hidden="true">⋯</span> Mais detalhes</button>
+                  <button type="button" className="danger" onClick={() => onDelete(actionAssignment, shift.id)}><span aria-hidden="true">×</span> Remover horário</button>
                 </div></details>
+                <small className="drag-context-hint">Para mover ou alinhar, arraste o quadradinho diretamente.</small>
               </div>}
             </div>;
           })}

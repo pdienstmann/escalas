@@ -491,6 +491,8 @@ test("selected GM cards expose one compact contextual action menu", () => {
   assert.doesNotMatch(schedule, /> Alterar \/ mover<\/button>/);
   assert.doesNotMatch(schedule, /className="inline-move-tools"/);
   assert.match(styles, /grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
+  assert.match(styles, /\.cell-more-actions>div>\.danger/);
+  assert.match(styles, /\.cell-more-actions>div>button>span/);
   assert.match(styles, /@media\(max-width:600px\)/);
 });
 
@@ -1081,10 +1083,10 @@ test("movement records keep a stable single-column flow and group guards expose 
   assert.match(styles, /content-visibility: visible/);
   assert.match(styles, /grid-template-columns: minmax\(0, 1fr\)/);
   assert.match(schedule, /operational-group-quick-actions/);
-  assert.match(schedule, />Ajustar</);
-  assert.match(schedule, />Trocar</);
-  assert.match(schedule, />BH</);
-  assert.match(schedule, />Detalhes</);
+  assert.match(schedule, /> Ajustar</);
+  assert.match(schedule, /> Trocar GM</);
+  assert.match(schedule, /> BH</);
+  assert.match(schedule, /> Mais detalhes</);
   assert.doesNotMatch(schedule, /className="operational-group-remove-segment"/);
   assert.match(schedule, /onDelete\(actionAssignment, shift\.id\)/);
   assert.match(styles, /\.dashboard-absence-mini/);
@@ -1750,7 +1752,7 @@ test("operational group GM cards keep contextual actions and offer same-group HE
   const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
   const styles = readFileSync(resolve("app/simple-ux.css"), "utf8");
   assert.match(schedule, /onSuggestHe: \(assignment: Rec, shift: string, member: Rec\)/);
-  assert.match(schedule, /HE do grupamento/);
+  assert.match(schedule, /Sugestões de HE/);
   assert.match(schedule, /pick\.groupId/);
   assert.match(schedule, /integrante do mesmo grupamento em dia\/equipe oposta/);
   assert.match(schedule, /onAdjust\(actionAssignment, shift\.id\)/);

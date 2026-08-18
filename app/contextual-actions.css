@@ -33,6 +33,7 @@
 .cell-quick-actions .primary-action{border-color:#0871e1;background:#0871e1;color:#fff;font-weight:900}
 .cell-quick-actions .advanced-action{border-color:#c4d1dc;background:#f7fafc;color:#4f687d}
 .cell-quick-actions .danger{border-color:#e1b5b9;background:#fff7f7;color:#a12631}
+.cell-more-actions>div>.danger{grid-column:1/-1;min-height:32px;border-color:#d99aa0!important;background:#fff1f2!important;color:#98232d!important;font-weight:900}.cell-more-actions>div>.danger:hover,.cell-more-actions>div>.danger:focus-visible{border-color:#b52d38!important;background:#ffe3e5!important;outline:2px solid #efb3b8}.cell-more-actions>div>button>span{display:inline-grid;place-items:center;flex:0 0 18px;min-width:18px;height:18px;border-radius:4px;background:#e9f0f5;color:inherit;font-size:11px;font-weight:900}.cell-more-actions>div>.danger>span{background:#ffd8dc}.operational-group-quick-actions .group-he-suggestions{border-color:#78b993!important;background:#eef8f1!important;color:#17643b!important}.operational-group-quick-actions .primary-action{min-height:32px}
 .cell-quick-actions .cell-quick-close{
   flex:none;
   width:27px;
