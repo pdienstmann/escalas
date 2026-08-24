@@ -66,6 +66,12 @@ test("resolveScheduleDate prefers URL date over storage and today", () => {
   assert.equal(formatScheduleDate("2026-08-12"), "12/08/2026");
 });
 
+test("schedule date hydration keeps the server snapshot stable before reading browser storage", () => {
+  const hook = readFileSync(resolve("app/use-schedule-date.ts"), "utf8");
+  assert.match(hook, /const hydrated = useSyncExternalStore/);
+  assert.match(hook, /hydrated\s*\? resolveScheduleDate\(null\)\s*:\s*todayScheduleDate\(\)/);
+});
+
 test("withScheduleDate preserves path and injects date query", () => {
   assert.equal(withScheduleDate("/padroes", "2026-08-15"), "/padroes?date=2026-08-15");
   assert.equal(

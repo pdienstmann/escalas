@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import {
+  isScheduleDate,
   readScheduleDateFromSearch,
   resolveScheduleDate,
   storeScheduleDate,
+  todayScheduleDate,
   withScheduleDate,
 } from "../lib/schedule-date";
 
@@ -21,12 +23,23 @@ function subscribeToScheduleDate(onChange: () => void) {
 }
 
 export function useScheduleDate(initial?: string | null) {
+  const hydrated = useSyncExternalStore(
+    () => () => undefined,
+    () => true,
+    () => false,
+  );
   const urlDate = useSyncExternalStore(
     subscribeToScheduleDate,
     () => readScheduleDateFromSearch() || "",
     () => initial || "",
   );
-  const date = resolveScheduleDate(urlDate || initial);
+  const date = isScheduleDate(urlDate)
+    ? urlDate
+    : isScheduleDate(initial)
+      ? initial
+      : hydrated
+        ? resolveScheduleDate(null)
+        : todayScheduleDate();
 
   const setDate = useCallback((next: string) => {
     const resolved = resolveScheduleDate(next);
