@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { auditScheduleIntegrity } from "../lib/schedule-integrity.ts";
-import { operationalGroupVehicleIdsForShifts } from "../lib/print-schedule-model.ts";
+import { operationalGroupVehicleIdsForShifts, vehicleHasAssignmentInShifts } from "../lib/print-schedule-model.ts";
 
 test("accepts contiguous weekly blocks", () => {
   const result = auditScheduleIntegrity({
@@ -97,4 +97,15 @@ test("a day-specific group remanejamento replaces the planned vehicle in the PDF
     assignments: [{ id: 71, guard_id: 40, vehicle_id: 200, starts_at: "2026-08-18T07:00", ends_at: "2026-08-18T19:00", is_reassigned: 1 }],
   });
   assert.deepEqual([...ids], [200]);
+});
+
+test("PDF hides an unused motorcycle only in periods without a rider", () => {
+  const input = {
+    date: "2026-08-18",
+    vehicleId: 643,
+    assignments: [{ id: 81, guard_id: 10, vehicle_id: 643, starts_at: "2026-08-18T07:00", ends_at: "2026-08-18T19:00" }],
+  };
+  assert.equal(vehicleHasAssignmentInShifts({ ...input, shiftIds: ["2", "3"] }), true);
+  assert.equal(vehicleHasAssignmentInShifts({ ...input, shiftIds: ["4", "1"] }), false);
+  assert.equal(vehicleHasAssignmentInShifts({ ...input, vehicleId: 646, shiftIds: ["2", "3"] }), false);
 });

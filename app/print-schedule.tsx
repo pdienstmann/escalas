@@ -8,7 +8,7 @@ import { compactRequestReference } from "../lib/request-reference";
 import { assignmentOverlapsShift, operationalShiftWindow } from "../lib/shift-rules";
 import { isMotorcycleType } from "../lib/crew-rules";
 import { operationalGroupMemberCoversShift } from "../lib/operational-group-schedule";
-import { operationalGroupVehicleIdsForShifts } from "../lib/print-schedule-model";
+import { operationalGroupVehicleIdsForShifts, vehicleHasAssignmentInShifts } from "../lib/print-schedule-model";
 type Rec = Record<string, string | number | null>;
 type OperationSlot = Rec & { id:number; role:string; guard_name?:string|null; source_type?:string|null };
 type OperationVehicle = Rec & { id:number; prefix:string; type:string; zone?:string|null; slots:OperationSlot[] };
@@ -103,12 +103,25 @@ function PrintPage({
   );
   const periodShifts = shifts[period];
   const groupVehicleIds = operationalGroupVehicleIds(data, period);
+  const conventionalAssignments = data.assignments.filter((assignment) =>
+    periodShifts.some((shift) => assignmentOverlapsShift(assignment, data.date, shift.id) && !isGroupOwnedAssignment(data, assignment, shift.id)),
+  );
   const resources = (Number(data.schedule?.hide_empty_resources || 0) === 1
     ? orderedResources.filter(({kind,r}) => data.assignments.some((assignment) =>
         (kind === "vehicle" ? Number(assignment.vehicle_id) === Number(r.id) : Number(assignment.post_id) === Number(r.id)) &&
         periodShifts.some((shift) => assignmentOverlapsShift(assignment,data.date,shift.id) && !isGroupOwnedAssignment(data,assignment,shift.id)),
       ))
-    : orderedResources).filter(({kind,r}) => kind !== "vehicle" || !groupVehicleIds.has(Number(r.id)));
+    : orderedResources).filter(({kind,r}) => {
+      if (kind !== "vehicle") return true;
+      if (groupVehicleIds.has(Number(r.id))) return false;
+      if (!isMotorcycleType(r.type)) return true;
+      return vehicleHasAssignmentInShifts({
+        date: data.date,
+        shiftIds: periodShifts.map((shift) => shift.id),
+        vehicleId: Number(r.id),
+        assignments: conventionalAssignments,
+      });
+    });
   const vehicleResources = resources.filter((resource) => resource.kind === "vehicle");
   const postResources = resources.filter((resource) => resource.kind === "post");
   return (

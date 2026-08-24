@@ -433,6 +433,14 @@ test("motorcycles never expose a patrol hole in the daily scale or operations", 
   assert.match(print, /motorcycle\?<td>—<\/td>/);
 });
 
+test("unused motorcycles stay out of each PDF period without hiding conventional vehicle holes", () => {
+  const print = readFileSync(resolve("app/print-schedule.tsx"), "utf8");
+  assert.match(print, /const conventionalAssignments/);
+  assert.match(print, /if \(!isMotorcycleType\(r\.type\)\) return true/);
+  assert.match(print, /vehicleHasAssignmentInShifts/);
+  assert.match(print, /if \(groupVehicleIds\.has\(Number\(r\.id\)\)\) return false/);
+});
+
 test("motorcycle remanejamento checks only the selected time interval", () => {
   const api = readFileSync(resolve("app/api/schedule/route.ts"), "utf8");
   assert.match(api, /targetStartsAt/);

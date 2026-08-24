@@ -35,3 +35,15 @@ export function operationalGroupVehicleIdsForShifts(input: {
   }
   return ids;
 }
+
+export function vehicleHasAssignmentInShifts(input: {
+  date: string;
+  shiftIds: string[];
+  vehicleId: number;
+  assignments?: PrintRecord[];
+}) {
+  return (input.assignments || []).some((assignment) =>
+    Number(assignment.vehicle_id) === input.vehicleId &&
+    input.shiftIds.some((shiftId) => assignmentOverlapsShift(assignment, input.date, shiftId)),
+  );
+}
