@@ -7,6 +7,10 @@ export type IntegrityIssue = {
   assignmentIds?: number[];
 };
 
+function isMotorcycle(type: unknown) {
+  return String(type || "").trim().toLowerCase() === "moto";
+}
+
 function interval(record: IntegrityRecord) {
   const start = Date.parse(String(record.starts_at || ""));
   const end = Date.parse(String(record.ends_at || ""));
@@ -20,11 +24,13 @@ function interval(record: IntegrityRecord) {
 export function auditScheduleIntegrity(payload: {
   date?: string;
   guards?: IntegrityRecord[];
+  vehicles?: IntegrityRecord[];
   assignments?: IntegrityRecord[];
 }) {
   const issues: IntegrityIssue[] = [];
   const assignments = payload.assignments || [];
   const guards = new Map((payload.guards || []).map((guard) => [Number(guard.id), guard]));
+  const vehicles = new Map((payload.vehicles || []).map((vehicle) => [Number(vehicle.id), vehicle]));
 
   for (const assignment of assignments) {
     const id = Number(assignment.id);
@@ -81,6 +87,37 @@ export function auditScheduleIntegrity(payload: {
           assignmentIds: [Number(ordered[index].id), Number(ordered[nextIndex].id)],
         });
       }
+    }
+  }
+
+  const motorcycleAssignments = assignments.filter((assignment) => {
+    const vehicle = vehicles.get(Number(assignment.vehicle_id));
+    return vehicle && isMotorcycle(vehicle.type);
+  });
+  const byMotorcycle = new Map<number, IntegrityRecord[]>();
+  for (const assignment of motorcycleAssignments) {
+    const vehicleId = Number(assignment.vehicle_id);
+    byMotorcycle.set(vehicleId, [...(byMotorcycle.get(vehicleId) || []), assignment]);
+  }
+  for (const [vehicleId, rows] of byMotorcycle) {
+    const ordered = [...rows].sort((a, b) => interval(a).start - interval(b).start);
+    let conflictFound = false;
+    for (let index = 0; index < ordered.length; index += 1) {
+      for (let nextIndex = index + 1; nextIndex < ordered.length; nextIndex += 1) {
+        const current = interval(ordered[index]);
+        const next = interval(ordered[nextIndex]);
+        if (next.start >= current.end) break;
+        if (Number(ordered[index].guard_id) === Number(ordered[nextIndex].guard_id)) continue;
+        issues.push({
+          level: "error",
+          code: "motorcycle_multiple_riders",
+          message: `${String(vehicles.get(vehicleId)?.prefix || "Moto")} possui mais de um condutor no mesmo horário.`,
+          assignmentIds: [Number(ordered[index].id), Number(ordered[nextIndex].id)],
+        });
+        conflictFound = true;
+        break;
+      }
+      if (conflictFound) break;
     }
   }
 

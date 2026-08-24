@@ -427,6 +427,14 @@ test("motorcycles never expose a patrol hole in the daily scale or operations", 
   assert.match(print, /motorcycle\?<td>—<\/td>/);
 });
 
+test("motorcycle remanejamento checks only the selected time interval", () => {
+  const api = readFileSync(resolve("app/api/schedule/route.ts"), "utf8");
+  assert.match(api, /targetStartsAt/);
+  assert.match(api, /targetEndsAt/);
+  assert.match(api, /starts_at<\? AND ends_at>\?/);
+  assert.match(api, /Esta moto já possui um GM no horário escolhido/);
+});
+
 test("schedule rows are memoized so shell feedback does not repaint the full matrix", () => {
   const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
   assert.match(schedule, /<MemoizedRow/);
@@ -1616,6 +1624,10 @@ test("pattern grupamento members can own a turn and VTR without duplicating the 
   assert.match(schedule, /operational-groups-grid-time/);
   assert.match(print, /isGroupOwnedAssignment/);
   assert.match(print, /PrintOperationalGroupRows/);
+  assert.match(print, /vehicleResources/);
+  assert.match(print, /<PrintOperationalGroupRows data=\{data\} period=\{period\} \/>/);
+  assert.ok(print.indexOf("<PrintOperationalGroupRows") < print.indexOf("resources={postResources}"));
+  assert.match(print, /print-day-off-list/);
   assert.match(dashboard, /VTR do grupamento/);
   assert.match(dashboard, /Início da jornada de 12h/);
 });

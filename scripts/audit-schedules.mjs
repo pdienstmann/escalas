@@ -16,7 +16,7 @@ for (const date of dates) {
     continue;
   }
   const data = await response.json();
-  const result = auditScheduleIntegrity({ date, guards: data.guards, assignments: data.assignments });
+  const result = auditScheduleIntegrity({ date, guards: data.guards, vehicles: data.vehicles, assignments: data.assignments });
   totalErrors += result.errors.length;
   console.log(`${date}: ${data.assignments?.length || 0} blocos · ${result.errors.length} erros · ${result.warnings.length} avisos`);
   for (const issue of result.issues) console.log(`  ${issue.level === "error" ? "ERRO" : "AVISO"} ${issue.code}: ${issue.message}`);

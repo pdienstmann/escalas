@@ -1555,9 +1555,13 @@ export async function POST(request: Request) {
     if (vehicleId && isMotorcycleType(destination.type)) {
       if (guardIds.size > 1)
         return Response.json({ error: "Motos comportam somente um GM condutor. Mova apenas um quadradinho para esta viatura." }, { status: 409 });
-      const targetOccupied = await env.DB.prepare("SELECT id FROM assignments WHERE schedule_id=? AND vehicle_id=? AND id NOT IN (" + assignmentIds.map(() => "?").join(",") + ") LIMIT 1").bind(scheduleId, vehicleId, ...assignmentIds).first();
+      const targetStartsAt = before.reduce((earliest, item) => !earliest || String(item.starts_at) < earliest ? String(item.starts_at) : earliest, "");
+      const targetEndsAt = before.reduce((latest, item) => String(item.ends_at) > latest ? String(item.ends_at) : latest, "");
+      const targetOccupied = await env.DB.prepare(
+        "SELECT id FROM assignments WHERE schedule_id=? AND vehicle_id=? AND id NOT IN (" + assignmentIds.map(() => "?").join(",") + ") AND starts_at<? AND ends_at>? LIMIT 1",
+      ).bind(scheduleId, vehicleId, ...assignmentIds, targetEndsAt, targetStartsAt).first();
       if (targetOccupied)
-        return Response.json({ error: "Esta moto já possui um GM nesta escala." }, { status: 409 });
+        return Response.json({ error: "Esta moto já possui um GM no horário escolhido." }, { status: 409 });
     }
     if (vehicleId) {
       const outage = await env.DB.prepare(

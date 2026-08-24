@@ -5,9 +5,10 @@ import { useScheduleDate } from "./use-schedule-date";
 import { formatScheduleDate, withScheduleDate } from "../lib/schedule-date";
 import { orderScheduleResources } from "../lib/schedule-sections";
 import { compactRequestReference } from "../lib/request-reference";
-import { assignmentOverlapsShift, operationalShiftWindow, SHIFT_DEFS } from "../lib/shift-rules";
+import { assignmentOverlapsShift, operationalShiftWindow } from "../lib/shift-rules";
 import { isMotorcycleType } from "../lib/crew-rules";
 import { operationalGroupMemberCoversShift } from "../lib/operational-group-schedule";
+import { operationalGroupVehicleIdsForShifts } from "../lib/print-schedule-model";
 type Rec = Record<string, string | number | null>;
 type OperationSlot = Rec & { id:number; role:string; guard_name?:string|null; source_type?:string|null };
 type OperationVehicle = Rec & { id:number; prefix:string; type:string; zone?:string|null; slots:OperationSlot[] };
@@ -100,12 +101,16 @@ function PrintPage({
     data.posts,
     data.sections || [],
   );
-  const resources = Number(data.schedule?.hide_empty_resources || 0) === 1
+  const periodShifts = shifts[period];
+  const groupVehicleIds = operationalGroupVehicleIds(data, period);
+  const resources = (Number(data.schedule?.hide_empty_resources || 0) === 1
     ? orderedResources.filter(({kind,r}) => data.assignments.some((assignment) =>
         (kind === "vehicle" ? Number(assignment.vehicle_id) === Number(r.id) : Number(assignment.post_id) === Number(r.id)) &&
-        SHIFT_DEFS.some((shift) => assignmentOverlapsShift(assignment,data.date,shift.id) && !isGroupOwnedAssignment(data,assignment,shift.id)),
+        periodShifts.some((shift) => assignmentOverlapsShift(assignment,data.date,shift.id) && !isGroupOwnedAssignment(data,assignment,shift.id)),
       ))
-    : orderedResources;
+    : orderedResources).filter(({kind,r}) => kind !== "vehicle" || !groupVehicleIds.has(Number(r.id)));
+  const vehicleResources = resources.filter((resource) => resource.kind === "vehicle");
+  const postResources = resources.filter((resource) => resource.kind === "post");
   return (
     <section className="print-page">
       <header>
@@ -133,7 +138,24 @@ function PrintPage({
           </tr>
         </thead>
         <tbody>
-          {resources.map(({ kind, r, section }, index) => (
+          <PrintResourceRows data={data} period={period} resources={vehicleResources} />
+          <PrintOperationalGroupRows data={data} period={period} />
+          <PrintResourceRows data={data} period={period} resources={postResources} />
+        </tbody>
+      </table>
+      <PrintMovementsFooter data={data} />
+      <div className="print-page-number">
+        {period === "day" ? "FRENTE · DIURNO" : "VERSO · NOTURNO"}
+      </div>
+    </section>
+  );
+}
+
+type OrderedPrintResource = ReturnType<typeof orderScheduleResources<Rec>>[number];
+
+function PrintResourceRows({ data, period, resources }: { data: State; period: "day" | "night"; resources: OrderedPrintResource[] }) {
+  return <>
+    {resources.map(({ kind, r, section }, index) => (
             <Fragment key={`${kind}-${r.id}`}>
               {(index === 0 || resources[index - 1].section !== section) && (
                 <tr className="print-section">
@@ -193,19 +215,24 @@ function PrintPage({
               </tr>
             </Fragment>
           ))}
-          <PrintOperationalGroupRows data={data} period={period} />
-        </tbody>
-      </table>
-      <footer>
+  </>;
+}
+
+function PrintMovementsFooter({ data }: { data: State }) {
+  return <footer>
         <h2>EFETIVO FORA DA ESCALA / ALTERAÇÕES DO DIA</h2>
-        <div>
+        <div className="print-movement-groups">
           {groups.map((g) => {
             const list = data.movements.filter((m) =>
               g.types.includes(String(m.type)),
             );
+            if (g.key === "day_off") return <section key={g.key} className="print-movement-group print-day-off-group">
+              <header><b>{g.label}</b><small>{list.length} GM{list.length === 1 ? "" : "s"}</small></header>
+              {list.length ? <div className="print-day-off-list">{list.map((m) => <span key={m.id}>{m.guard_name}</span>)}</div> : <p>—</p>}
+            </section>;
             return (
-              <section key={g.key}>
-                <b>{g.label}</b>
+              <section key={g.key} className="print-movement-group">
+                <header><b>{g.label}</b><small>{list.length || "—"}</small></header>
                 {list.map((m) => (
                   <p key={m.id}>
                     {m.guard_name}
@@ -234,11 +261,16 @@ function PrintPage({
           ) : null}
         </div>
       </footer>
-      <div className="print-page-number">
-        {period === "day" ? "FRENTE · DIURNO" : "VERSO · NOTURNO"}
-      </div>
-    </section>
-  );
+  ;
+}
+
+function operationalGroupVehicleIds(data: State, period: "day" | "night") {
+  return operationalGroupVehicleIdsForShifts({
+    date: data.date,
+    shiftIds: shifts[period].map((shift) => shift.id),
+    members: data.operationalGroupMembers || [],
+    assignments: data.assignments,
+  });
 }
 function PrintOperationalGroupRows({ data, period }: { data: State; period: "day" | "night" }) {
   const periodShifts = shifts[period];
