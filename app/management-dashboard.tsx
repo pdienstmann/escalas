@@ -5,6 +5,7 @@ import { readClientCache, writeClientCache } from "./client-cache";
 import { FullPageLink as Link } from "./full-page-link";
 import { ModuleLoading } from "./module-loading";
 import { ScheduleNav } from "./schedule-nav";
+import { VehicleIcon, vehicleTypeLabel } from "./vehicle-icon";
 
 type Period = {
   code: string;
@@ -275,8 +276,6 @@ export function ManagementDashboard({ initialDate }: { initialDate: string }) {
   </main>;
 }
 
-const dashboardVehicleType = (type: string) => ({ moto: ["🏍️", "Motos"], pickup: ["🛻", "Caminhonetes"], van: ["🚐", "Furgões"], suv: ["🚙", "SUVs"], sedan: ["🚓", "Sedans"] } as Record<string, [string, string]>)[type] || ["🚔", "Outras"];
-
 function DashboardFleet({ date, items }: { date: string; items: FleetTypeSummary[] }) {
   const available = items.reduce((sum, item) => sum + item.availablePrefixes.length, 0);
   const outages = items.reduce((sum, item) => sum + item.outagePrefixes.length, 0);
@@ -284,8 +283,8 @@ function DashboardFleet({ date, items }: { date: string; items: FleetTypeSummary
     <header><div><small>FROTA EM {new Date(`${date}T12:00:00`).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}</small><h3>Viaturas por tipo</h3></div><Link href={`/viaturas?date=${date}`}>Ver frota</Link></header>
     <div className="dashboard-fleet-totals"><span className="available"><b>{available}</b> disponíveis</span><span className="outage"><b>{outages}</b> em FA</span></div>
     <div className="dashboard-fleet-types">{items.map((item) => {
-      const [icon, label] = dashboardVehicleType(item.type);
-      return <article key={item.type}><span aria-hidden="true">{icon}</span><div><header><b>{label}</b><small>{item.availablePrefixes.length} disponíveis · {item.outagePrefixes.length} FA</small></header><p className="available"><b>Disponíveis:</b> {item.availablePrefixes.length ? item.availablePrefixes.join(" · ") : "nenhuma"}</p>{item.outagePrefixes.length > 0 && <p className="outage"><b>Em FA:</b> {item.outagePrefixes.join(" · ")}</p>}</div></article>;
+      const label = vehicleTypeLabel(item.type);
+      return <article key={item.type}><span aria-hidden="true"><VehicleIcon type={item.type} /></span><div><header><b>{label === "Moto" ? "Motos" : label === "Sedan" ? "Sedans" : label}</b><small>{item.availablePrefixes.length} disponíveis · {item.outagePrefixes.length} FA</small></header><p className="available"><b>Disponíveis:</b> {item.availablePrefixes.length ? item.availablePrefixes.join(" · ") : "nenhuma"}</p>{item.outagePrefixes.length > 0 && <p className="outage"><b>Em FA:</b> {item.outagePrefixes.join(" · ")}</p>}</div></article>;
     })}</div>
   </section>;
 }

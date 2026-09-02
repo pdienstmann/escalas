@@ -1720,7 +1720,7 @@ test("fleet views group vehicle types and expose date-specific available and FA 
   const managementStyles = readFileSync(resolve("app/management.css"), "utf8");
   const dashboardStyles = readFileSync(resolve("app/management-dashboard.css"), "utf8");
   assert.match(management, /fleet-type-groups/);
-  assert.match(management, /vehicleIconLabel\(group\.type\)/);
+  assert.match(management, /<VehicleIcon type=\{group\.type\}/);
   assert.match(management, /availableCount/);
   assert.match(planningApi, /fleetByType/);
   assert.match(planningApi, /outageFor\(vehicle\.id, date\)/);

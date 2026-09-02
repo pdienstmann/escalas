@@ -14,7 +14,7 @@ import { ModuleLoading } from "./module-loading";
 import { AppDialog } from "./app-dialog";
 import { BackToSchedule, ScheduleNav } from "./schedule-nav";
 import { useScheduleDate } from "./use-schedule-date";
-import { VehicleIcon } from "./vehicle-icon";
+import { VehicleIcon, vehicleTypeLabel } from "./vehicle-icon";
 
 type Rec = Record<string, string | number | null>;
 type Data = {
@@ -449,7 +449,7 @@ function PatternBoard({ pattern, data, search, showEmpty, busy, memberEditing, a
 }
 
 function patternVehicleIcon(type: string) {
-  return type === "moto" ? "🏍️" : type === "pickup" ? "🛻" : type === "van" ? "🚐" : type === "suv" ? "🚙" : type === "sedan" ? "🚓" : "🚘";
+  return vehicleTypeLabel(type);
 }
 
 function PatternGroupsPanel({ data, busy, onAction }: { data: Data; busy: boolean; onAction: (body: Record<string, unknown>) => Promise<boolean> }) {

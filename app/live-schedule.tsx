@@ -28,7 +28,7 @@ import {
   SHIFT_DEFS,
 } from "../lib/shift-rules";
 import { HoleSuggestBox, type SameDayCandidate } from "./hole-suggest-box";
-import { VehicleIcon } from "./vehicle-icon";
+import { VehicleIcon, vehicleTypeLabel } from "./vehicle-icon";
 import {
   DragEvent,
   FormEvent,
@@ -3384,7 +3384,7 @@ function Editor({
   );
 }
 const vehicleIcon = (t: string) =>
-  t === "moto" ? "🏍️" : t === "pickup" ? "🛻" : t === "van" ? "🚐" : t === "suv" ? "🚙" : "🚓";
+  vehicleTypeLabel(t);
 const statusClass = (s: string) =>
   s === "overtime" ? "he" : s === "time_bank" ? "bh" : "troca";
 const statusShort = (s: string) =>
