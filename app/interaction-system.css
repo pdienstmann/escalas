@@ -23,6 +23,10 @@
   letter-spacing: .055em;
   text-transform: uppercase;
 }
+.nav-more-groups .nav-module-item{display:grid;gap:2px;white-space:normal!important}
+.nav-more-groups .nav-module-item>span{font-weight:850}
+.nav-more-groups .nav-module-item>small{color:#6b8093;font-size:9px;font-weight:600;line-height:1.25}
+.nav-more-groups b.nav-module-item>small{color:#51789a}
 
 .mobile-module-nav { display: none; }
 

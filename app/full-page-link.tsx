@@ -43,17 +43,11 @@ export function FullPageLink({ href, children, ...props }: FullPageLinkProps) {
   const feedbackTimer = useRef<number | null>(null);
   const fallbackTimer = useRef<number | null>(null);
   useEffect(() => {
-    const schedule = () => prefetchPage(href, router.prefetch);
-    const idle = "requestIdleCallback" in window
-      ? window.requestIdleCallback(schedule, { timeout: 1800 })
-      : window.setTimeout(schedule, 700);
     return () => {
-      if ("cancelIdleCallback" in window) window.cancelIdleCallback(idle);
-      else window.clearTimeout(idle);
       if (feedbackTimer.current !== null) window.clearTimeout(feedbackTimer.current);
       if (fallbackTimer.current !== null) window.clearTimeout(fallbackTimer.current);
     };
-  }, [href, router]);
+  }, []);
 
   const prefetch = () => prefetchPage(href, router.prefetch);
   return <>
@@ -64,7 +58,7 @@ export function FullPageLink({ href, children, ...props }: FullPageLinkProps) {
       feedbackTimer.current = window.setTimeout(() => setShowFeedback(true), 180);
       fallbackTimer.current = window.setTimeout(() => window.location.assign(href), 8000);
       startTransition(() => router.push(href));
-    }} onPointerEnter={(event) => { props.onPointerEnter?.(event); prefetch(); }} onFocus={(event) => { props.onFocus?.(event); prefetch(); }}>{children}</a>
+    }} onPointerEnter={(event) => { props.onPointerEnter?.(event); prefetch(); }} onPointerDown={(event) => { props.onPointerDown?.(event); prefetch(); }} onFocus={(event) => { props.onFocus?.(event); prefetch(); }}>{children}</a>
     {showFeedback && <div className="route-transition" role="status" aria-live="polite"><span className="route-transition-spinner" aria-hidden="true"/><b>{`Abrindo ${destinationName(href)}…`}</b></div>}
   </>;
 }

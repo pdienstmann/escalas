@@ -9,6 +9,7 @@ import { assignmentOverlapsShift, operationalShiftWindow } from "../lib/shift-ru
 import { isMotorcycleType } from "../lib/crew-rules";
 import { operationalGroupMemberCoversShift } from "../lib/operational-group-schedule";
 import { operationalGroupVehicleIdsForShifts, vehicleHasAssignmentInShifts } from "../lib/print-schedule-model";
+import { VehicleIcon } from "./vehicle-icon";
 type Rec = Record<string, string | number | null>;
 type OperationSlot = Rec & { id:number; role:string; guard_name?:string|null; source_type?:string|null };
 type OperationVehicle = Rec & { id:number; prefix:string; type:string; zone?:string|null; slots:OperationSlot[] };
@@ -42,6 +43,7 @@ export function PrintSchedule() {
   const { date } = useScheduleDate();
   const [data, setData] = useState<State | null>(null),
     [error, setError] = useState("");
+  const [postHoleMode, setPostHoleMode] = useState<"holes" | "rounds" | "hide" | null>(null);
   useEffect(() => {
     const volumeTest = new URLSearchParams(location.search).get("teste") === "200";
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -65,16 +67,24 @@ export function PrintSchedule() {
       <div className="print-actions">
         <a href={withScheduleDate("/", date)}>← Voltar</a>
         {data.assignments.length >= 180 && <span className="print-volume-badge">Compactação automática · {data.assignments.length} designações</span>}
+        <label className="print-hole-option">
+          <span>Furos em postos</span>
+          <select value={postHoleMode ?? (Number(data.schedule?.hide_empty_resources || 0) === 1 ? "hide" : "holes")} onChange={(event) => setPostHoleMode(event.target.value as "holes" | "rounds" | "hide")}>
+            <option value="holes">Mostrar como furo</option>
+            <option value="rounds">Usar Rondas Frequentes</option>
+            <option value="hide">Ocultar posto se totalmente vazio</option>
+          </select>
+        </label>
         <button onClick={() => window.print()}>Imprimir / salvar PDF</button>
       </div>
-      <PrintPage data={data} period="day" title="ESCALA DIURNA" />
-      <PrintPage data={data} period="night" title="ESCALA NOTURNA" />
+      <PrintPage data={data} period="day" title="ESCALA DIURNA" postHoleMode={postHoleMode} />
+      <PrintPage data={data} period="night" title="ESCALA NOTURNA" postHoleMode={postHoleMode} />
       {Boolean(data.operations?.length)&&<PrintOperationsPage data={data}/>}
     </main>
   );
 }
 function PrintOperationsPage({data}:{data:State}){
-  return <section className="print-page print-operations-page"><header><div className="print-mark">GMNH</div><div><b>PREFEITURA MUNICIPAL DE NOVO HAMBURGO</b><span>SECRETARIA DE SEGURANÇA · DIRETORIA DA GUARDA MUNICIPAL</span><strong>OPERAÇÕES DO DIA</strong></div><aside><b>{formatScheduleDate(data.date)}</b><span>{data.operations?.length} operação(ões)</span></aside></header><div className="print-operation-list">{data.operations?.map(operation=><article key={operation.id}><header><div><h2>{operation.title}</h2><p>{String(operation.starts_at).slice(11,16)}–{String(operation.ends_at).slice(11,16)} · {String(operation.location||"Local não informado")}</p></div><aside><b>{String(operation.commander||"Responsável a definir")}</b><small>{String(operation.reference||"")}</small></aside></header><table><thead><tr><th>VTR / EQUIPE</th><th>MOTORISTA</th><th>PATRULHEIRO</th><th>REFORÇOS</th></tr></thead><tbody>{operation.vehicles.map(vehicle=>{const driver=vehicle.slots.find(slot=>slot.role==="driver"),patrol=vehicle.slots.find(slot=>slot.role==="patrol"),extras=vehicle.slots.filter(slot=>!["driver","patrol"].includes(slot.role)),motorcycle=isMotorcycleType(vehicle.type);return <tr key={vehicle.id}><td><b><span className="print-vehicle-icon">{vehicleIcon(String(vehicle.type))}</span>{vehicle.prefix}</b><small>{String(vehicle.zone||"Sem área")}</small></td><OperationSlotCell slot={driver}/>{motorcycle?<td>—</td>:<OperationSlotCell slot={patrol}/>}<td>{extras.length?extras.map(slot=><PrintOperationGuard key={slot.id} slot={slot}/>):"—"}</td></tr>})}{operation.generalSlots.length>0&&<tr><td><b>EFETIVO ADICIONAL</b><small>Sem VTR vinculada</small></td><td colSpan={3}>{operation.generalSlots.map(slot=><PrintOperationGuard key={slot.id} slot={slot}/>)}</td></tr>}</tbody></table>{operation.notes&&<p className="print-operation-notes"><b>Observações:</b> {String(operation.notes)}</p>}</article>)}</div><div className="print-page-number">ANEXO · OPERAÇÕES</div></section>
+  return <section className="print-page print-operations-page"><header><div className="print-mark">GMNH</div><div><b>PREFEITURA MUNICIPAL DE NOVO HAMBURGO</b><span>SECRETARIA DE SEGURANÇA · DIRETORIA DA GUARDA MUNICIPAL</span><strong>OPERAÇÕES DO DIA</strong></div><aside><b>{formatScheduleDate(data.date)}</b><span>{data.operations?.length} operação(ões)</span></aside></header><div className="print-operation-list">{data.operations?.map(operation=><article key={operation.id}><header><div><h2>{operation.title}</h2><p>{String(operation.starts_at).slice(11,16)}–{String(operation.ends_at).slice(11,16)} · {String(operation.location||"Local não informado")}</p></div><aside><b>{String(operation.commander||"Responsável a definir")}</b><small>{String(operation.reference||"")}</small></aside></header><table><thead><tr><th>VTR / EQUIPE</th><th>MOTORISTA</th><th>PATRULHEIRO</th><th>REFORÇOS</th></tr></thead><tbody>{operation.vehicles.map(vehicle=>{const driver=vehicle.slots.find(slot=>slot.role==="driver"),patrol=vehicle.slots.find(slot=>slot.role==="patrol"),extras=vehicle.slots.filter(slot=>!["driver","patrol"].includes(slot.role)),motorcycle=isMotorcycleType(vehicle.type);return <tr key={vehicle.id}><td><b><span className="print-vehicle-icon"><VehicleIcon type={String(vehicle.type)}/></span>{vehicle.prefix}</b><small>{String(vehicle.zone||"Sem área")}</small></td><OperationSlotCell slot={driver}/>{motorcycle?<td>—</td>:<OperationSlotCell slot={patrol}/>}<td>{extras.length?extras.map(slot=><PrintOperationGuard key={slot.id} slot={slot}/>):"—"}</td></tr>})}{operation.generalSlots.length>0&&<tr><td><b>EFETIVO ADICIONAL</b><small>Sem VTR vinculada</small></td><td colSpan={3}>{operation.generalSlots.map(slot=><PrintOperationGuard key={slot.id} slot={slot}/>)}</td></tr>}</tbody></table>{operation.notes&&<p className="print-operation-notes"><b>Observações:</b> {String(operation.notes)}</p>}</article>)}</div><div className="print-page-number">ANEXO · OPERAÇÕES</div></section>
 }
 function OperationSlotCell({slot}:{slot?:OperationSlot}){return <td>{slot?<PrintOperationGuard slot={slot}/>:<strong className="print-hole">VAGA</strong>}</td>}
 function PrintOperationGuard({slot}:{slot:OperationSlot}){return <span className="print-operation-guard"><b>{slot.guard_name||"VAGA"}</b>{slot.guard_name&&<em>{operationSource(String(slot.source_type||"pending"))}</em>}</span>}
@@ -91,10 +101,12 @@ function PrintPage({
   data,
   period,
   title,
+  postHoleMode,
 }: {
   data: State;
   period: "day" | "night";
   title: string;
+  postHoleMode: "holes" | "rounds" | "hide" | null;
 }) {
   const orderedResources = orderScheduleResources(
     data.vehicles,
@@ -106,13 +118,12 @@ function PrintPage({
   const conventionalAssignments = data.assignments.filter((assignment) =>
     periodShifts.some((shift) => assignmentOverlapsShift(assignment, data.date, shift.id) && !isGroupOwnedAssignment(data, assignment, shift.id)),
   );
-  const resources = (Number(data.schedule?.hide_empty_resources || 0) === 1
-    ? orderedResources.filter(({kind,r}) => data.assignments.some((assignment) =>
-        (kind === "vehicle" ? Number(assignment.vehicle_id) === Number(r.id) : Number(assignment.post_id) === Number(r.id)) &&
-        periodShifts.some((shift) => assignmentOverlapsShift(assignment,data.date,shift.id) && !isGroupOwnedAssignment(data,assignment,shift.id)),
-      ))
-    : orderedResources).filter(({kind,r}) => {
-      if (kind !== "vehicle") return true;
+  const resolvedPostHoleMode = postHoleMode ?? (Number(data.schedule?.hide_empty_resources || 0) === 1 ? "hide" : "holes");
+  const hasPeriodAssignment = (kind: "post" | "vehicle", resourceId: number) => conventionalAssignments.some((assignment) =>
+    Number(kind === "vehicle" ? assignment.vehicle_id : assignment.post_id) === resourceId,
+  );
+  const resources = orderedResources.filter(({kind,r}) => {
+      if (kind !== "vehicle") return resolvedPostHoleMode !== "hide" || hasPeriodAssignment("post", Number(r.id));
       if (groupVehicleIds.has(Number(r.id))) return false;
       if (!isMotorcycleType(r.type)) return true;
       return vehicleHasAssignmentInShifts({
@@ -151,9 +162,9 @@ function PrintPage({
           </tr>
         </thead>
         <tbody>
-          <PrintResourceRows data={data} period={period} resources={vehicleResources} />
+          <PrintResourceRows data={data} period={period} resources={vehicleResources} postHoleMode={resolvedPostHoleMode} />
           <PrintOperationalGroupRows data={data} period={period} />
-          <PrintResourceRows data={data} period={period} resources={postResources} />
+          <PrintResourceRows data={data} period={period} resources={postResources} postHoleMode={resolvedPostHoleMode} />
         </tbody>
       </table>
       <PrintMovementsFooter data={data} />
@@ -166,7 +177,7 @@ function PrintPage({
 
 type OrderedPrintResource = ReturnType<typeof orderScheduleResources<Rec>>[number];
 
-function PrintResourceRows({ data, period, resources }: { data: State; period: "day" | "night"; resources: OrderedPrintResource[] }) {
+function PrintResourceRows({ data, period, resources, postHoleMode }: { data: State; period: "day" | "night"; resources: OrderedPrintResource[]; postHoleMode: "holes" | "rounds" | "hide" }) {
   return <>
     {resources.map(({ kind, r, section }, index) => (
             <Fragment key={`${kind}-${r.id}`}>
@@ -177,7 +188,7 @@ function PrintResourceRows({ data, period, resources }: { data: State; period: "
               )}
               <tr>
                 <td>
-                  <b>{kind === "vehicle" ? <><span className="print-vehicle-icon">{vehicleIcon(String(r.type))}</span>{r.prefix}</> : r.name}</b>
+                  <b>{kind === "vehicle" ? <><span className="print-vehicle-icon"><VehicleIcon type={String(r.type)}/></span>{r.prefix}</> : r.name}</b>
                   <small>{kind === "vehicle" ? r.zone : r.group_name}</small>
                 </td>
                 {shifts[period].map((s) => {
@@ -217,7 +228,9 @@ function PrintResourceRows({ data, period, resources }: { data: State; period: "
                           )}
                         </div>
                       )})}
-                      {missingRoles.length > 0 && (
+                      {kind === "post" && missingRoles.length > 0 && postHoleMode === "rounds" ? (
+                        <strong className="print-rounds">VTR / RONDAS FREQUENTES</strong>
+                      ) : missingRoles.length > 0 && (
                         <strong className="print-hole">
                           FURO · {missingRoles.map((role)=>role==="driver"?"motorista":role==="patrol"?"patrulheiro":"GM").join(" + ")}
                         </strong>
@@ -310,7 +323,7 @@ function PrintOperationalGroupRows({ data, period }: { data: State; period: "day
             {periodShifts.map((shift) => <td key={shift.id}>{teamMembers.filter((member) => operationalGroupMemberCoversShift(member, data.date, shift.id)).map((member) => {
               const assignment = data.assignments.find((item) => Number(item.guard_id) === Number(member.resource_id) && String(item.work_kind || "shift") !== "overtime_extension" && assignmentOverlapsShift(item, data.date, shift.id) && (member.vehicle_id == null || Number(item.vehicle_id) === Number(member.vehicle_id)));
               const vehicle = member.vehicle_id ? data.vehicles.find((item) => Number(item.id) === Number(member.vehicle_id)) : assignment?.vehicle_id ? data.vehicles.find((item) => Number(item.id) === Number(assignment.vehicle_id)) : null;
-              const destination = vehicle ? `${vehicleIcon(String(vehicle.type))} ${String(vehicle.prefix)}` : assignment?.post_id ? String(data.posts.find((post) => Number(post.id) === Number(assignment.post_id))?.name || "Posto") : "À disposição";
+              const destination = vehicle ? <span className="print-group-destination"><VehicleIcon type={String(vehicle.type)}/>{String(vehicle.prefix)}</span> : assignment?.post_id ? String(data.posts.find((post) => Number(post.id) === Number(assignment.post_id))?.name || "Posto") : "À disposição";
               const time = member.starts_at && member.ends_at ? `${String(member.starts_at).slice(0, 5)}–${String(member.ends_at).slice(0, 5)} · 12h` : String(member.pattern_period) === "night" ? "19:00–07:00 · 12h" : "07:00–19:00 · 12h";
               const movement = data.movements.find((item) => Number(item.guard_id) === Number(member.resource_id) && String(item.starts_at || "") < `${data.date}T23:59` && String(item.ends_at || "") > `${data.date}T00:00`);
               const visualStatus = assignment ? statusInShift(assignment, data.date, shift.id) : movement ? "away" : "normal";
@@ -389,7 +402,6 @@ function printLegacyServiceAdjustmentRange(item:Rec,date:string){
 }
 const status = (s: string) =>
   s === "overtime" ? "HE" : s === "time_bank" ? "BH" : "TROCA";
-const vehicleIcon=(type:string)=>type==="moto"?"🏍️":type==="pickup"?"🛻":type==="van"?"🚐":type==="suv"?"🚙":"🚓";
 function statusInShift(a:Rec,date:string,shift:string){const value=String(a.status||"normal"),regular=String(a.regular_ends_at||"");if(value!=="overtime"||!regular)return value;return operationalShiftWindow(date,shift).end<=regular?"normal":value}
 function isOvertimeExtensionCell(a:Rec,date:string,shift:string){const regular=String(a.regular_ends_at||"");return Boolean(regular)&&String(a.status)==="overtime"&&operationalShiftWindow(date,shift).start>=regular}
 function assignmentDisplayInShift(a:Rec,date:string,shift:string){if(String(a.work_kind)==="weekly")return weeklyDisplayInShift(a,date,shift);const window=operationalShiftWindow(date,shift),start=String(a.starts_at),end=String(a.ends_at),segmentStart=start>window.start?start:window.start,segmentEnd=end<window.end?end:window.end,range=`${segmentStart.slice(11,16)}–${segmentEnd.slice(11,16)}`;return statusInShift(a,date,shift)==="overtime"&&a.regular_ends_at?`Extensão HE ${range}`:range}

@@ -1,6 +1,7 @@
 "use client";
 
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import Link from "next/link";
 
 type State = { error: Error | null; incident: string };
 
@@ -25,7 +26,7 @@ export class AppErrorBoundary extends Component<{ children: ReactNode }, State> 
         <h1>Esta tela encontrou um problema</h1>
         <p>A escala e os dados salvos não foram apagados. Tente carregar novamente; se o erro continuar, copie o código abaixo.</p>
         <details><summary>Detalhes técnicos</summary><code>{this.state.error.message}</code></details>
-        <div><button type="button" onClick={retry}>Tentar novamente</button><a href="/">Ir ao início</a><button type="button" className="secondary" onClick={()=>void navigator.clipboard?.writeText(`${this.state.incident}: ${this.state.error?.message}`)}>Copiar código</button></div>
+        <div><button type="button" onClick={retry}>Tentar novamente</button><Link href="/">Ir ao início</Link><button type="button" className="secondary" onClick={()=>void navigator.clipboard?.writeText(`${this.state.incident}: ${this.state.error?.message}`)}>Copiar código</button></div>
       </section>
     </main>;
   }

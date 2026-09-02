@@ -505,7 +505,7 @@ export async function GET(request: Request) {
   const schedule = await env.DB.prepare("SELECT * FROM schedules WHERE date=?")
     .bind(date)
     .first<Record<string, unknown>>();
-  const [guards, posts, vehicles, allVehicles, assignments, movements, notices, outages, sections, operations, serviceAdjustments, operationalGroups, operationalGroupMembers, weeklySlotCount] =
+  const [guards, posts, vehicles, allVehicles, assignments, movements, notices, outages, sections, operations, serviceAdjustments, operationalGroups, operationalGroupMembers, weeklySlotCount, operationAssignments, appliedPattern] =
     await Promise.all([
       env.DB.prepare(
         "SELECT id,name,CASE WHEN registration LIKE 'SEM-MATRICULA-%' THEN NULL ELSE registration END AS registration,platoon,base_shift,work_regime,overtime_eligible FROM guards WHERE active=1 ORDER BY name",
@@ -554,8 +554,9 @@ export async function GET(request: Request) {
         FROM operational_group_members m JOIN operational_groups g ON g.id=m.group_id
         WHERE g.active=1 AND (m.resource_kind!='guard' OR EXISTS (SELECT 1 FROM guards gm WHERE gm.id=m.resource_id AND gm.active=1 AND COALESCE(gm.work_regime,'12x36')!='weekly')) ORDER BY g.sort_order,g.name,m.resource_kind,m.resource_id`).all(),
       env.DB.prepare("SELECT COUNT(*) total FROM weekly_slots WHERE active=1").first<{ total: number }>(),
+      env.DB.prepare(`SELECT os.guard_id,o.starts_at,o.ends_at FROM operation_slots os JOIN operations o ON o.id=os.operation_id WHERE o.schedule_id=? AND o.status!='cancelled' AND os.guard_id IS NOT NULL`).bind(schedule?.id).all<{guard_id:number;starts_at:string;ends_at:string}>(),
+      env.DB.prepare("SELECT dp.code day_code,np.code night_code FROM schedule_patterns sp JOIN shift_patterns dp ON dp.id=sp.day_pattern_id JOIN shift_patterns np ON np.id=sp.night_pattern_id WHERE sp.schedule_id=?").bind(schedule?.id).first<Record<string,unknown>>(),
     ]);
-  const operationAssignments=(await env.DB.prepare(`SELECT os.guard_id,o.starts_at,o.ends_at FROM operation_slots os JOIN operations o ON o.id=os.operation_id WHERE o.schedule_id=? AND o.status!='cancelled' AND os.guard_id IS NOT NULL`).bind(schedule?.id).all<{guard_id:number;starts_at:string;ends_at:string}>()).results;
   const blocked = new Set([
       ...movements.results.map((m) => Number(m.guard_id)),
       ...serviceAdjustments.results.filter((item) => String(item.subtype)==="negative_full" && String(item.service_date)===date).map((item) => Number(item.guard_id)),
@@ -574,19 +575,19 @@ export async function GET(request: Request) {
     active = assignments.results.filter(
       (a) => !blocked.has(Number(a.guard_id)) && !awaitingRedeploy(a),
     ),
-    availableForRedeployment = assignments.results.filter((a) => awaitingRedeploy(a)&&!operationAssignments.some(operation=>
+    availableForRedeployment = assignments.results.filter((a) => awaitingRedeploy(a)&&!operationAssignments.results.some(operation=>
       Number(operation.guard_id)===Number(a.guard_id)&&String(a.starts_at)<operation.ends_at&&String(a.ends_at)>operation.starts_at,
     ));
-  const appliedPattern=await env.DB.prepare("SELECT dp.code day_code,np.code night_code FROM schedule_patterns sp JOIN shift_patterns dp ON dp.id=sp.day_pattern_id JOIN shift_patterns np ON np.id=sp.night_pattern_id WHERE sp.schedule_id=?").bind(schedule?.id).first<Record<string,unknown>>();
-  const patternOperationalGroupMembers = appliedPattern
-    ? await env.DB.prepare(`SELECT m.id,m.pattern_id,m.group_id,m.resource_kind,m.resource_id,m.team_label,m.shift,m.vehicle_id,m.starts_at,m.ends_at,p.code pattern_code,p.period pattern_period,g.name group_name,g.short_name group_short_name,g.color group_color,g.sort_order group_sort_order
+  const [patternOperationalGroupMembers, dailyOperationalGroupMembers, suggested] = await Promise.all([
+    appliedPattern
+    ? env.DB.prepare(`SELECT m.id,m.pattern_id,m.group_id,m.resource_kind,m.resource_id,m.team_label,m.shift,m.vehicle_id,m.starts_at,m.ends_at,p.code pattern_code,p.period pattern_period,g.name group_name,g.short_name group_short_name,g.color group_color,g.sort_order group_sort_order
       FROM pattern_operational_group_members m JOIN shift_patterns p ON p.id=m.pattern_id AND p.active=1 JOIN operational_groups g ON g.id=m.group_id AND g.active=1
       WHERE m.pattern_id IN (SELECT day_pattern_id FROM schedule_patterns WHERE schedule_id=? UNION SELECT night_pattern_id FROM schedule_patterns WHERE schedule_id=?)
         AND (m.resource_kind!='guard' OR EXISTS (SELECT 1 FROM guards gm WHERE gm.id=m.resource_id AND gm.active=1 AND COALESCE(gm.work_regime,'12x36')!='weekly'))
       ORDER BY g.sort_order,g.name,m.resource_kind,m.resource_id`).bind(schedule?.id,schedule?.id).all()
-    : { results: [] as Record<string, unknown>[] };
-  const dailyOperationalGroupMembers = schedule
-    ? await env.DB.prepare(`SELECT MIN(d.id) id,-d.schedule_id pattern_id,d.group_id,'guard' resource_kind,d.guard_id resource_id,d.team_label,
+    : Promise.resolve({ results: [] as Record<string, unknown>[] }),
+    schedule
+    ? env.DB.prepare(`SELECT MIN(d.id) id,-d.schedule_id pattern_id,d.group_id,'guard' resource_kind,d.guard_id resource_id,d.team_label,
         CASE WHEN MIN(a.starts_at)<s.date||'T19:00' THEN 'day' ELSE 'night' END pattern_period,
         CASE WHEN MIN(a.starts_at)<s.date||'T19:00' THEN '2' ELSE '4' END shift,
         MAX(a.vehicle_id) vehicle_id,substr(MIN(a.starts_at),12,5) starts_at,substr(MAX(a.ends_at),12,5) ends_at,
@@ -597,14 +598,15 @@ export async function GET(request: Request) {
       JOIN assignments a ON a.schedule_id=d.schedule_id AND a.guard_id=d.guard_id
       WHERE d.schedule_id=?
       GROUP BY d.schedule_id,d.group_id,d.team_label,d.guard_id,g.name,g.short_name,g.color,g.sort_order`).bind(schedule.id).all<Record<string,unknown>>()
-    : { results: [] as Record<string, unknown>[] };
+    : Promise.resolve({ results: [] as Record<string, unknown>[] }),
+    appliedPattern ? Promise.resolve(null) : resolvePatternCodes(env.DB,date),
+  ]);
   const contextualMembers = [...new Map(
     [...operationalGroupMembers.results, ...patternOperationalGroupMembers.results, ...dailyOperationalGroupMembers.results].map((member) => [
       `${member.group_id}:${member.resource_kind}:${member.resource_id}:${String(member.team_label || "").trim().toUpperCase()}:${member.pattern_period || "global"}`,
       member,
     ]),
   ).values()];
-  const suggested=appliedPattern?null:await resolvePatternCodes(env.DB,date);
   const weeklyCount=Number(weeklySlotCount?.total||0);
   const patternDay=String((appliedPattern||suggested)?.day_code||"");
   const patternNight=String((appliedPattern||suggested)?.night_code||"");

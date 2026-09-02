@@ -35,3 +35,12 @@
 .print-page footer p small{color:#587087}
 @media(max-width:700px){.print-document{padding:8px}.print-actions{gap:8px}.print-page{min-width:980px;padding:12px}.print-page footer .print-movement-groups{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media print{.print-page table{font-size:7.5pt}.print-page tr,.print-movement-group{break-inside:avoid}.print-page footer .print-movement-groups{grid-template-columns:repeat(4,minmax(0,1fr))}}
+
+/* A escolha de como tratar postos vazios pertence somente ao documento. */
+.print-actions{align-items:center;gap:10px}
+.print-hole-option{display:flex;align-items:center;gap:8px;margin-left:auto;padding:6px 9px;border:1px solid #9eb0c1;border-radius:7px;background:#fff;color:#173a5d}
+.print-hole-option span{font-size:10px;font-weight:900}
+.print-hole-option select{min-width:190px;padding:6px;border:1px solid #b6c4d1;border-radius:5px;background:#fff;color:#173a5d}
+.print-rounds{display:block;padding:4px;border:1px solid #d3ae16;border-radius:3px;background:#ffe947;color:#4f4200;text-align:center;font-size:9px;font-weight:900;print-color-adjust:exact;-webkit-print-color-adjust:exact}
+@media(max-width:700px){.print-actions{align-items:stretch;flex-wrap:wrap}.print-hole-option{order:3;width:100%;margin-left:0;justify-content:space-between}.print-hole-option select{min-width:0;max-width:55%}}
+@media print{.print-hole-option{display:none!important}}

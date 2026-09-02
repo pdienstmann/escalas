@@ -1908,3 +1908,37 @@ test("removing a weekly GM restores the saved 12x36 origin and existing schedule
   assert.match(engine, /JOIN schedule_patterns sp ON sp\.schedule_id=s\.id/);
   assert.match(migration, /weekly_return_contexts/);
 });
+
+test("PDF lets the escalante decide how fully empty posts are printed", () => {
+  const print = readFileSync(resolve("app/print-schedule.tsx"), "utf8");
+  const styles = readFileSync(resolve("app/print-schedule.css"), "utf8");
+  assert.match(print, /Furos em postos/);
+  assert.match(print, /Mostrar como furo/);
+  assert.match(print, /Usar Rondas Frequentes/);
+  assert.match(print, /Ocultar posto se totalmente vazio/);
+  assert.match(print, /resolvedPostHoleMode/);
+  assert.match(print, /VTR \/ RONDAS FREQUENTES/);
+  assert.match(styles, /\.print-rounds/);
+});
+
+test("vehicle icons use stable SVG glyphs instead of OS-dependent emoji in scale and PDF", () => {
+  const icon = readFileSync(resolve("app/vehicle-icon.tsx"), "utf8");
+  const schedule = readFileSync(resolve("app/live-schedule.tsx"), "utf8");
+  const print = readFileSync(resolve("app/print-schedule.tsx"), "utf8");
+  const patterns = readFileSync(resolve("app/patterns-dashboard.tsx"), "utf8");
+  assert.match(icon, /export function VehicleIcon/);
+  assert.match(icon, /viewBox="0 0 32 20"/);
+  assert.match(schedule, /<VehicleIcon type=\{String\(resource\.type\)\}/);
+  assert.match(print, /<VehicleIcon type=\{String\(r\.type\)\}/);
+  assert.match(patterns, /<VehicleIcon type=\{String\(resource\.type/);
+});
+
+test("navigation prefetches by intent and warms only the most likely next module", () => {
+  const link = readFileSync(resolve("app/full-page-link.tsx"), "utf8");
+  const navigation = readFileSync(resolve("app/schedule-nav.tsx"), "utf8");
+  assert.doesNotMatch(link, /requestIdleCallback/);
+  assert.match(link, /onPointerDown/);
+  assert.match(navigation, /likelyDestination/);
+  assert.match(navigation, /router\.prefetch\(href\)/);
+  assert.match(navigation, /description: "Compensações e trocas de serviço"/);
+});

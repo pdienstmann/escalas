@@ -3,48 +3,63 @@
 import { FullPageLink as Link } from "./full-page-link";
 import { withScheduleDate } from "../lib/schedule-date";
 import { useSessionProfile } from "./use-session-profile";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 
-const primaryItems = [
+type NavItem = {
+  href: string;
+  label: string;
+  exact?: boolean;
+  icon?: string;
+  description?: string;
+};
+
+type NavGroup = {
+  label: string;
+  items: NavItem[];
+};
+
+const primaryItems: NavItem[] = [
   { href: "/", label: "Início", exact: true },
   { href: "/escala", label: "Escala" },
   { href: "/planejamento", label: "Planejamento" },
   { href: "/operacoes", label: "Operações" },
   { href: "/movimentacoes", label: "Pendências" },
   { href: "/horas-extras", label: "Horas extras" },
-] as const;
-const moreGroups = [
+];
+const moreGroups: NavGroup[] = [
   {
     label: "Gestão do efetivo",
     items: [
-      { href: "/bancos", label: "BH / trocas" },
-      { href: "/alteracoes", label: "Alterações diversas" },
-      { href: "/folgas", label: "Folgas mensais" },
+      { href: "/bancos", label: "BH / trocas", description: "Compensações e trocas de serviço" },
+      { href: "/alteracoes", label: "Alterações diversas", description: "Lembretes vinculados às datas" },
+      { href: "/folgas", label: "Folgas mensais", description: "Importação e panorama de folgas" },
     ],
   },
   {
     label: "Preparação da escala",
     items: [
-      { href: "/padroes", label: "Padrões 12x36" },
-      { href: "/viaturas", label: "Viaturas" },
-      { href: "/cadastros", label: "Cadastros" },
+      { href: "/padroes", label: "Padrões e semanal", description: "Equipes-base e expediente semanal" },
+      { href: "/viaturas", label: "Viaturas", description: "Disponibilidade, tipo e situação FA" },
+      { href: "/cadastros", label: "Cadastros", description: "GMs, postos e seções" },
     ],
   },
   {
     label: "Conferência",
     items: [
-      { href: "/validacao", label: "Validar / publicar" },
-      { href: "/historico", label: "Histórico" },
+      { href: "/validacao", label: "Validar / publicar", description: "Conferir furos e liberar a escala" },
+      { href: "/historico", label: "Histórico", description: "Alterações, responsáveis e desfazer" },
     ],
   },
-] as const;
+] ;
 const moreItems = moreGroups.flatMap((group) => group.items);
 
-const mobileItems = [
+const mobileItems: NavItem[] = [
   { href: "/", label: "Início", icon: "⌂", exact: true },
   { href: "/escala", label: "Escala", icon: "▦" },
   { href: "/planejamento", label: "Planejar", icon: "□" },
   { href: "/movimentacoes", label: "Pendências", icon: "!" },
-] as const;
+];
 
 export function ScheduleNav({
   date,
@@ -54,7 +69,15 @@ export function ScheduleNav({
   active?: string;
 }) {
   const session = useSessionProfile();
+  const router = useRouter();
   const activeMoreItem = moreItems.find((item) => active.startsWith(item.href));
+  useEffect(() => {
+    const likelyDestination = active === "/" ? "/escala" : active.startsWith("/escala") ? "/planejamento" : "/escala";
+    const href = withScheduleDate(likelyDestination, date);
+    const warm = () => { try { router.prefetch(href); } catch { /* prefetch is optional */ } };
+    const timer = window.setTimeout(warm, 900);
+    return () => window.clearTimeout(timer);
+  }, [active, date, router]);
   return <>
     <nav className="tabs operational-tabs" aria-label="Módulos da escala">
       {primaryItems.map((item) => {
@@ -77,7 +100,8 @@ export function ScheduleNav({
           <small>{group.label}</small>
           {group.items.map((item)=>{
             const href=withScheduleDate(item.href,date),isActive=active.startsWith(item.href);
-            return isActive?<b key={item.href}>{item.label}</b>:<Link key={item.href} href={href}>{item.label}</Link>;
+            const content=<><span>{item.label}</span><small>{item.description}</small></>;
+            return isActive?<b className="nav-module-item" key={item.href}>{content}</b>:<Link className="nav-module-item" key={item.href} href={href}>{content}</Link>;
           })}
         </section>)}</div>
       </details>

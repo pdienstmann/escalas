@@ -28,6 +28,7 @@ import {
   SHIFT_DEFS,
 } from "../lib/shift-rules";
 import { HoleSuggestBox, type SameDayCandidate } from "./hole-suggest-box";
+import { VehicleIcon } from "./vehicle-icon";
 import {
   DragEvent,
   FormEvent,
@@ -2825,7 +2826,7 @@ function Row({
               <button type="button" className="section-toggle" aria-expanded={!collapsed} onClick={onToggleSection}>
                 <span className="section-toggle-label">
                   <span aria-hidden="true">{collapsed ? "▸" : "▾"}</span>
-                  <span aria-hidden="true">{operationalSession ? "◆" : kind === "vehicle" ? "🚓" : "◆"}</span>
+                   <span aria-hidden="true">{operationalSession ? "◆" : kind === "vehicle" ? <VehicleIcon type="sedan"/> : "◆"}</span>
                   <b>{section}</b>
                   <small className="section-heading-summary">{sectionResourceCount} {sectionResourceCount === 1 ? "recurso" : "recursos"}</small>
                 </span>
@@ -2862,7 +2863,7 @@ function Row({
         <td className="resource-cell">
           <div className="resource">
             <span className="vehicle">
-            {kind === "vehicle" ? vehicleIcon(String(resource.type)) : ""}
+             {kind === "vehicle" ? <VehicleIcon type={String(resource.type)} label={String(resource.prefix || "Viatura")}/> : ""}
             </span>
             <div>
             <b>{kind === "vehicle" ? resource.prefix : resource.name}</b>
