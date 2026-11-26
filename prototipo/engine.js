@@ -291,8 +291,25 @@ export function afastamentoNoDia(data, gmId, dia) {
 // 1) lotado neste posto e trabalhando hoje no período oposto (pode estender);
 // 2) demais, por necessidade: menos HE no mês (contando o que veio do mês anterior);
 // quem já passou do teto vai para o fim; reserva técnica / à disposição ficam por último.
+// Ordem: 0 escala oposta do mesmo posto e do mesmo turno (dia/noite) · 1 quem já está no posto hoje (estende)
+// · 2 outros GMs do mesmo turno · 3 mesmo posto, turno oposto · 4 o resto. Dentro de cada grupo: abaixo do teto e menos horas.
 export function prioridadeHE(x, teto) {
-  return [x.bloqueado ? 1 : 0, x.mesmoPosto ? (x.noPostoHoje ? 1 : 0) : 2, x.heMes + x.transporte >= teto ? 1 : 0, x.heMes + x.transporte];
+  const grupo = x.noPostoHoje ? 1 : x.mesmoPosto && x.mesmoPeriodo ? 0 : x.mesmoPeriodo ? 2 : x.mesmoPosto ? 3 : 4;
+  return [x.bloqueado ? 1 : 0, grupo, x.heMes + x.transporte >= teto ? 1 : 0, x.heMes + x.transporte];
+}
+// dia (07–19) ou noite (19–07) de um horário em minutos
+export const periodoDoHorario = (m) => { const x = ((m % 1440) + 1440) % 1440; return x >= 420 && x < 1140 ? "dia" : "noite"; };
+export function mesmoPeriodo(data, gm, dia, ini) {
+  const eq = data.equipes.find((e) => e.id === vigente(gm, dia).equipe);
+  return !!eq?.periodo && eq.periodo === periodoDoHorario(ini);
+}
+// Quem já trabalha hoje colado ao horário da vaga só estende 6h (um turno): ninguém faz 12h normais + 12h extras.
+export function limitarExtensao(data, dia, gmId, ini, fim, max = 360) {
+  if (fim - ini <= max) return [ini, fim];
+  const minhas = calcularDia(data, dia).designacoes.filter((d) => d.gm === gmId && d.nat !== "he" && d.nat !== "bh");
+  if (minhas.some((d) => d.fim <= ini && ini - d.fim < 60)) return [ini, ini + max];
+  if (minhas.some((d) => d.ini >= fim && d.ini - fim < 60)) return [fim - max, fim];
+  return [ini, fim];
 }
 const compararPrioridade = (teto) => (a, b) => {
   const pa = prioridadeHE(a, teto), pb = prioridadeHE(b, teto);
@@ -315,7 +332,7 @@ export function sugerir(data, dia, postoId, ini, fim) {
     const minhas = cd.designacoes.filter((d) => d.gm === gm.id);
     const l = livro.get(gm.id) || { he: 0, transporte: 0 };
     const lotPosto = vigente(gm, dia).lotacao?.posto;
-    const base = { gm, heMes: l.he, transporte: l.transporte, mesmoPosto: lotPosto === postoId, noPostoHoje: minhas.some((d) => d.posto === postoId && d.nat !== "he") };
+    const base = { gm, heMes: l.he, transporte: l.transporte, mesmoPosto: lotPosto === postoId, noPostoHoje: minhas.some((d) => d.posto === postoId && d.nat !== "he"), mesmoPeriodo: !minhas.length && mesmoPeriodo(data, gm, dia, ini) };
     const sobre = minhas.filter((d) => sobrepoe(d.ini, d.fim, ini, fim) > 0);
     if (sobre.length) {
       if (sobre.every(livreParaRemanejar)) {
@@ -327,8 +344,11 @@ export function sugerir(data, dia, postoId, ini, fim) {
     if (ontemNoite.includes(gm.id)) continue;
     const teto = (data.config?.tetoHE ?? 60) * 60, total = base.heMes + base.transporte;
     const notas = [];
-    if (base.mesmoPosto && !base.noPostoHoje) notas.push("escala oposta deste posto");
-    if (base.noPostoHoje) notas.push("já está neste posto hoje · estende");
+    const [ea, eb] = limitarExtensao(data, dia, gm.id, ini, fim);
+    if (base.mesmoPosto && !base.noPostoHoje) notas.push(base.mesmoPeriodo ? "escala oposta deste posto" : "deste posto · turno oposto");
+    else if (base.mesmoPeriodo) notas.push("de folga · mesmo turno");
+    if (base.noPostoHoje) notas.push(eb - ea < fim - ini ? `já está neste posto hoje · estende ${fmtHm(ea)}–${fmtHm(eb)}` : "já está neste posto hoje · estende");
+    else if (eb - ea < fim - ini) notas.push(`trabalha hoje · estende ${fmtHm(ea)}–${fmtHm(eb)}`);
     if (total >= teto) notas.push("já passou do teto de HE");
     else if (total + (fim - ini) > teto) notas.push("vai passar do teto de HE");
     if (gm.naoFazHE) notas.push("não realiza HE");
@@ -446,7 +466,10 @@ export function planejarCobertura(data, dias) {
     const livres = cd.designacoes.filter((d) => d.nat === "normal" && (d.posto === null || reserva.has(d.posto)));
     const usados = new Set();
     const teto = (data.config?.tetoHE ?? 60) * 60;
-    for (const p of pendencias(data, dia)) for (let k = 0; k < p.faltam; k++) {
+    for (const pend of pendencias(data, dia)) for (let k = 0; k < pend.faltam; k++) {
+      const fila = [[pend.ini, pend.fim]];
+      while (fila.length) {
+      const [ini, fim] = fila.shift(), p = { ...pend, ini, fim };
       const mes = mesDe(dia);
       let melhor = null;
       for (const gm of data.gms) {
@@ -454,7 +477,8 @@ export function planejarCobertura(data, dias) {
         if ((ocup.get(gm.id) || []).some(([a, b]) => sobrepoe(a, b, p.ini, p.fim) > 0)) continue;
         const l = livro.get(gm.id) || { he: 0, transporte: 0 };
         const x = { gm, heMes: l.he + (heExtra.get(gm.id + mes) || 0), transporte: l.transporte, mesmoPosto: vigente(gm, dia).lotacao?.posto === p.posto,
-          noPostoHoje: cd.designacoes.some((d) => d.gm === gm.id && d.posto === p.posto && d.nat !== "he"), bloqueado: false };
+          noPostoHoje: cd.designacoes.some((d) => d.gm === gm.id && d.posto === p.posto && d.nat !== "he"), bloqueado: false,
+          mesmoPeriodo: !cd.designacoes.some((d) => d.gm === gm.id) && mesmoPeriodo(data, gm, dia, p.ini) };
         if (!melhor || compararPrioridade(teto)(x, melhor) < 0) melhor = x;
       }
       // reserva técnica / à disposição só se ninguém puder fazer HE
@@ -465,10 +489,14 @@ export function planejarCobertura(data, dias) {
         continue;
       }
       if (!melhor) { plano.push({ dia, posto: p.posto, tipo: null, ini: p.ini, fim: p.fim }); continue; }
+      // quem já trabalha colado só estende 6h; o resto da vaga vai para outro GM
+      const [ea, eb] = limitarExtensao(data, dia, melhor.gm.id, p.ini, p.fim);
+      if (ea > p.ini) fila.push([p.ini, ea]); if (eb < p.fim) fila.push([eb, p.fim]);
       melhor.horas = melhor.heMes + melhor.transporte; melhor.mesmo = melhor.mesmoPosto;
-      marca(melhor.gm.id, p.ini, p.fim);
-      heExtra.set(melhor.gm.id + mes, (heExtra.get(melhor.gm.id + mes) || 0) + p.fim - p.ini);
-      plano.push({ dia, posto: p.posto, tipo: "HE", gm: melhor.gm.id, ini: p.ini, fim: p.fim, horasNoMes: melhor.horas, conhecePosto: !!melhor.mesmo });
+      marca(melhor.gm.id, ea, eb);
+      heExtra.set(melhor.gm.id + mes, (heExtra.get(melhor.gm.id + mes) || 0) + eb - ea);
+      plano.push({ dia, posto: p.posto, tipo: "HE", gm: melhor.gm.id, ini: ea, fim: eb, horasNoMes: melhor.horas, conhecePosto: !!melhor.mesmo });
+      }
     }
   }
   return plano;

@@ -715,7 +715,7 @@ const PRESETS = {
 const periodoDe = (ini) => (ini >= 1140 || ini < 420 ? "noite" : "dia");
 function abrirPop(modo, el, extra) {
   const r = el.getBoundingClientRect();
-  ui.pop = { modo, anc: { x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: r.height }, ...extra };
+  ui.pop = { modo, anc: { x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: r.height }, turno: el.closest?.("td[data-turno]")?.dataset.turno, ...extra };
   desenharPop();
 }
 // A caixinha acompanha a rolagem da página, ancorada no ponto clicado.
@@ -1042,16 +1042,16 @@ function tirarDoDia(d, m) {
     data.ocorrencias.push({ id: novoId(), tipo: m, gm: quem, de: ui.dia });
   });
 }
-function itensGm(d) {
+function itensGm(d, turnoId) {
   const req = valoresCartao(d).req;
   return [
     { t: "Editar horário, REQ e observação…", act: "mn-card", padrao: true },
     { t: "Trocar o GM…", act: "mn-trocar" },
     ...itensEstender(d),
     { sep: true },
-    d.recorrente ? { t: "Não fazer esta HE recorrente hoje", act: "mn-sem-rec" }
-    : ehHeLancada(d) ? { t: "Remover esta hora extra", act: "mn-remover-he" }
-      : { t: "Tirar do dia", sub: [["FOLGA", "Folga"], ["FALTA", "Faltou"], ["ATESTADO", "Atestado"], ["BH_COMP", "Compensação de banco de horas"]].map(([m, t]) => ({ t, act: "mn-tirar", d: { m } })) },
+    ...(d.recorrente ? [{ t: "Não fazer esta HE recorrente hoje", act: "mn-sem-rec" }]
+    : ehHeLancada(d) ? itensRemoverHE(d, turnoId).map((x) => ({ ...x, padrao: false }))
+      : [{ t: "Tirar do dia", sub: [["FOLGA", "Folga"], ["FALTA", "Faltou"], ["ATESTADO", "Atestado"], ["BH_COMP", "Compensação de banco de horas"]].map(([m, t]) => ({ t, act: "mn-tirar", d: { m } })) }]),
     { t: "Remanejar para outro posto…", act: "mn-drawer", d: { acao: "remanej" } },
     { t: "Afastamento (férias, licença, curso)…", act: "mn-drawer", d: { acao: "afast" } },
     { t: "Lotação e horário fixo…", act: "mn-drawer", d: { acao: "lotacao" } },
@@ -1143,7 +1143,7 @@ document.addEventListener("contextmenu", (e) => {
   fecharPop();
   const r = alvo.getBoundingClientRect();
   const x = e.clientX || r.left + 8, y = e.clientY || r.bottom; // teclado (Shift+F10) não informa posição
-  if (chipEl) { const d = ui.desMap.get(chipEl.dataset.des); if (d) abrirMenu(itensGm(d), x, y, chipEl, { des: d }); }
+  if (chipEl) { const d = ui.desMap.get(chipEl.dataset.des); if (d) abrirMenu(itensGm(d, chipEl.closest("td[data-turno]")?.dataset.turno), x, y, chipEl, { des: d }); }
   else if (postoEl) abrirMenu(itensPosto(postoPorId(postoEl.dataset.posto)), x, y, postoEl, { posto: postoEl.dataset.posto });
   else if (secEl) abrirMenu(itensSecao(secEl.dataset.secao), x, y, secEl, {});
   else abrirMenu(itensCelula(cel.dataset.posto, cel.dataset.turno), x, y, cel, { posto: cel.dataset.posto });
@@ -1439,9 +1439,9 @@ function escolherEditor(i) {
   fecharEditor();
   if (modo === "padrao") { colocarNoPadrao(x.gm, ctx.posto, ctx.per); return; }
   if (modo === "add") {
-    const [vi, vf] = ctx.ini != null ? [ctx.ini, ctx.fim] : intervaloVaga(ctx.posto, ctx.turno), t = { ini: vi, fim: vf }, pn = postoPorId(ctx.posto).nome;
+    const [vi, vf] = ctx.ini != null ? [ctx.ini, ctx.fim] : intervaloVaga(ctx.posto, ctx.turno), pn = postoPorId(ctx.posto).nome;
     if (x.via === "rem") mudar(`${nomeGm(X)} remanejado para ${pn}`, () => data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: X, de: ui.dia, ate: ui.dia, posto: ctx.posto }));
-    else mudar(`${nomeGm(X)} com hora extra ${fmtHm(t.ini)}–${fmtHm(t.fim)} em ${pn}`, () => data.ocorrencias.push({ id: novoId(), tipo: "HE", gm: X, de: ui.dia, ini: fmtHm(t.ini), fim: fmtHm(t.fim), posto: ctx.posto, req: "" }));
+    else lancarHE(X, vi, vf, ctx.posto);
     return;
   }
   if (ehHeLancada(d)) { mudar(`Hora extra passou para ${nomeGm(X)}`, () => { data.ocorrencias.find((o) => o.id === d.origem).gm = X; }); return; }
@@ -1553,7 +1553,7 @@ document.addEventListener("keydown", (e) => {
     else if (e.key === "Delete" || e.key === "Backspace") {
       e.preventDefault();
       const r = chipEl.getBoundingClientRect();
-      if (ehHeLancada(d)) abrirMenu([{ t: `Remover a hora extra de ${nomeGm(d.gm)}`, act: "mn-remover-he", padrao: true }, { sep: true }, { t: "Cancelar", act: "dr-cancelar" }], r.left, r.bottom + 2, chipEl, { des: d });
+      if (ehHeLancada(d)) abrirMenu([...itensRemoverHE(d, chipEl.closest("td[data-turno]")?.dataset.turno), { sep: true }, { t: "Cancelar", act: "dr-cancelar" }], r.left, r.bottom + 2, chipEl, { des: d });
       else abrirMenu([{ t: `Tirar ${nomeGm(d.gm)} do dia:`, act: "ed-nada", desab: true }, { sep: true }, ...[["FOLGA", "Folga"], ["FALTA", "Faltou"], ["ATESTADO", "Atestado"], ["BH_COMP", "Compensação de banco de horas"]].map(([m, t]) => ({ t, act: "mn-tirar", d: { m } })), { sep: true }, { t: "Cancelar", act: "dr-cancelar" }], r.left, r.bottom + 2, chipEl, { des: d });
     }
     return;
@@ -1601,6 +1601,30 @@ function opcoesVaga(postoId, turnoId) {
   if (p?.reforco) { const [a, b] = intervalo(p.reforco.ini, p.reforco.fim); ops.unshift([a, b, fmtHoras(b - a)]); }
   return ops.filter(([a, b], i, arr) => arr.findIndex(([c, d]) => c === a && d === b) === i);
 }
+// Lança HE numa vaga. Quem já trabalha hoje colado à vaga só estende 6h; o resto continua vaga a cobrir.
+function lancarHE(X, ini, fim, posto) {
+  const [a, b] = limitarExtensao(data, ui.dia, X, ini, fim), pn = postoPorId(posto).nome, resto = fim - ini - (b - a);
+  mudar(`${nomeGm(X)} com hora extra ${fmtHm(a)}–${fmtHm(b)} em ${pn}${resto ? ` (estende ${fmtHoras(b - a)}; faltam ${fmtHoras(resto)} a cobrir)` : ""}`,
+    () => data.ocorrencias.push({ id: novoId(), tipo: "HE", gm: X, de: ui.dia, ini: fmtHm(a), fim: fmtHm(b), posto, req: "" }));
+}
+// Tirar uma hora extra: só o turno clicado ou ela toda
+function itensRemoverHE(d, turnoId) {
+  const o = data.ocorrencias.find((x) => x.id === d.origem), t = TURNOS.find((x) => x.id === turnoId);
+  const [a, b] = o ? intervalo(o.ini, o.fim) : [d.ini, d.fim];
+  const toda = { t: `Remover toda a hora extra (${fmtHm(a)}–${fmtHm(b)})`, act: "mn-remover-he" };
+  if (!t || !o || o.tipo !== "HE" || sobrepoe(a, b, t.ini, t.fim) >= b - a) return [{ ...toda, t: "Remover esta hora extra", padrao: true }];
+  const [x, y] = [Math.max(a, t.ini), Math.min(b, t.fim)];
+  return [{ t: `Remover só o ${t.nome.toLowerCase()} (${fmtHm(x)}–${fmtHm(y)})`, act: "mn-remover-turno", d: { turno: turnoId }, padrao: true }, toda];
+}
+function removerTurnoHE(d, turnoId) {
+  const o = data.ocorrencias.find((x) => x.id === d.origem), t = TURNOS.find((x) => x.id === turnoId);
+  const [a, b] = intervalo(o.ini, o.fim), x = Math.max(a, t.ini), y = Math.min(b, t.fim);
+  mudar(`Hora extra de ${nomeGm(d.gm)}: tirado ${fmtHm(x)}–${fmtHm(y)}`, () => {
+    const i = data.ocorrencias.indexOf(o), partes = [[a, x], [y, b]].filter(([p, q]) => q > p);
+    const novas = partes.map(([p, q], k) => ({ ...o, id: k ? novoId() : o.id, ini: fmtHm(p), fim: fmtHm(q) }));
+    data.ocorrencias.splice(i, 1, ...novas);
+  });
+}
 // nome dos turnos que um horário cobre: "3º e 4º turno"
 function turnosDe(a, b) {
   const ts = TURNOS.filter((t) => sobrepoe(a, b, t.ini, t.fim) >= 60).map((t) => t.nome.split(" ")[0]);
@@ -1609,10 +1633,10 @@ function turnosDe(a, b) {
 function itensEstender(d) {
   if (ehHeLancada(d) || d.recorrente) return [];
   const [, b0] = (d.alvo || `${d.ini}-${d.fim}`).split("-").map(Number);
-  const fimDia = b0 <= 1140 ? 1500 : b0 + 120; // serviço diurno: até 01:00
   return [{ t: "Estender horário", sub: [
+    { t: `+6h (até ${fmtHm(b0 + 360)}) · hora extra`, act: "mn-estender", d: { fim: fmtHm(b0 + 360) }, padrao: true },
+    { sep: true },
     ...[60, 120, 180].map((m) => ({ t: `+${m / 60}h (até ${fmtHm(b0 + m)}) · hora extra`, act: "mn-estender", d: { fim: fmtHm(b0 + m) } })),
-    ...(fimDia > b0 + 180 ? [{ t: `Até ${fmtHm(fimDia)} (+${fmtHoras(fimDia - b0)}) · hora extra`, act: "mn-estender", d: { fim: fmtHm(fimDia) } }] : []),
     { sep: true }, { t: "Outro horário…", act: "mn-outro-horario" },
   ] }];
 }
@@ -1887,6 +1911,7 @@ document.addEventListener("click", (e) => {
     case "mn-card": abrirPop("card", ui.menu.alvo, { des: ui.menu.des }); fecharMenu(); return;
     case "mn-trocar": abrirPop("gm", ui.menu.alvo, { des: ui.menu.des }); fecharMenu(); return;
     case "mn-tirar": { const d = ui.menu.des; fecharMenu(); tirarDoDia(d, el.dataset.m); return; }
+    case "mn-remover-turno": { const d = ui.menu.des, t = el.dataset.turno; fecharMenu(); removerTurnoHE(d, t); return; }
     case "mn-remover-he": { const d = ui.menu.des; fecharMenu(); mudar(`Hora extra de ${nomeGm(d.gm)} removida`, () => { data.ocorrencias = data.ocorrencias.filter((o) => o.id !== d.origem); }); return; }
     case "mn-drawer": { const d = ui.menu.des; fecharMenu(); ui.drawer = { tipo: "gm", gm: d.gm, acao: el.dataset.acao }; render(); if (el.dataset.acao === "lotacao") previaHorarioFixo(); return; }
     case "mn-ficha": { const d = ui.menu.des; fecharMenu(); ui.gm = d.gm; ui.mes = mesDe(ui.dia); ui.view = "ficha"; ui.drawer = null; location.hash = "ficha"; render(); window.scrollTo(0, 0); return; }
@@ -1923,6 +1948,8 @@ document.addEventListener("click", (e) => {
     case "card-tirar": {
       const d = ui.pop.des;
       if (d.recorrente) { fecharPop(); mudar(`${nomeGm(d.gm)}: HE recorrente suspensa em ${ddmm(ui.dia)}`, () => data.ocorrencias.push({ id: novoId(), tipo: "SEM_HE_REC", gm: d.gm, de: ui.dia })); return; }
+      const opsHE = ehHeLancada(d) ? itensRemoverHE(d, ui.pop.turno) : [];
+      if (opsHE.length > 1) { const r = el.getBoundingClientRect(); fecharPop(); abrirMenu([...opsHE, { sep: true }, { t: "Cancelar", act: "dr-cancelar" }], r.left, r.bottom + 2, null, { des: d }); return; }
       if (ehHeLancada(d)) { fecharPop(); mudar(`Hora extra de ${nomeGm(d.gm)} removida`, () => { data.ocorrencias = data.ocorrencias.filter((o) => o.id !== d.origem); }); return; }
       ui.pop.modo = "tirar"; desenharPop(); return;
     }
@@ -2120,7 +2147,7 @@ document.addEventListener("click", (e) => {
         fecharPop();
         const pn = postoPorId(s.posto).nome;
         if (via === "rem") mudar(`${nomeGm(X)} remanejado para ${pn}`, () => data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: X, de: ui.dia, ate: ui.dia, posto: s.posto }));
-        else mudar(`${nomeGm(X)} entra com hora extra ${s.ini}–${s.fim} em ${pn}`, () => data.ocorrencias.push({ id: novoId(), tipo: "HE", gm: X, de: ui.dia, ini: s.ini, fim: s.fim, posto: s.posto, req: "" }));
+        else { const [a, b] = intervalo(s.ini, s.fim); lancarHE(X, a, b, s.posto); }
         return;
       }
       const d = s.des;
@@ -2135,7 +2162,7 @@ document.addEventListener("click", (e) => {
       mudar(`${TIPOS[m]} para ${nomeGm(T)}; ${nomeGm(X)} ${s.via === "rem" ? "remanejado" : "com hora extra"}`, () => {
         data.ocorrencias.push({ id: novoId(), tipo: m, gm: T, de: ui.dia });
         if (s.via === "rem") data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: X, de: ui.dia, ate: ui.dia, posto: d.posto, obs: `Remanejado (${s.origem})` });
-        else data.ocorrencias.push({ id: novoId(), tipo: "HE", gm: X, de: ui.dia, ini: fmtHm(d.ini), fim: fmtHm(d.fim), posto: d.posto, req: "" });
+        else { const [a, b] = limitarExtensao(data, ui.dia, X, d.ini, d.fim); data.ocorrencias.push({ id: novoId(), tipo: "HE", gm: X, de: ui.dia, ini: fmtHm(a), fim: fmtHm(b), posto: d.posto, req: "" }); }
       });
       return;
     }

@@ -1,13 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { calcularDia, livroMes, resumoMes, intervalo, sugerir, saldoBH, minutosNoturnos, planejarCobertura } from "./engine.js";
+import { limitarExtensao, calcularDia, livroMes, resumoMes, intervalo, sugerir, saldoBH, minutosNoturnos, planejarCobertura } from "./engine.js";
 import { criarExemplo } from "./seed.js";
 
 const base = () => ({
   config: { tetoHE: 60, mesInicial: "2026-11" },
   equipes: [
-    { id: "D1", tipo: "alternado", paridade: 0 }, { id: "D2", tipo: "alternado", paridade: 1 },
-    { id: "N1", tipo: "alternado", paridade: 0 }, { id: "SEM", tipo: "semanal" },
+    { id: "D1", tipo: "alternado", paridade: 0, periodo: "dia" }, { id: "D2", tipo: "alternado", paridade: 1, periodo: "dia" },
+    { id: "N1", tipo: "alternado", paridade: 0, periodo: "noite" }, { id: "SEM", tipo: "semanal" },
   ],
   postos: [
     { id: "vtr", nome: "VTR 1317", vagas: { t2: 2, t3: 2 } },
@@ -160,10 +160,11 @@ test("falta retira o GM e o planejador cobre a semana sem repetir pessoas", () =
   const d = diaDe(data, "D1");
   data.ocorrencias.push({ id: "f1", tipo: "FALTA", gm: "a", de: d }, { id: "f2", tipo: "FOLGA", gm: "b", de: d }); data._versao++;
   const plano = planejarCobertura(data, [d]).filter((x) => x.posto === "vtr");
-  assert.equal(plano.length, 2);
   // primeiro quem é do posto e está de folga (escala oposta); reserva técnica só por último
   assert.deepEqual([plano[0].tipo, plano[0].gm], ["HE", "c"]);
-  assert.equal(plano[1].tipo, "HE");
+  assert.ok(plano.every((x) => x.tipo === "HE"));
+  assert.equal(plano.reduce((t, x) => t + x.fim - x.ini, 0), 24 * 60); // as duas vagas de 12h cobertas
+  assert.ok(plano.every((x) => x.fim - x.ini <= 360 || !calcularDia(data, d).designacoes.some((y) => y.gm === x.gm))); // quem já trabalha hoje só estende 6h
   // sem ninguém livre para HE, aí sim a reserva técnica
   for (const g of data.gms) if (!["r", "a", "b"].includes(g.id)) g.naoFazHE = true;
   data._versao++;
@@ -281,14 +282,24 @@ test("vaga de reforço (EJA) é coberta só no horário do reforço", () => {
   assert.equal(planejarCobertura(data, ["2026-11-01"]).filter((x) => x.posto === "eja").length, 0); // domingo não
 });
 
-test("sugestão de HE: escala oposta do posto, depois quem está no posto no período oposto, depois menos horas; teto por último", () => {
+test("sugestão de HE: mesmo turno primeiro (escala oposta do posto), quem está no posto estende 6h, turno oposto por último", () => {
   const data = base();
-  data.gms.push({ id: "x", nome: "X", equipe: "N1", lotacao: { posto: "vtr", segmentos: [{ ini: "19:00", fim: "07:00" }] } });
+  data.equipes.push({ id: "N2", tipo: "alternado", paridade: 1, periodo: "noite" });
+  data.gms.push(
+    { id: "m", nome: "M", equipe: "N2", lotacao: { posto: "noite", segmentos: [{ ini: "19:00", fim: "07:00" }] } },
+    { id: "o", nome: "O", equipe: "N2", lotacao: { posto: "hosp", segmentos: [{ ini: "19:00", fim: "07:00" }] } },
+    { id: "q", nome: "Q", equipe: "D2", lotacao: { posto: "noite", segmentos: [{ ini: "07:00", fim: "19:00" }] } },
+  );
   const d = diaDe(data, "D1");
-  data.ocorrencias.push({ id: "f", tipo: "FOLGA", gm: "a", de: d }); data._versao++;
-  const s = sugerir(data, d, "vtr", 1140, 1500).he.map((x) => x.gm.id); // furo à noite no posto vtr
-  assert.equal(s[0], "c"); // lotado no vtr, de folga hoje
-  assert.equal(s[1], "b"); // está no vtr hoje de dia: pode estender
+  data.ocorrencias.push({ id: "f", tipo: "FOLGA", gm: "n", de: d }); data._versao++;
+  const s = sugerir(data, d, "noite", 1140, 1860).he; // vaga da noite inteira (19–07)
+  const ids = s.map((x) => x.gm.id);
+  assert.equal(ids[0], "m"); // do posto, padrão oposto, mesmo turno (noite)
+  assert.ok(ids.indexOf("o") < ids.indexOf("q")); // outro GM da noite antes de quem é do posto mas do dia
+  assert.ok(ids.indexOf("o") < ids.indexOf("b") && ids.indexOf("o") < ids.indexOf("c")); // GMs do dia (de folga ou trabalhando) depois
+  assert.match(s.find((x) => x.gm.id === "b").notas.join(), /estende 19:00–01:00/); // quem sai às 19h estende só 6h
+  assert.deepEqual(limitarExtensao(data, d, "b", 1140, 1860), [1140, 1500]);
+  assert.deepEqual(limitarExtensao(data, d, "m", 1140, 1860), [1140, 1860]);
 });
 
 test("horário fixo: faixas + horas de HE fixa viram segmentos como no padrão, e voltam", async () => {
