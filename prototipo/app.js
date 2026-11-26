@@ -2164,9 +2164,17 @@ function turnosDe(a, b) {
   const ts = TURNOS.filter((t) => sobrepoe(a, b, t.ini, t.fim) >= 60).map((t) => t.nome.split(" ")[0]);
   return ts.length > 1 ? `${ts.slice(0, -1).join(", ")} e ${ts.at(-1)} turno` : `${ts[0] || ""} turno`;
 }
+// HE fixa (semanal) colada ao serviço normal: estender aumenta a própria HE fixa, sem criar outra HE por cima
+function parFixa(d) {
+  const todas = [...(ui.desMap?.values() || [])].filter((x) => x.gm === d.gm);
+  if (d.fixa && !d.recorrente) { const n = todas.find((x) => !x.fixa && x.nat !== "he" && x.fim === d.ini); return n ? { normal: n, he: d } : null; }
+  const he = todas.find((x) => x.fixa && !x.recorrente && x.ini === d.fim);
+  return he ? { normal: d, he } : null;
+}
 function itensEstender(d) {
   if (ehHeLancada(d) || d.recorrente) return [];
-  const [, b0] = (d.alvo || `${d.ini}-${d.fim}`).split("-").map(Number);
+  const pf = parFixa(d);
+  const [, b0] = pf ? [0, pf.he.fim] : (d.alvo || `${d.ini}-${d.fim}`).split("-").map(Number);
   return [{ t: "Estender horário", sub: [
     { t: `+6h (até ${fmtHm(b0 + 360)}) · hora extra`, act: "mn-estender", d: { fim: fmtHm(b0 + 360) }, padrao: true },
     { sep: true },
@@ -2848,7 +2856,12 @@ document.addEventListener("click", (e) => {
       });
       return;
     }
-    case "mn-estender": { const d = ui.menu.des, ini = valoresCartao(d).ini; fecharMenu(); aplicarHorario(d, ini, el.dataset.fim); return; }
+    case "mn-estender": {
+      const d = ui.menu.des; fecharMenu();
+      const pf = parFixa(d);
+      if (pf) { aplicarHorarioJunto(pf.normal, pf.he, valoresCartao(pf.normal).ini, el.dataset.fim); return; }
+      aplicarHorario(d, valoresCartao(d).ini, el.dataset.fim); return;
+    }
     case "mn-outro-horario": { const d = ui.menu.des, alvo = ui.menu.alvo; fecharMenu(); abrirEditor("hora", alvo.querySelector(".hr") || alvo, { des: d }); return; }
     case "mn-sem-rec": { const d = ui.menu.des; fecharMenu(); mudar(`${nomeGm(d.gm)}: HE recorrente suspensa em ${ddmm(ui.dia)}`, () => data.ocorrencias.push({ id: novoId(), tipo: "SEM_HE_REC", gm: d.gm, de: ui.dia })); return; }
     case "ed-estender": { const inp = $("#ed-in"), f = parseFaixa(inp.value); if (f) { inp.value = `${f[0]}–${el.dataset.fim}`; atualizarDicaHora(); } inp.focus(); return; }
