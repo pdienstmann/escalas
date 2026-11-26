@@ -40,6 +40,7 @@ export const TIPOS = {
   VAGAS: "Vagas alteradas no dia",
   INSPETOR: "Inspetor do dia",
   FUNCAO: "Função no dia",
+  AREA: "Área / nome no dia",
   DISP_HE: "Disponível para HE",
   DISP_FERIAS: "Declarou férias (folgas)",
   SEM_HE_REC: "HE recorrente suspensa no dia",
@@ -233,12 +234,12 @@ export function calcularDia(data, dia) {
   // 6. Viatura fora de atividade: guarnição vai para "à disposição"
   const fa = new Map();
   for (const oc of ocs.filter((o) => o.tipo === "FA" || o.tipo === "FECHADO")) fa.set(oc.posto, oc);
-  for (const p of data.postos) if (p.ativo === false) fa.set(p.id, { tipo: "INATIVO", posto: p.id, de: dia });
+  for (const p of data.postos) if (p.ativo === false || (p.so && p.so !== dia)) fa.set(p.id, { tipo: "INATIVO", posto: p.id, de: dia }); // "so": posto/viatura extra de um dia só
   // ajustes do dia em postos: viatura substituta e vagas diferentes
   const ajustesPosto = new Map();
-  for (const oc of ocs.filter((o) => o.tipo === "PREFIXO" || o.tipo === "VAGAS")) {
+  for (const oc of ocs.filter((o) => o.tipo === "PREFIXO" || o.tipo === "VAGAS" || o.tipo === "AREA")) {
     const a = ajustesPosto.get(oc.posto) || {};
-    if (oc.tipo === "PREFIXO") a.prefixo = oc; else a.vagas = oc;
+    if (oc.tipo === "PREFIXO") a.prefixo = oc; else if (oc.tipo === "AREA") a.area = oc; else a.vagas = oc;
     ajustesPosto.set(oc.posto, a);
   }
   for (const d of des) if (d.posto && fa.has(d.posto)) { d.postoOriginal = d.posto; d.posto = null; }
