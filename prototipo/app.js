@@ -34,7 +34,7 @@ function carregar() {
 }
 function salvar() { if (SERVIDOR) { sincronizar(); return; } try { localStorage.setItem(CHAVE, JSON.stringify({ ...data, _versao: undefined })); } catch { /* ignora */ } }
 function mudar(msg, fn) {
-  desfazer.push(JSON.stringify({ o: data.ocorrencias, p: data.postos, s: data.secoes, g: data.gms, r: data.requerimentos || {}, e: data.equipes, c: data.controle || [], i: data.inspetores || {}, f: data.frota || [] }));
+  desfazer.push(JSON.stringify({ o: data.ocorrencias, p: data.postos, s: data.secoes, g: data.gms, r: data.requerimentos || {}, e: data.equipes, c: data.controle || [], i: data.inspetores || {}, f: data.frota || [], fs: data.folgasSync || {} }));
   if (desfazer.length > 30) desfazer.shift();
   fn();
   data._versao = (data._versao || 0) + 1;
@@ -246,6 +246,7 @@ function vDrawer() {
   if (d.tipo === "finalizar") return drawerFinalizar(d);
   if (d.tipo === "controle") return drawerControle(d);
   if (d.tipo === "gmnovo") return drawerGmNovo(d);
+  if (d.tipo === "folgasmud") return drawerFolgasMud();
   return "";
 }
 // ---------- FINALIZAR ESCALA E CONTROLE DE HE ----------
@@ -540,7 +541,8 @@ function lancFolgas() {
   const imp = L.import;
   return `<div class="cols-lanc largo"><section class="painel form-lanc"><h2>Sistema de Folgas</h2>
     <p class="dica">No Sistema de Folgas, exporte o CSV da competência e escolha o arquivo aqui. As folgas entram na escala, e quem se ofereceu para HE passa a aparecer primeiro nas sugestões daquele dia.</p>
-    ${SERVIDOR ? `<button class="btn pri" data-act="fg-buscar">Buscar do Sistema de Folgas (${MESES[Number(m.slice(5)) - 1]})</button><p class="dica">Consulta direto o Sistema de Folgas, só para leitura e só quando você clica.</p>
+    ${SERVIDOR ? `<button class="btn pri" data-act="fg-buscar">Buscar do Sistema de Folgas (${MESES[Number(m.slice(5)) - 1]})</button><p class="dica">Consulta direto o Sistema de Folgas, só para leitura. Depois de aplicar uma vez, a escala avisa (selo no topo) quando algo mudar lá.</p>
+    ${data.folgasSync?.[m] ? `<p class="meta">Sincronizado com o Sistema de Folgas · ${Object.keys(data.folgasSync[m].linhas).length} pedidos. <button class="link" data-act="fm-conferir">Conferir alterações agora</button></p>` : ""}
     <details><summary class="meta">ou importar o arquivo CSV</summary>` : ""}
     <label class="arq">Arquivo CSV <input type="file" id="fg-arq" accept=".csv,text/csv"></label>${SERVIDOR ? "</details>" : ""}
     ${imp ? `<div class="prev-imp">${imp.competencia ? `<p class="meta">Competência <b>${esc(imp.competencia.rotulo || imp.competencia.mes)}</b> · ${esc({ OPEN: "aberta (ainda recebendo pedidos)", CLOSED: "encerrada", CONSOLIDATED: "consolidada", SCHEDULED: "agendada", DRAFT: "rascunho" }[imp.competencia.situacao] || imp.competencia.situacao)}</p>` : ""}<p><b>${imp.linhas.length}</b> GMs ${imp.competencia ? "no Sistema de Folgas" : "no arquivo"} · <b>${imp.linhas.filter((x) => x.gm).length}</b> encontrados${imp.linhas.some((x) => !x.gm) ? ` · <b class="ruim">${imp.linhas.filter((x) => !x.gm).length}</b> sem correspondência` : ""}</p>
@@ -558,6 +560,95 @@ function lancFolgas() {
         <td>${os.sort((a, b) => a.de.localeCompare(b.de)).map((o) => `<span class="chip-gm">${ddmm(o.de)}<button class="ic" data-act="pre-apagar" data-id="${o.id}" aria-label="Excluir folga">×</button></span>`).join("")}${os.some((o) => ui.confirmar === o.id) ? `<button class="btn perigo" data-act="apagar" data-id="${ui.confirmar}">Confirmar exclusão</button>` : ""}</td>
         <td class="meta">${os.some((o) => o.origem === "folgas-gmnh") ? `Sistema de Folgas${os[0].req ? ` · ${esc(os[0].req)}` : ""}` : "à mão"}</td>
         <td class="num meta">${disp.filter((o) => o.gm === g).map((o) => ddmm(o.de)).join(", ")}</td></tr>`).join("")}</tbody></table></div>` : `<p class="meta">Nenhuma folga lançada neste mês.</p>`}</section></div>`;
+}
+// ---------- SINCRONIA COM O SISTEMA DE FOLGAS ----------
+// O Sistema de Folgas é a fonte das folgas. data.folgasSync[mes] guarda o que já foi aplicado (ou ignorado) de cada pedido:
+// { em, linhas: { idNoSistema: { versao, nome, gm, folgas, he, ferias, protocolo } } }. A escala só avisa o que mudou desde então.
+const syncFolgas = { mudancas: [], buscando: false, em: 0 };
+const igualLista = (a, b) => JSON.stringify([...(a || [])].sort()) === JSON.stringify([...(b || [])].sort());
+const folgasDoSistemaNaEscala = (gm, mes) => data.ocorrencias.filter((o) => o.tipo === "FOLGA" && o.gm === gm && o.origem === "folgas-gmnh" && o.de.startsWith(mes)).map((o) => o.de).sort();
+function diffFolgas(mes, linhas) {
+  const snap = data.folgasSync?.[mes];
+  if (!snap) return [];
+  const out = [], vistos = new Set();
+  const local = (gm, antes) => (gm && !igualLista(folgasDoSistemaNaEscala(gm, mes), antes) ? folgasDoSistemaNaEscala(gm, mes) : null);
+  for (const l of linhas) {
+    vistos.add(l.fgId);
+    const a = snap.linhas[l.fgId];
+    if (a && igualLista(a.folgas, l.folgas) && igualLista(a.he, l.he)) continue;
+    const gm = a?.gm || acharGmPorNome(l.nome)?.id || "";
+    out.push({ mes, fgId: l.fgId, nome: l.nome, gm, antes: a?.folgas || [], depois: l.folgas, heAntes: a?.he || [], heDepois: l.he, novo: !a, linha: l, local: local(gm, a?.folgas || []) });
+  }
+  for (const [id, a] of Object.entries(snap.linhas)) if (!vistos.has(id) && (a.folgas.length || a.he.length))
+    out.push({ mes, fgId: id, nome: a.nome, gm: a.gm, antes: a.folgas, depois: [], heAntes: a.he, heDepois: [], excluido: true, linha: null, local: local(a.gm, a.folgas) });
+  return out.filter((x) => !igualLista(x.antes, x.depois) || !igualLista(x.heAntes, x.heDepois));
+}
+// confere ao abrir a escala, no máximo uma vez por hora (o resultado fica guardado neste navegador)
+async function conferirFolgas(forcar) {
+  if (!SERVIDOR || syncFolgas.buscando) return;
+  const meses = Object.keys(data.folgasSync || {}).filter((m) => m >= mesDe(hojeBase())).sort().slice(0, 2);
+  if (!meses.length) { syncFolgas.mudancas = []; mostrarSeloFolgas(); return; }
+  let cache = null;
+  try { cache = JSON.parse(localStorage.getItem("folgas-cache") || "null"); } catch { /* sem armazenamento */ }
+  if (!forcar && cache && Date.now() - cache.em < 3600e3 && meses.every((m) => cache.meses[m])) {
+    syncFolgas.mudancas = meses.flatMap((m) => diffFolgas(m, cache.meses[m])); syncFolgas.em = cache.em; mostrarSeloFolgas(); return;
+  }
+  syncFolgas.buscando = true;
+  try {
+    const res = {};
+    for (const m of meses) { const { status, corpo } = await api(`/api/folgas?mes=${m}`); if (status === 200) res[m] = corpo.linhas; }
+    syncFolgas.em = Date.now();
+    try { localStorage.setItem("folgas-cache", JSON.stringify({ em: syncFolgas.em, meses: res })); } catch { /* ignora */ }
+    syncFolgas.mudancas = Object.entries(res).flatMap(([m, l]) => diffFolgas(m, l));
+  } catch { /* sem conexão: tenta na próxima vez */ }
+  syncFolgas.buscando = false;
+  mostrarSeloFolgas();
+  if (ui.drawer?.tipo === "folgasmud") render();
+}
+// só para os testes automáticos (página aberta como arquivo local)
+if (typeof location !== "undefined" && location.protocol === "file:") window.__testeFolgas = { diffFolgas, registrarFolgas, syncFolgas, get data() { return data; }, render: () => { mostrarSeloFolgas(); render(); } };
+function mostrarSeloFolgas() {
+  const el = $("#selo-folgas"); if (!el) return;
+  // recalcula com o que está guardado (o escalante pode ter aplicado algo em outra aba)
+  const n = syncFolgas.mudancas.length;
+  el.hidden = !n; el.textContent = `Folgas: ${n} alteraç${n === 1 ? "ão" : "ões"}`;
+}
+// o que a mudança causa na escala
+function efeitoMudanca(x) {
+  if (!x.gm) return "GM não encontrado na escala";
+  const ent = x.depois.filter((d) => !x.antes.includes(d)), sai = x.antes.filter((d) => !x.depois.includes(d)), fx = [];
+  for (const d of ent) { const des = calcularDia(data, d).designacoes.find((y) => y.gm === x.gm && y.posto && y.nat !== "he"); fx.push(des ? `abre vaga em ${postoPorId(des.posto)?.nome} (${ddmm(d)})` : `folga em ${ddmm(d)}`); }
+  for (const d of sai) fx.push(trabalhaNoDia(data, gmPorId(x.gm), d) ? `volta a trabalhar em ${ddmm(d)}` : `sai a folga de ${ddmm(d)}`);
+  const he = x.heDepois.filter((d) => !x.heAntes.includes(d)).length;
+  if (he) fx.push(`+${he} dia${he === 1 ? "" : "s"} disponível para HE`);
+  return fx.join(" · ");
+}
+function registrarFolgas(x) {
+  const s = ((data.folgasSync ||= {})[x.mes] ||= { linhas: {} });
+  s.em = new Date().toISOString();
+  if (x.excluido) delete s.linhas[x.fgId];
+  else s.linhas[x.fgId] = { versao: x.linha.versao, nome: x.linha.nome, gm: x.gm, folgas: x.depois, he: x.heDepois, ferias: !!x.linha.ferias, protocolo: x.linha.protocolo || "" };
+}
+function aplicarFolgasNaEscala(x) {
+  if (!x.gm) return;
+  data.ocorrencias = data.ocorrencias.filter((o) => !(o.gm === x.gm && o.origem === "folgas-gmnh" && ["FOLGA", "DISP_HE"].includes(o.tipo) && o.de.startsWith(x.mes)));
+  for (const d of x.depois) if (!data.ocorrencias.some((o) => o.tipo === "FOLGA" && o.gm === x.gm && o.de === d)) data.ocorrencias.push({ id: novoId(), tipo: "FOLGA", gm: x.gm, de: d, origem: "folgas-gmnh", ...(x.linha?.protocolo ? { req: x.linha.protocolo } : {}) });
+  for (const d of x.heDepois) data.ocorrencias.push({ id: novoId(), tipo: "DISP_HE", gm: x.gm, de: d, origem: "folgas-gmnh" });
+}
+function drawerFolgasMud() {
+  const ms = syncFolgas.mudancas, lista = (ds) => (ds.length ? ds.map(ddmm).join(", ") : "—");
+  return `<div class="dw-head"><div><p class="eyebrow">Sistema de Folgas</p><h2>${ms.length} alteraç${ms.length === 1 ? "ão" : "ões"}</h2>
+    <p class="meta">O que mudou no Sistema de Folgas desde a última vez que foi aplicado na escala${syncFolgas.em ? ` · conferido às ${new Date(syncFolgas.em).toTimeString().slice(0, 5)}` : ""}. Nada muda na escala até você aplicar.</p></div>
+    <button class="ic" data-act="fechar" aria-label="Fechar">×</button></div>
+  <div class="dw-body">
+    ${ms.length ? `<div class="linha"><button class="btn pri" data-act="fm-todas">Aplicar todas</button><button class="link" data-act="fm-conferir">Conferir de novo</button></div>
+    <ul class="fm-lista">${ms.map((x, i) => `<li class="${x.local ? "conflito" : ""}"><div class="fm-cab"><b>${esc(x.gm ? nomeGm(x.gm) : x.nome)}</b> <span class="meta">${x.novo ? "pedido novo" : x.excluido ? "pedido excluído no sistema" : "pedido alterado"} · ${MESES[Number(x.mes.slice(5)) - 1]}</span></div>
+      <div class="fm-dif">Folgas: <s>${lista(x.antes)}</s> → <b>${lista(x.depois)}</b>${!igualLista(x.heAntes, x.heDepois) ? `<br><span class="meta">Disponível para HE: ${lista(x.heDepois)}</span>` : ""}</div>
+      ${x.local ? `<div class="fm-local">Na escala estava diferente (alterada à mão): <b>${lista(x.local)}</b></div>` : ""}
+      <div class="fm-efeito">${esc(efeitoMudanca(x))}</div>
+      <div class="linha">${x.gm ? `<button class="btn" data-act="fm-aplicar" data-i="${i}">${x.local ? "Usar o do sistema" : "Aplicar"}</button>` : ""}<button class="link" data-act="fm-ignorar" data-i="${i}">${x.local ? "Manter o da escala" : "Ignorar"}</button></div></li>`).join("")}</ul>`
+    : `<p class="tudo-ok">Escala e Sistema de Folgas estão iguais.</p><button class="link" data-act="fm-conferir">Conferir de novo</button>`}
+  </div>`;
 }
 // nome vindo de outro sistema → GM da escala (igual, ou contido sem ambiguidade)
 function acharGmPorNome(nome) {
@@ -1271,7 +1362,7 @@ function popInsp(s) {
 // Sem servidor, tudo fica no navegador (localStorage). Com servidor, cada alteração vira um
 // comando enviado com a revisão que a tela conhece; se outra pessoa salvou antes, recarrega.
 const SERVIDOR = typeof window !== "undefined" ? window.ESCALA_SERVIDOR : null;
-const DOCS_SYNC = ["postos", "secoes", "equipes", "config", "requerimentos", "inspetores", "frota"];
+const DOCS_SYNC = ["postos", "secoes", "equipes", "config", "requerimentos", "inspetores", "frota", "folgasSync"];
 const srv = { revisao: 0, foto: null, enviando: false, pendente: false, resumos: [], estado: "ok" };
 function fotografar(d) {
   return {
@@ -1354,6 +1445,7 @@ async function carregarDoServidor() {
   ui.vazio = false; ui.pronto = true;
   mostrarSync("ok");
   render();
+  conferirFolgas(false);
 }
 function telaServidor() {
   if (!ui.pronto) return `<div class="tela-centro"><p class="dica">Carregando a escala…</p></div>`;
@@ -2530,6 +2622,20 @@ document.addEventListener("click", (e) => {
     }
     case "lc-mais": { const c = el.dataset.curso, o = data.ocorrencias.find((x) => x.tipo === "CURSO" && x.curso === c); ui.lanc.sel = []; redesenharSel(); $("#lc-nome").value = c; if (o) { $("#lc-local").value = o.local || ""; $("#lg-de").value = o.de; $("#lg-ate").value = o.ate || o.de; } $("#lg-gm").focus(); return; }
     case "fg-cancelar": ui.lanc.import = null; render(); return;
+    case "folgas-mud": ui.drawer = { tipo: "folgasmud" }; render(); return;
+    case "fm-conferir": conferirFolgas(true).then(() => { render(); toast(`${syncFolgas.mudancas.length} alteraç${syncFolgas.mudancas.length === 1 ? "ão" : "ões"} no Sistema de Folgas`); }); return;
+    case "fm-aplicar": case "fm-ignorar": {
+      const x = syncFolgas.mudancas[Number(el.dataset.i)], aplicar = el.dataset.act === "fm-aplicar";
+      mudar(aplicar ? `Folgas de ${nomeGm(x.gm)} atualizadas pelo Sistema de Folgas` : `Alteração de ${x.gm ? nomeGm(x.gm) : x.nome} ignorada (a escala fica como está)`, () => { if (aplicar) aplicarFolgasNaEscala(x); registrarFolgas(x); });
+      syncFolgas.mudancas = syncFolgas.mudancas.filter((y) => y !== x); mostrarSeloFolgas(); render();
+      return;
+    }
+    case "fm-todas": {
+      const ms = syncFolgas.mudancas.filter((x) => x.gm);
+      mudar(`${ms.length} alteraç${ms.length === 1 ? "ão" : "ões"} do Sistema de Folgas aplicada${ms.length === 1 ? "" : "s"}`, () => { for (const x of ms) { aplicarFolgasNaEscala(x); registrarFolgas(x); } });
+      syncFolgas.mudancas = syncFolgas.mudancas.filter((x) => !x.gm); mostrarSeloFolgas(); render();
+      return;
+    }
     case "fg-buscar": {
       el.disabled = true; el.textContent = "Buscando…";
       api(`/api/folgas?mes=${ui.filtroLanc.mes}`).then(({ status, corpo }) => {
@@ -2550,8 +2656,13 @@ document.addEventListener("click", (e) => {
           for (const d of x.he) data.ocorrencias.push({ id: novoId(), tipo: "DISP_HE", gm: x.gm, de: d, origem: "folgas-gmnh" });
           if (x.ferias && x.folgas[0]) data.ocorrencias.push({ id: novoId(), tipo: "DISP_FERIAS", gm: x.gm, de: x.folgas[0].slice(0, 7) + "-01", origem: "folgas-gmnh" });
         }
+        if (imp.competencia) { // veio direto do sistema: guarda o retrato para avisar as próximas mudanças
+          const mes = imp.competencia.mes, snap = ((data.folgasSync ||= {})[mes] = { em: new Date().toISOString(), linhas: {} });
+          for (const x of imp.linhas) if (x.fgId) snap.linhas[x.fgId] = { versao: x.versao, nome: x.nome, gm: x.gm, folgas: x.folgas, he: x.he, ferias: !!x.ferias, protocolo: x.protocolo || "" };
+        }
         ui.lanc.import = null;
       });
+      if (imp.competencia) { syncFolgas.mudancas = syncFolgas.mudancas.filter((x) => x.mes !== imp.competencia.mes); try { localStorage.removeItem("folgas-cache"); } catch { /* ignora */ } mostrarSeloFolgas(); }
       return;
     }
     case "pad-posto": abrirPop("posto", el, { posto: el.dataset.posto, aba: "sempre" }); return;
@@ -2841,7 +2952,7 @@ document.addEventListener("click", (e) => {
       return;
     }
     case "desfazer": if (SERVIDOR && desfazer.length) srv.resumos.push("Desfez a última alteração");
-      if (desfazer.length) { const u = JSON.parse(desfazer.pop()); data.ocorrencias = u.o; data.postos = u.p; data.secoes = u.s; data.gms = u.g; data.requerimentos = u.r; data.equipes = u.e; data.controle = u.c || []; data.inspetores = u.i || {}; data.frota = u.f || []; data._versao++; ui.plano = null; salvar(); render(); toast("Última alteração desfeita"); } break;
+      if (desfazer.length) { const u = JSON.parse(desfazer.pop()); data.ocorrencias = u.o; data.postos = u.p; data.secoes = u.s; data.gms = u.g; data.requerimentos = u.r; data.equipes = u.e; data.controle = u.c || []; data.inspetores = u.i || {}; data.frota = u.f || []; data.folgasSync = u.fs || {}; data._versao++; ui.plano = null; salvar(); render(); toast("Última alteração desfeita"); } break;
     case "imprimir": window.print(); break;
     case "restaurar": ui.confirmar = "restaurar"; $("#restaurar").outerHTML = `<button id="restaurar" class="btn perigo" data-act="restaurar-ok">Apagar meus lançamentos e restaurar</button>`; return;
     case "restaurar-ok": try { localStorage.removeItem(CHAVE); } catch { /* ignora */ } data = criarExemplo(); desfazer.length = 0; $("#restaurar").outerHTML = `<button id="restaurar" class="link" data-act="restaurar">Restaurar exemplo</button>`; render(); toast("Dados de exemplo restaurados"); break;

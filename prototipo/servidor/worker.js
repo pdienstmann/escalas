@@ -5,7 +5,7 @@
 import pagina from "./pagina.html";
 
 const COLECOES = ["gms", "ocorrencias", "controle"];
-const DOCS = ["postos", "secoes", "equipes", "config", "requerimentos", "inspetores", "frota"];
+const DOCS = ["postos", "secoes", "equipes", "config", "requerimentos", "inspetores", "frota", "folgasSync"];
 const DIA_SEG = 60 * 60 * 24;
 const enc = new TextEncoder();
 
@@ -70,7 +70,7 @@ async function lerEstado(env) {
     env.DB.prepare("SELECT chave, valor FROM docs").all(),
     lerRevisao(env),
   ]);
-  const estado = { gms: [], ocorrencias: [], controle: [], postos: [], secoes: [], equipes: [], config: {}, requerimentos: {}, inspetores: {}, frota: [] };
+  const estado = { gms: [], ocorrencias: [], controle: [], postos: [], secoes: [], equipes: [], config: {}, requerimentos: {}, inspetores: {}, frota: [], folgasSync: {} };
   for (const r of regs.results) estado[r.colecao].push(JSON.parse(r.valor));
   for (const d of docs.results) estado[d.chave] = JSON.parse(d.valor);
   return { revisao: rev.numero, estado, vazio: !estado.gms.length };
@@ -93,9 +93,9 @@ async function lerSistemaFolgas(env, mes) {
   if (!r.ok) return json({ erro: "O Sistema de Folgas não respondeu. Tente de novo." }, 502);
   const d = await r.json();
   const porGm = (lista, id) => (lista || []).filter((x) => x.gm_id === id).map((x) => x.date).sort();
-  const linhas = (d.requests || []).map((q) => ({ nome: nome.get(q.gm_id) || "", folgas: porGm(d.leaveDays, q.gm_id), ferias: !!q.vacation_declared, he: porGm(d.overtime, q.gm_id), protocolo: q.receipt_id || "" })).filter((x) => x.nome);
+  const linhas = (d.requests || []).map((q) => ({ fgId: q.gm_id, versao: q.version || 1, nome: nome.get(q.gm_id) || "", folgas: porGm(d.leaveDays, q.gm_id), ferias: !!q.vacation_declared, he: porGm(d.overtime, q.gm_id), protocolo: q.receipt_id || "" })).filter((x) => x.nome);
   // quem só marcou disponibilidade de HE, sem pedido de folga
-  for (const id of new Set((d.overtime || []).map((x) => x.gm_id))) if (!(d.requests || []).some((q) => q.gm_id === id) && nome.get(id)) linhas.push({ nome: nome.get(id), folgas: [], ferias: false, he: porGm(d.overtime, id), protocolo: "" });
+  for (const id of new Set((d.overtime || []).map((x) => x.gm_id))) if (!(d.requests || []).some((q) => q.gm_id === id) && nome.get(id)) linhas.push({ fgId: id, versao: 0, nome: nome.get(id), folgas: [], ferias: false, he: porGm(d.overtime, id), protocolo: "" });
   return json({ competencia: { mes: comp.month, rotulo: comp.label, situacao: comp.status }, linhas });
 }
 
@@ -138,7 +138,7 @@ async function importar(env, sessao, estado) {
       st.push(db.prepare(`INSERT INTO registros (colecao, id, valor, atualizado) VALUES ${lote.map(() => "(?, ?, ?, ?)").join(", ")}`).bind(...lote.flat()));
     }
   }
-  for (const k of DOCS) st.push(db.prepare("INSERT INTO docs (chave, valor) VALUES (?, ?) ON CONFLICT (chave) DO UPDATE SET valor = excluded.valor").bind(k, JSON.stringify(estado[k] ?? (k === "requerimentos" || k === "config" || k === "inspetores" ? {} : []))));
+  for (const k of DOCS) st.push(db.prepare("INSERT INTO docs (chave, valor) VALUES (?, ?) ON CONFLICT (chave) DO UPDATE SET valor = excluded.valor").bind(k, JSON.stringify(estado[k] ?? (k === "requerimentos" || k === "config" || k === "inspetores" || k === "folgasSync" ? {} : []))));
   st.push(db.prepare("UPDATE meta SET valor = '1:importacao' WHERE chave = 'revisao'"));
   st.push(db.prepare("INSERT INTO eventos (quando, quem, resumo, revisao, alteracoes) VALUES (?, ?, ?, 1, ?)").bind(quando, sessao.nome, `Carga inicial: ${estado.gms.length} GMs e ${estado.ocorrencias.length} lançamentos`, estado.gms.length + estado.ocorrencias.length));
   await db.batch(st);
