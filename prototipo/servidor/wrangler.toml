@@ -1,0 +1,14 @@
+name = "escala-gm-piloto"
+main = "worker.js"
+compatibility_date = "2025-09-01"
+workers_dev = true
+
+[[rules]]
+type = "Text"
+globs = ["**/*.html"]
+fallthrough = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "escala-gm-piloto"
+database_id = "00000000-0000-0000-0000-000000000000"

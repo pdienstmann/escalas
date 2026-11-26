@@ -24,18 +24,20 @@ ui.mes = mesDe(ui.dia); ui.filtroLanc.mes = ui.mes;
 const desfazer = [];
 
 function carregar() {
+  if (typeof window !== "undefined" && window.ESCALA_SERVIDOR) return { config: { tetoHE: 60, mesInicial: "2026-10", cabecalho: "" }, equipes: [], secoes: [], postos: [], gms: [], ocorrencias: [], requerimentos: {}, _versao: 0 };
   try {
     const s = localStorage.getItem(CHAVE);
     if (s) { const d = JSON.parse(s); d._versao = 1; return d; }
   } catch { /* sem armazenamento: usa exemplo */ }
   return criarExemplo();
 }
-function salvar() { try { localStorage.setItem(CHAVE, JSON.stringify({ ...data, _versao: undefined })); } catch { /* ignora */ } }
+function salvar() { if (SERVIDOR) { sincronizar(); return; } try { localStorage.setItem(CHAVE, JSON.stringify({ ...data, _versao: undefined })); } catch { /* ignora */ } }
 function mudar(msg, fn) {
   desfazer.push(JSON.stringify({ o: data.ocorrencias, p: data.postos, s: data.secoes, g: data.gms, r: data.requerimentos || {}, e: data.equipes }));
   if (desfazer.length > 30) desfazer.shift();
   fn();
   data._versao = (data._versao || 0) + 1;
+  if (SERVIDOR) srv.resumos.push(msg);
   salvar();
   render();
   toast(msg, true);
@@ -68,6 +70,7 @@ const BADGE = { he: ["HE+", "he"], bh: ["BH+", "bh"], troca: ["TROCA", "troca"] 
 // ---------- shell ----------
 function render() {
   document.querySelectorAll("[data-nav]").forEach((a) => a.setAttribute("aria-current", a.dataset.nav === ui.view ? "page" : "false"));
+  if (SERVIDOR && (!ui.pronto || ui.vazio)) { $("#main").innerHTML = telaServidor(); $("#drawer").hidden = true; $("#veu").hidden = true; return; }
   const main = $("#main");
   const html = { pendencias: vPendencias, ajustes: vAjustes, quadro: vQuadro, lancamentos: vLancamentos, mes: vMes, ficha: vFicha, folha: vFolha }[ui.view]();
   main.innerHTML = html;
@@ -75,6 +78,7 @@ function render() {
   $("#drawer").hidden = !ui.drawer;
   $("#veu").hidden = !ui.drawer;
   $("#btn-desfazer").disabled = !desfazer.length;
+  if (SERVIDOR && ui.view === "ajustes") carregarHistorico();
   if (ui.pop) desenharPop(); else fecharPop();
 }
 
@@ -576,7 +580,8 @@ function vAjustes() {
     <p class="dica">O que passar do teto vai para o mês seguinte.</p>
     <h2>Folha</h2>
     <label>Cabeçalho <input id="aj-cab" value="${esc(c.cabecalho)}" size="50"></label>
-    <div><button class="btn pri" data-act="salvar-ajustes">Salvar ajustes</button></div></section>`;
+    <div><button class="btn pri" data-act="salvar-ajustes">Salvar ajustes</button></div></section>
+    ${SERVIDOR ? `<section class="painel ajustes"><h2>Histórico de alterações</h2><p class="dica">Quem mudou o quê, do mais recente para o mais antigo. O histórico não pode ser apagado.</p><div id="historico"><p class="dica">Carregando…</p></div></section>` : ""}`;
 }
 
 // ---------- LANÇAMENTO RÁPIDO ----------
@@ -846,6 +851,113 @@ function popInsp(s) {
   return `${cabPop(`Inspetor de serviço · ${esc(eq.nome)}`, `${SEMANA[diaSemana(ui.dia)].toLowerCase()} ${ddmm(ui.dia)}`)}<div class="pop-corpo">
     <label class="campo"><span class="rot">Nome</span><input id="in-nome" value="${esc(atual)}"></label>
     <div class="pop-acoes"><button class="btn pri" data-act="insp-salvar" data-escopo="dia">Só em ${ddmm(ui.dia)}</button><button class="btn" data-act="insp-salvar" data-escopo="sempre">Sempre para a ${esc(eq.id)}</button></div></div>`;
+}
+
+// ---------- MODO SERVIDOR (dados no banco da Cloudflare) ----------
+// Sem servidor, tudo fica no navegador (localStorage). Com servidor, cada alteração vira um
+// comando enviado com a revisão que a tela conhece; se outra pessoa salvou antes, recarrega.
+const SERVIDOR = typeof window !== "undefined" ? window.ESCALA_SERVIDOR : null;
+const DOCS_SYNC = ["postos", "secoes", "equipes", "config", "requerimentos"];
+const srv = { revisao: 0, foto: null, enviando: false, pendente: false, resumos: [], estado: "ok" };
+function fotografar(d) {
+  return {
+    gms: new Map(d.gms.map((g) => [g.id, JSON.stringify(g)])),
+    ocorrencias: new Map(d.ocorrencias.map((o) => [o.id, JSON.stringify(o)])),
+    docs: Object.fromEntries(DOCS_SYNC.map((k) => [k, JSON.stringify(d[k] ?? null)])),
+  };
+}
+function diferenca() {
+  const ops = [], f = srv.foto;
+  for (const c of ["gms", "ocorrencias"]) {
+    const vistos = new Set();
+    for (const x of data[c]) {
+      vistos.add(x.id);
+      const j = JSON.stringify(x);
+      if (f[c].get(x.id) !== j) ops.push({ t: "put", c, id: x.id, v: x });
+    }
+    for (const id of f[c].keys()) if (!vistos.has(id)) ops.push({ t: "del", c, id });
+  }
+  for (const k of DOCS_SYNC) if (JSON.stringify(data[k] ?? null) !== f.docs[k]) ops.push({ t: "doc", k, v: data[k] ?? null });
+  return ops;
+}
+function mostrarSync(estado) {
+  srv.estado = estado;
+  const el = $("#sync");
+  if (!el) return;
+  el.hidden = false;
+  el.className = "sync " + estado;
+  el.textContent = { ok: "✓ Salvo", salvando: "Salvando…", erro: "Sem conexão · tentando de novo" }[estado];
+}
+async function api(caminho, opcoes = {}) {
+  const r = await fetch(caminho, { ...opcoes, headers: { "content-type": "application/json", ...(opcoes.headers || {}) } });
+  if (r.status === 401) { location.href = "/login"; throw new Error("sessao"); }
+  const corpo = await r.json().catch(() => ({}));
+  return { status: r.status, corpo };
+}
+async function sincronizar() {
+  if (srv.enviando) { srv.pendente = true; return; }
+  const ops = diferenca();
+  if (!ops.length) { mostrarSync("ok"); return; }
+  srv.enviando = true; srv.pendente = false;
+  mostrarSync("salvando");
+  const resumo = srv.resumos.splice(0).join(" · ") || "Alteração";
+  const cmd = "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  try {
+    let res;
+    for (let tentativa = 0; tentativa < 3; tentativa++) {
+      try { res = await api("/api/comandos", { method: "POST", body: JSON.stringify({ revisao: srv.revisao, cmd, resumo, ops }) }); break; }
+      catch (e) { if (e.message === "sessao" || tentativa === 2) throw e; await new Promise((ok) => setTimeout(ok, 1500 * (tentativa + 1))); }
+    }
+    if (res.status === 409) {
+      await carregarDoServidor();
+      toast("A escala foi alterada em outro computador. Abri a versão mais nova: confira e refaça a sua última mudança, se precisar.");
+    } else if (res.status !== 200) {
+      throw new Error(res.corpo.erro || "erro");
+    } else {
+      srv.revisao = res.corpo.revisao;
+      srv.foto = fotografar(data);
+      mostrarSync("ok");
+    }
+  } catch (e) {
+    if (e.message === "sessao") return;
+    srv.resumos.unshift(resumo);
+    mostrarSync("erro");
+    setTimeout(() => { srv.enviando = false; sincronizar(); }, 4000);
+    return;
+  }
+  srv.enviando = false;
+  if (srv.pendente) sincronizar();
+}
+async function carregarDoServidor() {
+  const { status, corpo } = await api("/api/estado");
+  if (status !== 200) throw new Error(corpo.erro || "Falha ao carregar");
+  srv.revisao = corpo.revisao;
+  if (corpo.vazio) { ui.vazio = true; ui.pronto = true; render(); return; }
+  data = { ...corpo.estado, _versao: Date.now() };
+  srv.foto = fotografar(data);
+  desfazer.length = 0;
+  ui.vazio = false; ui.pronto = true;
+  mostrarSync("ok");
+  render();
+}
+function telaServidor() {
+  if (!ui.pronto) return `<div class="tela-centro"><p class="dica">Carregando a escala…</p></div>`;
+  return `<div class="tela-centro"><section class="painel boas-vindas"><h2>Banco de dados vazio</h2>
+    <p>Este é o primeiro acesso. Para conhecer o sistema, comece com os dados de exemplo (nomes e escalas fictícios). Depois dá para trocar pelos dados reais.</p>
+    <button class="btn pri grande" data-act="srv-exemplo">Começar com dados de exemplo</button></section></div>`;
+}
+async function iniciarServidor() {
+  $("#restaurar").outerHTML = `<span>${esc(SERVIDOR.nome)}</span> · <a class="link" href="/sair">Sair</a>`;
+  try { await carregarDoServidor(); }
+  catch { $("#main").innerHTML = `<div class="tela-centro"><p class="dica">Não consegui falar com o servidor. Verifique a internet e recarregue a página.</p></div>`; }
+}
+async function carregarHistorico() {
+  const el = $("#historico");
+  if (!el) return;
+  try {
+    const { corpo } = await api("/api/eventos");
+    el.innerHTML = corpo.eventos.length ? `<table class="hist-ev"><tbody>${corpo.eventos.map((e) => `<tr><td class="num">${e.quando.slice(8, 10)}/${e.quando.slice(5, 7)} ${new Date(e.quando).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</td><td>${esc(e.quem)}</td><td>${esc(e.resumo)}</td></tr>`).join("")}</tbody></table>` : `<p class="dica">Nenhuma alteração ainda.</p>`;
+  } catch { el.innerHTML = `<p class="dica">Não consegui carregar o histórico.</p>`; }
 }
 
 // ---------- eventos ----------
@@ -1122,7 +1234,17 @@ document.addEventListener("click", (e) => {
     case "abrir-ficha": ui.gm = el.dataset.gm; ui.mes = mesDe(ui.dia); ui.view = "ficha"; ui.drawer = null; location.hash = "ficha"; render(); window.scrollTo(0, 0); break;
     case "ir-dia": ui.dia = el.dataset.dia; ui.view = "quadro"; location.hash = "quadro"; render(); break;
     case "fechar": ui.drawer = null; render(); break;
-    case "desfazer": if (desfazer.length) { const u = JSON.parse(desfazer.pop()); data.ocorrencias = u.o; data.postos = u.p; data.secoes = u.s; data.gms = u.g; data.requerimentos = u.r; data.equipes = u.e; data._versao++; ui.plano = null; salvar(); render(); toast("Última alteração desfeita"); } break;
+    case "srv-exemplo": {
+      el.disabled = true; el.textContent = "Carregando…";
+      const est = criarExemplo(); delete est._versao;
+      api("/api/importar", { method: "POST", body: JSON.stringify({ estado: est }) })
+        .then(({ status, corpo }) => { if (status !== 200) throw new Error(corpo.erro); return carregarDoServidor(); })
+        .then(() => toast("Dados de exemplo carregados"))
+        .catch((e) => { el.disabled = false; el.textContent = "Começar com dados de exemplo"; toast("Não deu certo: " + (e.message || "erro")); });
+      return;
+    }
+    case "desfazer": if (SERVIDOR && desfazer.length) srv.resumos.push("Desfez a última alteração");
+      if (desfazer.length) { const u = JSON.parse(desfazer.pop()); data.ocorrencias = u.o; data.postos = u.p; data.secoes = u.s; data.gms = u.g; data.requerimentos = u.r; data.equipes = u.e; data._versao++; ui.plano = null; salvar(); render(); toast("Última alteração desfeita"); } break;
     case "imprimir": window.print(); break;
     case "restaurar": ui.confirmar = "restaurar"; $("#restaurar").outerHTML = `<button id="restaurar" class="btn perigo" data-act="restaurar-ok">Apagar meus lançamentos e restaurar</button>`; return;
     case "restaurar-ok": try { localStorage.removeItem(CHAVE); } catch { /* ignora */ } data = criarExemplo(); desfazer.length = 0; $("#restaurar").outerHTML = `<button id="restaurar" class="link" data-act="restaurar">Restaurar exemplo</button>`; render(); toast("Dados de exemplo restaurados"); break;
@@ -1186,4 +1308,6 @@ document.addEventListener("scroll", (e) => { if (ui.pop && e.target !== document
 window.addEventListener("resize", () => { if (ui.pop) desenharPop(); });
 try { if (localStorage.getItem("escala-letra")) { document.documentElement.classList.add("letra-grande"); $("#btn-letra")?.setAttribute("aria-pressed", "true"); } } catch { /* ignora */ }
 void hm; void trabalhaNoDia; void resumoMes; void norm;
+window.addEventListener("beforeunload", (e) => { if (SERVIDOR && ui.pronto && !ui.vazio && (srv.enviando || diferenca().length)) { e.preventDefault(); e.returnValue = ""; } });
 render();
+if (SERVIDOR) iniciarServidor();

@@ -342,6 +342,14 @@ button.eq:hover { border-color: var(--accent); }
 .links-pop { margin: 0; font-size: .88rem; color: var(--muted); }
 .aviso { margin: 0; padding: .4rem .55rem; border-radius: 6px; background: var(--warn-bg); color: var(--warn); font-size: .85rem; }
 
+/* modo servidor */
+.sync { align-self: center; font-size: .8rem; font-weight: 600; padding: .2rem .5rem; border-radius: 999px; white-space: nowrap; }
+.sync.ok { color: var(--ok); } .sync.salvando { color: var(--muted); } .sync.erro { color: var(--furo); background: var(--furo-bg); }
+.tela-centro { min-height: 50vh; display: grid; place-items: center; }
+.boas-vindas { max-width: 520px; gap: .8rem; } .boas-vindas p { margin: 0; }
+table.hist-ev td { padding: .3rem .5rem; border-bottom: 1px solid var(--line); vertical-align: top; font-size: .88rem; }
+table.hist-ev td.num { white-space: nowrap; color: var(--muted); }
+
 /* estrutura clicável */
 .posto-btn, .secao-btn { all: unset; box-sizing: border-box; display: block; width: 100%; cursor: pointer; border-radius: 5px; padding: .1rem .2rem; position: relative; }
 .secao-btn { display: inline-block; width: auto; padding: .1rem .35rem; }
@@ -477,7 +485,8 @@ td.m-furo button:hover { outline: 2px solid var(--ink); }
     <div id="cmd-prev" class="cmd-prev" hidden></div>
   </div>
   <div class="ferr"><button id="btn-desfazer" class="btn" data-act="desfazer" disabled title="Desfaz a última alteração">↶ Desfazer</button>
-    <button id="btn-letra" class="btn" data-act="letra" aria-pressed="false" title="Aumentar o tamanho da letra">A+</button></div>
+    <button id="btn-letra" class="btn" data-act="letra" aria-pressed="false" title="Aumentar o tamanho da letra">A+</button>
+    <span id="sync" class="sync" role="status" hidden></span></div>
   <div class="exemplo"><a href="#ajustes" data-nav="ajustes" class="link">Ajustes</a> · Nomes e dados fictícios · <button id="restaurar" class="link" data-act="restaurar">Restaurar exemplo</button></div>
 </header>
 <main id="main"><p class="dica">Carregando a escala…</p></main>

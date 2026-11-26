@@ -1,0 +1,11 @@
+{
+  "name": "escala-gm-piloto",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "preparar": "node ../build.mjs && cp ../escala-gm.html pagina.html",
+    "dev": "npm run preparar && wrangler d1 execute DB --local --file schema.sql && wrangler dev --port 8787",
+    "deploy": "npm run preparar && wrangler deploy"
+  },
+  "devDependencies": { "wrangler": "4.20.0" }
+}
