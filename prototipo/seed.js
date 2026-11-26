@@ -1,5 +1,5 @@
 // Dados de exemplo — nomes fictícios, estrutura inspirada nas escalas reais.
-import { indiceDia, calcularDia, diasDoMes, somaDias, trabalhaNoDia, afastamentoNoDia, intervalo, sobrepoe, TURNOS, mesDe } from "./engine.js";
+import { heDoDia, indiceDia, calcularDia, diasDoMes, somaDias, trabalhaNoDia, afastamentoNoDia, intervalo, sobrepoe, TURNOS, mesDe } from "./engine.js";
 
 function rng(seed) { let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
 
@@ -220,6 +220,15 @@ export function criarExemplo() {
     add({ tipo: "BH_MAIS", gm: pick(livres).id, de: d, ini: "19:00", fim: "01:00", posto, req: String(1400 + Math.floor(r() * 400)) });
   }
   void fim;
+  data._versao++;
+  // escalas já finalizadas até o dia anterior a 26/11: a HE delas está no controle
+  data.controle = [];
+  for (let d = (data.config.mesInicial || "2026-11") + "-01"; d < "2026-11-26"; d = somaDias(d, 1)) {
+    data.controle.push({ id: `f${d.replaceAll("-", "")}`, tipo: "FECHADO", dia: d, quando: d + "T08:00:00.000Z" }, ...heDoDia(data, d));
+  }
+  // exemplo de correção do RH: um GM não compareceu a uma HE
+  const corr = data.controle.find((c) => c.tipo === "HE" && !c.fixa && c.dia >= "2026-11-10");
+  if (corr) Object.assign(corr, { min: 0, editado: true, obs: "RH: não compareceu" });
   data._versao++;
   return data;
 }

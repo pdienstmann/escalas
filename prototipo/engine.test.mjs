@@ -320,3 +320,26 @@ test("HE fixa estendida no dia continua HE fixa (3HE → 4HE) e pode ser removid
   data.ocorrencias[0] = { id: "x", tipo: "HORARIO", gm: "h", de: d, alvo: "960-1080", ini: "16:00", fim: "17:00", remover: true }; data._versao++;
   assert.equal(calcularDia(data, d).designacoes.filter((x) => x.gm === "h" && x.fixa).length, 0);
 });
+
+test("controle de HE: só dias finalizados contam, correções valem, previsão fica à parte", async () => {
+  const { heDoDia, controleMes, previstaMes, diaFinalizado, diasEmAberto } = await import("./engine.js");
+  const data = base();
+  const d = diaDe(data, "D1");
+  data.ocorrencias.push({ id: "he1", tipo: "HE", gm: "c", de: d, ini: "19:00", fim: "01:00", posto: "noite" }); data._versao++;
+  const mes = d.slice(0, 7);
+  assert.equal(controleMes(data, mes).get("c").he, 0); // nada finalizado: controle vazio
+  assert.equal(previstaMes(data, mes).get("c"), 360); // mas a previsão mostra
+  assert.ok(previstaMes(data, mes).get("h") > 0); // HE fixa da semanal também é só previsão
+  // finaliza o dia
+  data.controle = [{ id: "f", tipo: "FECHADO", dia: d }, ...heDoDia(data, d)]; data._versao++;
+  assert.ok(diaFinalizado(data, d) && !diasEmAberto(data, mes, d).includes(d));
+  assert.equal(controleMes(data, mes).get("c").he, 360);
+  assert.equal(previstaMes(data, mes).get("c") || 0, 0);
+  // RH: o GM não compareceu → corrige para 0
+  data.controle.find((x) => x.gm === "c").min = 0; data._versao++;
+  assert.equal(controleMes(data, mes).get("c").he, 0);
+  // ajuste manual negativo e teto
+  data.controle.push({ id: "aj", tipo: "HE", manual: true, dia: d, gm: "c", min: 70 * 60 }); data._versao++;
+  const l = controleMes(data, mes).get("c");
+  assert.equal(l.paga, 60 * 60); assert.equal(l.proximo, 10 * 60);
+});

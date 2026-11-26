@@ -4,7 +4,7 @@
 // - Histórico de alterações append-only (tabela eventos).
 import pagina from "./pagina.html";
 
-const COLECOES = ["gms", "ocorrencias"];
+const COLECOES = ["gms", "ocorrencias", "controle"];
 const DOCS = ["postos", "secoes", "equipes", "config", "requerimentos"];
 const DIA_SEG = 60 * 60 * 24;
 const enc = new TextEncoder();
@@ -70,7 +70,7 @@ async function lerEstado(env) {
     env.DB.prepare("SELECT chave, valor FROM docs").all(),
     lerRevisao(env),
   ]);
-  const estado = { gms: [], ocorrencias: [], postos: [], secoes: [], equipes: [], config: {}, requerimentos: {} };
+  const estado = { gms: [], ocorrencias: [], controle: [], postos: [], secoes: [], equipes: [], config: {}, requerimentos: {} };
   for (const r of regs.results) estado[r.colecao].push(JSON.parse(r.valor));
   for (const d of docs.results) estado[d.chave] = JSON.parse(d.valor);
   return { revisao: rev.numero, estado, vazio: !estado.gms.length };
@@ -109,7 +109,7 @@ async function importar(env, sessao, estado) {
   if (!estado || !Array.isArray(estado.gms) || !Array.isArray(estado.ocorrencias)) return json({ erro: "Dados inválidos." }, 400);
   const db = env.DB, st = [], quando = agora();
   for (const c of COLECOES) {
-    const linhas = estado[c].map((v) => [c, String(v.id), JSON.stringify(v), quando]);
+    const linhas = (estado[c] || []).map((v) => [c, String(v.id), JSON.stringify(v), quando]);
     for (let i = 0; i < linhas.length; i += 24) {
       const lote = linhas.slice(i, i + 24);
       st.push(db.prepare(`INSERT INTO registros (colecao, id, valor, atualizado) VALUES ${lote.map(() => "(?, ?, ?, ?)").join(", ")}`).bind(...lote.flat()));

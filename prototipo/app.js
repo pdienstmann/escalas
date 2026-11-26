@@ -1,6 +1,7 @@
 import {
   TURNOS, TIPOS, AFASTAMENTOS, calcularDia, sugerir, livroMes, resumoMes, saldoBH, somaDias, diaSemana, diasDoMes,
   mesDe, mesSeguinte, fmtHm, fmtHoras, intervalo, sobrepoe, trabalhaNoDia, hm, planejarCobertura, vigente, TIPOS_REQ, montarSegmentos, lerFaixas, descreverSegmentos,
+  limitarExtensao, diaFinalizado, heDoDia, diasEmAberto, controleMes, previstaMes,
 } from "./engine.js";
 import { criarExemplo } from "./seed.js";
 import { interpretar, norm } from "./comando.js";
@@ -24,7 +25,7 @@ ui.mes = mesDe(ui.dia); ui.filtroLanc.mes = ui.mes;
 const desfazer = [];
 
 function carregar() {
-  if (typeof window !== "undefined" && window.ESCALA_SERVIDOR) return { config: { tetoHE: 60, mesInicial: "2026-10", cabecalho: "" }, equipes: [], secoes: [], postos: [], gms: [], ocorrencias: [], requerimentos: {}, _versao: 0 };
+  if (typeof window !== "undefined" && window.ESCALA_SERVIDOR) return { config: { tetoHE: 60, mesInicial: "2026-10", cabecalho: "" }, equipes: [], secoes: [], postos: [], gms: [], ocorrencias: [], controle: [], requerimentos: {}, _versao: 0 };
   try {
     const s = localStorage.getItem(CHAVE);
     if (s) { const d = JSON.parse(s); d._versao = 1; return d; }
@@ -33,7 +34,7 @@ function carregar() {
 }
 function salvar() { if (SERVIDOR) { sincronizar(); return; } try { localStorage.setItem(CHAVE, JSON.stringify({ ...data, _versao: undefined })); } catch { /* ignora */ } }
 function mudar(msg, fn) {
-  desfazer.push(JSON.stringify({ o: data.ocorrencias, p: data.postos, s: data.secoes, g: data.gms, r: data.requerimentos || {}, e: data.equipes }));
+  desfazer.push(JSON.stringify({ o: data.ocorrencias, p: data.postos, s: data.secoes, g: data.gms, r: data.requerimentos || {}, e: data.equipes, c: data.controle || [] }));
   if (desfazer.length > 30) desfazer.shift();
   fn();
   data._versao = (data._versao || 0) + 1;
@@ -217,6 +218,7 @@ function vQuadro() {
   <div class="faixa">
     <span class="${furosTotal ? "ruim" : "bom"}"><b>${furosTotal}</b> ${furosTotal === 1 ? "vaga descoberta" : "vagas descobertas"}</span>
     <span><b>${fmtHoras(heHoje)}</b> de HE</span>
+    ${diaFinalizado(data, ui.dia) ? `<span class="fin-ok">✓ Escala finalizada <button class="link" data-act="fin-reabrir">reabrir</button></span>` : `<button class="btn fin" data-act="fin-abrir" title="Confirmar as horas extras deste dia e lançar no controle do mês">Finalizar escala…</button>`}
     <span><b>${new Set(cd.designacoes.filter((d) => d.posto).map((d) => d.gm)).size}</b> GMs escalados</span>
     <span><b>${cd.afastados.length}</b> fora da escala</span>
     <label class="toggle"><input type="checkbox" id="q-sofuros" ${ui.soFuros ? "checked" : ""}> Só furos</label>
@@ -239,7 +241,77 @@ function vDrawer() {
   const d = ui.drawer;
   if (d.tipo === "furo") return drawerFuro(d);
   if (d.tipo === "gm") return drawerGm(d);
+  if (d.tipo === "finalizar") return drawerFinalizar(d);
+  if (d.tipo === "controle") return drawerControle(d);
   return "";
+}
+// ---------- FINALIZAR ESCALA E CONTROLE DE HE ----------
+// Ao finalizar, a HE do dia vai para o controle. HE fixa/recorrente da semanal entra direto; as demais pedem confirmação.
+function drawerFinalizar(d) {
+  const dias = d.dias, fora = new Set(d.fora || []);
+  const porDia = dias.map((dia) => ({ dia, hs: heDoDia(data, dia) }));
+  const todas = porDia.flatMap((x) => x.hs), marcadas = todas.filter((h) => !fora.has(h.id));
+  const linha = (h) => `<li><label class="fin-he ${h.fixa ? "fixa" : ""}"><input type="checkbox" data-fin="${h.id}" data-min="${h.min}" ${fora.has(h.id) ? "" : "checked"}>
+    <b>${esc(nomeGm(h.gm))}</b><span class="hr">${h.ini}–${h.fim}</span><span class="meta">${esc(postoPorId(h.posto)?.nome || "")}${h.fixa ? " · HE fixa" : ""}${h.req ? ` · REQ ${esc(h.req)}` : ""}</span><span class="num">${fmtHoras(h.min)}</span></label></li>`;
+  return `<div class="dw-head"><div><p class="eyebrow">Finalizar escala</p><h2>${dias.length === 1 ? `${SEMANA[diaSemana(dias[0])]} ${ddmm(dias[0])}` : `${dias.length} dias · ${ddmm(dias[0])} a ${ddmm(dias.at(-1))}`}</h2>
+    <p class="meta">Confirme as horas extras que vão para o controle do mês. Desmarque quem não fez. Dá para corrigir depois em <b>Mês e horas</b>.</p></div>
+    <button class="ic" data-act="fechar" aria-label="Fechar">×</button></div>
+  <div class="dw-body">
+    ${d.abertosAntes?.length ? `<p class="aviso-fin">${d.abertosAntes.length} ${d.abertosAntes.length === 1 ? "dia anterior ainda está aberto" : "dias anteriores ainda estão abertos"} neste mês. <button class="link" data-act="fin-incluir">Finalizar junto</button></p>` : ""}
+    ${porDia.map(({ dia, hs }) => {
+      const fixas = hs.filter((h) => h.fixa), outras = hs.filter((h) => !h.fixa);
+      return `${dias.length > 1 ? `<h3>${SEMANA[diaSemana(dia)]} ${ddmm(dia)}</h3>` : ""}
+      ${outras.length ? `<p class="grupo">Horas extras lançadas na escala</p><ul class="fin-lista">${outras.map(linha).join("")}</ul>` : `<p class="meta">Nenhuma hora extra lançada${dias.length > 1 ? "" : " neste dia"}.</p>`}
+      ${fixas.length ? `<details class="fin-fixas"><summary>HE fixa da escala semanal · ${fixas.length} GM${fixas.length === 1 ? "" : "s"} · ${fmtHoras(fixas.reduce((t, h) => t + h.min, 0))} (entra automaticamente)</summary><ul class="fin-lista">${fixas.map(linha).join("")}</ul></details>` : ""}`;
+    }).join("")}
+    <button class="btn pri largo" data-act="fin-ok" id="fin-ok">Finalizar e lançar ${fmtHoras(marcadas.reduce((t, h) => t + h.min, 0))} no controle</button>
+    ${todas.length - marcadas.length ? `<p class="meta">${todas.length - marcadas.length} desmarcada${todas.length - marcadas.length === 1 ? "" : "s"}: não entra${todas.length - marcadas.length === 1 ? "" : "m"} no controle.</p>` : ""}
+  </div>`;
+}
+function finalizar(dias, fora) {
+  const quando = new Date().toISOString(), lista = data.controle ||= [];
+  for (const dia of dias) {
+    data.controle = data.controle.filter((c) => c.dia !== dia || c.manual);
+    data.controle.push({ id: `f${dia.replaceAll("-", "")}`, tipo: "FECHADO", dia, quando });
+    for (const h of heDoDia(data, dia)) if (!fora.has(h.id)) data.controle.push(h);
+  }
+  void lista;
+}
+function abrirFinalizar(dia) {
+  const antes = diasEmAberto(data, mesDe(dia), somaDias(dia, -1));
+  ui.drawer = { tipo: "finalizar", dias: [dia], fora: [], abertosAntes: antes };
+  render();
+}
+// Controle do GM no mês: cada lançamento pode ser corrigido (horas, observação) ou retirado; dá para incluir ajustes.
+function drawerControle(d) {
+  const g = gmPorId(d.gm), m = d.mes, ls = (data.controle || []).filter((c) => c.tipo === "HE" && c.gm === g.id && c.dia.startsWith(m)).sort((a, b) => a.dia.localeCompare(b.dia) || a.ini?.localeCompare(b.ini || ""));
+  const l = controleMes(data, m).get(g.id) || {}, prev = previstaMes(data, m).get(g.id) || 0;
+  return `<div class="dw-head"><div><p class="eyebrow">Controle de HE · ${nomeMes(m)}</p><h2>${esc(g.nome)}</h2>
+    <p class="meta">${fmtHoras(l.he || 0)} no controle${l.transporte ? ` + ${fmtHoras(l.transporte)} do mês anterior` : ""} · ${fmtHoras(l.paga || 0)} a pagar${l.proximo ? ` · ${fmtHoras(l.proximo)} para o próximo mês` : ""}${prev ? ` · ${fmtHoras(prev)} previstas nos dias em aberto` : ""}</p></div>
+    <button class="ic" data-act="fechar" aria-label="Fechar">×</button></div>
+  <div class="dw-body">
+    <p class="dica">Corrija as horas quando o GM não fez a HE toda (ex.: <b>0</b> se faltou). Só os dias finalizados entram aqui.</p>
+    ${ls.length ? `<table class="lanc ctl"><thead><tr><th>Dia</th><th>Horário e observação</th><th>Horas</th><th></th></tr></thead><tbody>
+      ${ls.map((c) => `<tr class="${c.editado ? "editado" : ""}"><td>${ddmm(c.dia)}</td><td>${c.manual ? "ajuste" : `${c.ini}–${c.fim} <span class="meta">${esc(postoPorId(c.posto)?.nome || "")}${c.fixa ? " · fixa" : ""}</span>`}
+          <input class="ctl-o" data-ctl="${c.id}" value="${esc(c.obs || "")}" placeholder="observação (ex.: RH — não compareceu)" aria-label="Observação"></td>
+        <td><input class="ctl-h" data-ctl="${c.id}" value="${fmtHoras(c.min).replace("h", ":").replace(/:$/, ":00")}" size="5" inputmode="numeric" aria-label="Horas"></td>
+        <td><button class="ic" data-act="ctl-del" data-ctl="${c.id}" title="Tirar do controle" aria-label="Tirar do controle">×</button></td></tr>`).join("")}</tbody></table>` : `<p class="meta">Nada no controle neste mês ainda.</p>`}
+    <div class="form linha-ctl"><label>Dia <input type="date" id="ctl-dia" value="${ui.dia.startsWith(m) ? ui.dia : m + "-01"}"></label>
+      <label>Horas (use − para descontar) <input id="ctl-h" placeholder="ex.: 6 ou -6" size="6"></label>
+      <label>Motivo <input id="ctl-o" placeholder="ex.: correção do RH"></label>
+      <button class="btn" data-act="ctl-add">Incluir ajuste</button></div>
+  </div>`;
+}
+// "6", "6h", "6:30", "6,5", "-6" → minutos
+function lerHoras(txt) {
+  const t = String(txt || "").trim().replace(/h$/i, "").replace(",", ".");
+  if (!t) return null;
+  const neg = /^[-−]/.test(t), x = t.replace(/^[-−+]/, "");
+  let min;
+  if (/^\d{1,3}:\d{2}$/.test(x)) { const [h, m] = x.split(":").map(Number); min = h * 60 + m; }
+  else if (/^\d{1,3}(\.\d+)?$/.test(x)) min = Math.round(Number(x) * 60);
+  else return null;
+  return neg ? -min : min;
 }
 function drawerFuro(d) {
   const p = postoPorId(d.posto), t = TURNOS.find((x) => x.id === d.turno);
@@ -280,7 +352,7 @@ function drawerGm(d) {
   const cd = calcularDia(data, ui.dia);
   const minhas = cd.designacoes.filter((x) => x.gm === g.id);
   const afast = cd.afastados.find((a) => a.gm === g.id);
-  const l = livroMes(data, mesDe(ui.dia)).get(g.id);
+  const l = { ...controleMes(data, mesDe(ui.dia)).get(g.id), prevista: previstaMes(data, mesDe(ui.dia)).get(g.id) || 0 };
   const escalado = minhas.some((x) => x.origem === "base" || x.nat === "troca");
   const acao = d.acao || "";
   const ocsDoDia = data.ocorrencias.filter((o) => o.gm === g.id && o.de <= ui.dia && ui.dia <= (o.ate || o.de));
@@ -300,7 +372,7 @@ function drawerGm(d) {
     <p class="meta">${esc(rotuloLotacao(g))}</p>${g.naoFazHE ? `<p class="tag-linha"><span class="tag furo">Não realiza HE</span></p>` : ""}${g.obs ? `<p class="meta">${esc(g.obs)}</p>` : ""}</div>
     <button class="ic" data-act="fechar" aria-label="Fechar">×</button></div>
   <div class="dw-body">
-    <div class="mini"><div><span class="num">${fmtHoras(l?.he || 0)}</span><span class="meta">HE em ${MESES[Number(mesDe(ui.dia).slice(5)) - 1]}</span></div>
+    <div class="mini"><div><span class="num">${fmtHoras(l?.he || 0)}</span><span class="meta">HE no controle de ${MESES[Number(mesDe(ui.dia).slice(5)) - 1]}${l.prevista ? ` · +${fmtHoras(l.prevista)} prevista` : ""}</span></div>
       <div><span class="num">${fmtHoras(l?.transporte || 0)}</span><span class="meta">veio do mês anterior</span></div>
       <div><span class="num">${fmtHoras(saldoBH(data, g.id, mesDe(ui.dia)))}</span><span class="meta">banco de horas</span></div></div>
     <h3>Neste serviço</h3>
@@ -386,7 +458,10 @@ function celulaDia(marcas) {
 }
 function vMes() {
   const m = ui.mes;
-  const livro = livroMes(data, m);
+  // serviços, folgas e dias vêm da escala; as horas extras vêm do controle (só dias finalizados)
+  const escala = livroMes(data, m), ctl = controleMes(data, m), prev = previstaMes(data, m);
+  const livro = new Map(data.gms.map((g) => [g.id, { ...escala.get(g.id), ...ctl.get(g.id), prevista: prev.get(g.id) || 0 }]));
+  const nFin = diasDoMes(m).filter((d) => diaFinalizado(data, d)).length, abertos = diasEmAberto(data, m, somaDias(hojeBase(), -1));
   const dias = diasDoMes(m);
   const f = ui.filtroMes;
   let gms = data.gms.filter((g) => !f.equipe || g.equipe === f.equipe);
@@ -400,21 +475,23 @@ function vMes() {
   return `<div class="barra"><div class="datas"><button class="ic" data-act="mes" data-n="-1" aria-label="Mês anterior">‹</button><h2 class="titulo-mes">${nomeMes(m)}</h2><button class="ic" data-act="mes" data-n="1" aria-label="Próximo mês">›</button></div>
     <div class="filtros"><select id="m-eq" aria-label="Equipe"><option value="">Todas as equipes</option>${data.equipes.map((e) => `<option value="${e.id}" ${e.id === f.equipe ? "selected" : ""}>${esc(rotuloEquipe(e, m + "-01"))}</option>`).join("")}</select>
     <select id="m-ord" aria-label="Ordenar"><option value="he" ${f.ordem === "he" ? "selected" : ""}>Mais HE no mês</option><option value="heAsc" ${f.ordem === "heAsc" ? "selected" : ""}>Menos HE (próximo a chamar)</option><option value="proximo" ${f.ordem === "proximo" ? "selected" : ""}>Maior transporte p/ próximo mês</option><option value="equipe" ${f.ordem === "equipe" ? "selected" : ""}>Equipe</option><option value="nome" ${f.ordem === "nome" ? "selected" : ""}>Nome</option></select>
-    <input type="search" id="m-busca" placeholder="Buscar GM" aria-label="Buscar GM"></div></div>
+    <input type="search" id="m-busca" placeholder="Buscar GM" aria-label="Buscar GM">
+    ${abertos.length ? `<button class="btn fin" data-act="fin-pendentes">Finalizar ${abertos.length} dia${abertos.length === 1 ? "" : "s"} em aberto…</button>` : ""}</div></div>
   <div class="resumo">
-    <div class="kpi"><span class="v">${fmtHoras(tot("he"))}</span><span class="l">HE realizada no mês</span></div>
+    <div class="kpi"><span class="v">${fmtHoras(tot("he"))}</span><span class="l">HE no controle · ${nFin} de ${diasDoMes(m).length} dias finalizados</span></div>
+    <div class="kpi previsto"><span class="v">${fmtHoras(tot("prevista"))}</span><span class="l">HE prevista nos dias em aberto (ainda não conta)</span></div>
     <div class="kpi"><span class="v">${fmtHoras(tot("paga"))}</span><span class="l">HE a pagar (teto ${data.config.tetoHE}h por GM)</span></div>
     <div class="kpi ${tot("proximo") ? "atencao" : ""}"><span class="v">${fmtHoras(tot("proximo"))}</span><span class="l">vai para ${MESES[Number(mesSeguinte(m).slice(5)) - 1]} · ${acima} GM${acima === 1 ? "" : "s"} acima do teto</span></div>
     <div class="kpi ${folgaPend ? "atencao" : ""}"><span class="v">${folgaPend}</span><span class="l">GMs 12x36 com menos de 2 folgas</span></div>
   </div>
   <div class="legenda"><span><i class="lg s"></i>Serviço</span><span><i class="lg tr"></i>Troca</span><span><i class="dot he"></i>HE</span><span><i class="dot bh"></i>BH+</span><span><i class="lg f"></i>Folga</span><span><i class="lg fe"></i>Férias</span><span><i class="lg l"></i>Licença/atestado/curso</span><span><i class="lg bhc"></i>Compensação</span></div>
-  <div class="tabela-wrap"><table class="mes"><thead><tr><th class="gmcol">GM</th><th>Eq.</th><th title="Serviços realizados / previstos pela escala">Serv.</th><th>Folgas</th><th>HE mês</th><th title="Horas que excederam o teto no mês anterior">Transp.</th><th>Paga</th><th>Próx. mês</th><th title="Parte da HE entre 22h e 5h — informativo para o RH">22–05h</th><th>BH</th>
+  <div class="tabela-wrap"><table class="mes"><thead><tr><th class="gmcol">GM</th><th>Eq.</th><th title="Serviços realizados / previstos pela escala">Serv.</th><th>Folgas</th><th title="HE confirmada ao finalizar a escala. Clique para corrigir.">HE controle</th><th title="HE prevista pela escala nos dias ainda não finalizados">Prevista</th><th title="Horas que excederam o teto no mês anterior">Transp.</th><th>Paga</th><th>Próx. mês</th><th title="Parte da HE entre 22h e 5h — informativo para o RH">22–05h</th><th>BH</th>
     ${dias.map((d) => `<th class="d ${[0, 6].includes(diaSemana(d)) ? "fds" : ""}">${Number(d.slice(8))}<small>${SEMANA[diaSemana(d)][0]}</small></th>`).join("")}</tr></thead><tbody>
     ${gms.map((g) => { const l = L(g); const alt = equipe(g.equipe)?.tipo === "alternado"; return `<tr data-nome="${esc(g.nome.toLowerCase())}">
       <th class="gmcol" scope="row"><button class="link" data-act="abrir-ficha" data-gm="${g.id}">${esc(g.nome)}</button>${g.naoFazHE ? ` <span class="tag furo" title="Não realiza HE">sem HE</span>` : ""}</th><td>${g.equipe}</td>
       <td class="num">${l.servicos || 0}<small>/${l.servicosBase || 0}</small></td>
       <td class="num ${alt && (l.folgas || 0) !== 2 ? "alerta" : ""}">${alt ? `${l.folgas || 0}/2` : "—"}</td>
-      <td class="num forte">${l.he ? fmtHoras(l.he) : "—"}</td><td class="num">${l.transporte ? fmtHoras(l.transporte) : "—"}</td>
+      <td class="num forte"><button class="link ctl-link" data-act="abrir-controle" data-gm="${g.id}" title="Ver e corrigir o controle de HE">${l.he ? fmtHoras(l.he) : "—"}</button></td><td class="num previsto">${l.prevista ? fmtHoras(l.prevista) : "—"}</td><td class="num">${l.transporte ? fmtHoras(l.transporte) : "—"}</td>
       <td class="num">${l.paga ? fmtHoras(l.paga) : "—"}</td><td class="num ${l.proximo ? "alerta" : ""}">${l.proximo ? fmtHoras(l.proximo) : "—"}</td>
       <td class="num">${l.heNoturna ? fmtHoras(l.heNoturna) : "—"}</td><td class="num">${(() => { const s = saldoBH(data, g.id, m); return s ? fmtHoras(s) : "—"; })()}</td>
       ${dias.map((d) => celulaDia(l.dias?.[d])).join("")}</tr>`; }).join("")}
@@ -426,10 +503,10 @@ function vFicha() {
   const g = gmPorId(ui.gm) || data.gms[0];
   ui.gm = g.id;
   const m = ui.mes;
-  const l = livroMes(data, m).get(g.id) || {};
+  const l = { ...livroMes(data, m).get(g.id), ...controleMes(data, m).get(g.id), prevista: previstaMes(data, m).get(g.id) || 0 };
   const eq = equipe(g.equipe);
   const hist = [];
-  for (let x = data.config.mesInicial; x <= "2026-12"; x = mesSeguinte(x)) hist.push([x, livroMes(data, x).get(g.id) || {}]);
+  for (let x = data.config.mesInicial; x <= "2026-12"; x = mesSeguinte(x)) hist.push([x, controleMes(data, x).get(g.id) || {}]);
   const dias = diasDoMes(m).map((d) => {
     const cd = calcularDia(data, d);
     const des = cd.designacoes.filter((x) => x.gm === g.id);
@@ -448,7 +525,7 @@ function vFicha() {
   <div class="resumo">
     <div class="kpi"><span class="v">${l.servicos || 0}<small>/${l.servicosBase || 0}</small></span><span class="l">serviços realizados / previstos</span></div>
     ${eq?.tipo === "alternado" ? `<div class="kpi ${(l.folgas || 0) !== 2 ? "atencao" : ""}"><span class="v">${l.folgas || 0}/2</span><span class="l">folgas do mês</span></div>` : ""}
-    <div class="kpi"><span class="v">${fmtHoras(l.he || 0)}</span><span class="l">HE no mês${l.heFixa ? ` (${fmtHoras(l.heFixa)} fixa)` : ""}</span></div>
+    <div class="kpi"><span class="v">${fmtHoras(l.he || 0)}</span><span class="l">HE no controle${l.heFixa ? ` (${fmtHoras(l.heFixa)} fixa)` : ""}${l.prevista ? ` · +${fmtHoras(l.prevista)} prevista nos dias em aberto` : ""} · <button class="link" data-act="abrir-controle" data-gm="${g.id}">corrigir</button></span></div>
     <div class="kpi"><span class="v">${fmtHoras(l.paga || 0)}</span><span class="l">a pagar · ${fmtHoras(l.transporte || 0)} vieram do mês anterior</span></div>
     <div class="kpi ${l.proximo ? "atencao" : ""}"><span class="v">${fmtHoras(l.proximo || 0)}</span><span class="l">passa para o mês seguinte</span></div>
     <div class="kpi"><span class="v">${fmtHoras(saldoBH(data, g.id, m))}</span><span class="l">saldo do banco de horas</span></div>
@@ -484,7 +561,8 @@ function vFolha() {
   };
   let corpo = "", corpoVerso = "";
   for (const s of data.secoes) {
-    const ps = data.postos.filter((p) => p.secao === s.id && p.ativo !== false && faPostos.get(p.id)?.tipo !== "FA"); // viatura em FA não sai na folha
+    const ps = data.postos.filter((p) => p.secao === s.id && p.ativo !== false && faPostos.get(p.id)?.tipo !== "FA" // viatura em FA não sai na folha
+      && (p.rondas || faPostos.has(p.id) || cd.designacoes.some((d) => d.posto === p.id) || cd.furos.some((f) => f.posto === p.id))); // nem posto vazio sem vaga
     if (!ps.length) continue;
     const verso = ps.every((p) => p.tipo === "reserva");
     if (s.grupamento && !cd.designacoes.some((d) => ps.some((p) => p.id === d.posto))) continue;
@@ -936,14 +1014,15 @@ function fotografar(d) {
   return {
     gms: new Map(d.gms.map((g) => [g.id, JSON.stringify(g)])),
     ocorrencias: new Map(d.ocorrencias.map((o) => [o.id, JSON.stringify(o)])),
+    controle: new Map((d.controle || []).map((o) => [o.id, JSON.stringify(o)])),
     docs: Object.fromEntries(DOCS_SYNC.map((k) => [k, JSON.stringify(d[k] ?? null)])),
   };
 }
 function diferenca() {
   const ops = [], f = srv.foto;
-  for (const c of ["gms", "ocorrencias"]) {
+  for (const c of ["gms", "ocorrencias", "controle"]) {
     const vistos = new Set();
-    for (const x of data[c]) {
+    for (const x of data[c] || []) {
       vistos.add(x.id);
       const j = JSON.stringify(x);
       if (f[c].get(x.id) !== j) ops.push({ t: "put", c, id: x.id, v: x });
@@ -1006,7 +1085,7 @@ async function carregarDoServidor() {
   if (status !== 200) throw new Error(corpo.erro || "Falha ao carregar");
   srv.revisao = corpo.revisao;
   if (corpo.vazio) { ui.vazio = true; ui.pronto = true; render(); return; }
-  data = { ...corpo.estado, _versao: Date.now() };
+  data = { controle: [], ...corpo.estado, _versao: Date.now() };
   srv.foto = fotografar(data);
   desfazer.length = 0;
   ui.vazio = false; ui.pronto = true;
@@ -1077,6 +1156,25 @@ function itensPosto(p) {
     ...itensGerais(),
   ];
 }
+function itensPostoPadrao(p) {
+  const irmaos = data.postos.filter((x) => x.secao === p.secao && x.ativo !== false), i = irmaos.indexOf(p);
+  const temNoite = ["t4", "t1"].some((t) => p.vagas?.[t]), temDia = ["t2", "t3"].some((t) => p.vagas?.[t]);
+  return [
+    { t: "Editar cadastro (nome, zona, vagas)…", act: "mn-posto", d: { aba: "sempre" }, padrao: true },
+    { t: temDia ? "Não usar de dia (tirar as vagas do dia)" : "Usar de dia (1 vaga)", act: "pad-vagas", d: { per: "dia", n: temDia ? "0" : "1" } },
+    { t: temNoite ? "Não usar à noite (tirar as vagas da noite)" : "Usar à noite (1 vaga)", act: "pad-vagas", d: { per: "noite", n: temNoite ? "0" : "1" } },
+    { sep: true },
+    { t: "Subir", act: "mn-mover", d: { d: "-1" }, desab: i <= 0 },
+    { t: "Descer", act: "mn-mover", d: { d: "1" }, desab: i >= irmaos.length - 1 },
+    { sep: true },
+    { t: `Desativar ${ehViatura(p) ? "viatura" : "posto"}…`, act: "mn-posto", d: { aba: "sempre" } },
+    ...itensGerais(),
+  ];
+}
+function mudarVagasPeriodo(p, per, n) {
+  const ts = per === "dia" ? ["t2", "t3"] : ["t4", "t1"];
+  mudar(`${p.nome}: ${n ? `${n} vaga ${per === "dia" ? "de dia" : "à noite"}` : `sem vaga ${per === "dia" ? "de dia" : "à noite"} (não abre mais falta)`}`, () => { p.vagas = { ...(p.vagas || {}) }; for (const t of ts) p.vagas[t] = n; });
+}
 function itensCelula(posto, turno) {
   const cd = calcularDia(data, ui.dia), t = TURNOS.find((x) => x.id === turno), p = postoPorId(posto);
   const furo = cd.furos.some((f) => f.posto === posto && f.turno === turno);
@@ -1144,7 +1242,7 @@ document.addEventListener("contextmenu", (e) => {
   const r = alvo.getBoundingClientRect();
   const x = e.clientX || r.left + 8, y = e.clientY || r.bottom; // teclado (Shift+F10) não informa posição
   if (chipEl) { const d = ui.desMap.get(chipEl.dataset.des); if (d) abrirMenu(itensGm(d, chipEl.closest("td[data-turno]")?.dataset.turno), x, y, chipEl, { des: d }); }
-  else if (postoEl) abrirMenu(itensPosto(postoPorId(postoEl.dataset.posto)), x, y, postoEl, { posto: postoEl.dataset.posto });
+  else if (postoEl) abrirMenu((ui.view === "padroes" ? itensPostoPadrao : itensPosto)(postoPorId(postoEl.dataset.posto)), x, y, postoEl, { posto: postoEl.dataset.posto });
   else if (secEl) abrirMenu(itensSecao(secEl.dataset.secao), x, y, secEl, {});
   else abrirMenu(itensCelula(cel.dataset.posto, cel.dataset.turno), x, y, cel, { posto: cel.dataset.posto });
 });
@@ -1743,17 +1841,20 @@ function vPadroes() {
           const reforco = p.reforco && periodoDe([p.reforco]) === per;
           tem += aqui.length + semanais.length + rec.length;
           const vazio = !aqui.length && !semanais.length && !rec.length && !reforco;
+          const ts = per === "dia" ? ["t2", "t3"] : ["t4", "t1"], vagas = p.rondas ? 0 : Math.max(0, ...ts.map((t) => p.vagas?.[t] || 0));
+          const faltam = Math.max(0, vagas - aqui.length - semanais.length);
           return `<td class="${per} ${dif ? "dif" : ""}" data-pposto="${p.id}" data-pper="${per}">${aqui.map((x) => pessoa(x)).join("")}${semanais.map((x) => pessoa(x, "sem")).join("")}
             ${rec.map(({ g }) => `<button class="pgm he" data-act="pad-gm" data-gm="${g.id}">${esc(g.nome)} <b class="he-num">HE+</b><span class="num">${g.heRecorrente.filter((r) => r.posto === p.id).flatMap((r) => r.segmentos).map((x) => x.ini + "–" + x.fim).join(" + ")} · dias úteis</span></button>`).join("")}
             ${reforco ? `<span class="vaga-ref">Vaga de reforço ${fmtHm(ra)}–${fmtHm(rb)} · HE${p.dias ? " · dias úteis" : ""}</span>` : ""}
             ${vazio && p.rondas ? `<span class="rondas">VTR/RONDAS FREQUENTES</span>` : ""}
+            ${faltam ? `<span class="furo-pad" title="O posto tem ${vagas} vaga${vagas === 1 ? "" : "s"} neste período">Vaga sem GM · falta ${faltam}<button class="link" data-act="pad-semvaga" data-posto="${p.id}" data-per="${per}">não usar ${per === "dia" ? "de dia" : "à noite"}</button></span>` : ""}
             ${dif ? `<span class="dif-txt" title="No outro padrão há ${no}">${aqui.length < no ? "▲" : "▼"} outro padrão: ${no}</span>` : ""}
             <button class="add" data-act="pad-add" data-posto="${p.id}" data-per="${per}">+ pôr GM</button></td>`;
         };
-        const html = `<tr class="${s.grupamento ? "em-grupo" : ""}"><th scope="row" class="posto"><span class="pn">${iconePosto(p)}${esc(p.nome)}</span>${p.sub ? `<span class="ps">${esc(p.sub)}</span>` : ""}${p.obs ? `<span class="po">(${esc(p.obs)})</span>` : ""}</th>${cel("dia")}${cel("noite")}</tr>`;
+        const html = `<tr class="${s.grupamento ? "em-grupo" : ""}"><th scope="row" class="posto"><button class="posto-btn" data-act="pad-posto" data-posto="${p.id}" title="Clique para editar · botão direito: mais opções"><span class="pn">${iconePosto(p)}${esc(p.nome)}</span>${p.sub ? `<span class="ps">${esc(p.sub)}</span>` : ""}${p.obs ? `<span class="po">(${esc(p.obs)})</span>` : ""}<span class="lapis" aria-hidden="true">✎</span></button></th>${cel("dia")}${cel("noite")}</tr>`;
         return s.grupamento && !tem ? "" : html; // grupamento sem ninguém neste padrão não aparece
       }).join("");
-      return linhas ? `<tr class="secao ${s.grupamento ? "grupo" : ""}"><th colspan="3">${s.grupamento ? ICONES.grupo : ""}${esc(s.nome)}${s.grupamento ? `<span class="selo-grupo">GRUPAMENTO</span>` : ""}</th></tr>${linhas}` : "";
+      return linhas || !s.grupamento ? `<tr class="secao ${s.grupamento ? "grupo" : ""}"><th colspan="3"><button class="secao-btn" data-act="secao-nome" data-secao="${s.id}" title="Clique para renomear · botão direito: mais opções">${s.grupamento ? ICONES.grupo : ""}${esc(s.nome)} <span class="lapis" aria-hidden="true">✎</span></button>${s.grupamento ? `<span class="selo-grupo">GRUPAMENTO</span>` : ""}</th></tr>${linhas}` : "";
     }).join("");
     corpo = `<div class="tabela-wrap"><table class="quadro padrao"><colgroup><col class="c-posto"><col><col></colgroup>
       <thead><tr><th>POSTO</th><th class="dia">DIA (2º e 3º turno)</th><th class="noite">NOITE (4º e 1º turno)</th></tr></thead><tbody>${corpo}</tbody></table></div>`;
@@ -1761,7 +1862,7 @@ function vPadroes() {
   return `<div class="barra"><div class="datas"><button class="ic" data-act="pad-mes" data-n="-1" aria-label="Mês anterior">‹</button><h2 class="titulo-mes">${nomeMes(mes)}</h2><button class="ic" data-act="pad-mes" data-n="1" aria-label="Próximo mês">›</button></div>
     <label class="desde">Mudanças valem a partir de <input type="date" id="pad-desde" value="${pd.desde}"></label></div>
   <div class="abas-pad" role="tablist">${abas.map(([k, t]) => `<button role="tab" aria-selected="${pd.aba === k}" data-act="pad-aba" data-aba="${k}">${t}</button>`).join("")}</div>
-  <p class="dica">${pd.aba === "semanal" ? "Quem trabalha de segunda a sexta, com o horário fixo e a HE fixa de cada um. Clique no nome para editar." : `Composição do padrão ${pd.aba === "impar" ? "ímpar" : "par"} em ${nomeMes(mes).toLowerCase()} (quem trabalha nos dias ${pd.aba === "impar" ? "ímpares" : "pares"}), sem folgas e afastamentos. Clique no GM para editar, arraste com o botão direito para mais opções. Em vermelho: posto com quantidade diferente do outro padrão.`}</p>
+  <p class="dica">${pd.aba === "semanal" ? "Quem trabalha de segunda a sexta, com o horário fixo e a HE fixa de cada um. Clique no nome para editar." : `Composição do padrão ${pd.aba === "impar" ? "ímpar" : "par"} em ${nomeMes(mes).toLowerCase()} (quem trabalha nos dias ${pd.aba === "impar" ? "ímpares" : "pares"}), sem folgas e afastamentos. Clique no GM, no posto ou na seção para editar; o botão direito mostra mais opções (novo posto, subir/descer, desativar). Em vermelho: vaga sem GM ou quantidade diferente do outro padrão.`}</p>
   ${corpo}`;
 }
 function itensPadraoGm(g) {
@@ -2006,6 +2107,9 @@ document.addEventListener("click", (e) => {
       return;
     }
     case "pop-posto": abrirPop("posto", el, { posto: el.dataset.posto, aba: "dia" }); return;
+    case "pad-posto": abrirPop("posto", el, { posto: el.dataset.posto, aba: "sempre" }); return;
+    case "pad-semvaga": mudarVagasPeriodo(postoPorId(el.dataset.posto), el.dataset.per, 0); return;
+    case "pad-vagas": { const p = postoPorId(ui.menu.posto); fecharMenu(); mudarVagasPeriodo(p, el.dataset.per, Number(el.dataset.n)); return; }
     case "pop-secao": abrirPop("secao", el, { secao: el.dataset.secao }); return;
     case "pop-aba": ui.pop.aba = el.dataset.aba; ui.pop.confirmarDesativar = false; desenharPop(); return;
     case "step": { const i = $("#" + el.dataset.alvo); i.value = Math.max(0, Math.min(9, (Number(i.value) || 0) + Number(el.dataset.d))); return; }
@@ -2231,6 +2335,29 @@ document.addEventListener("click", (e) => {
     case "abrir-ficha": ui.gm = el.dataset.gm; ui.mes = mesDe(ui.dia); ui.view = "ficha"; ui.drawer = null; location.hash = "ficha"; render(); window.scrollTo(0, 0); break;
     case "ir-dia": ui.dia = el.dataset.dia; ui.view = "quadro"; location.hash = "quadro"; render(); break;
     case "fechar": ui.drawer = null; render(); break;
+    case "fin-abrir": abrirFinalizar(ui.dia); return;
+    case "fin-pendentes": { const dias = diasEmAberto(data, ui.mes, somaDias(hojeBase(), -1)); if (!dias.length) { toast("Nenhum dia em aberto até ontem."); return; } ui.drawer = { tipo: "finalizar", dias, fora: [] }; render(); return; }
+    case "fin-incluir": { const d = ui.drawer; d.dias = [...d.abertosAntes, ...d.dias]; d.abertosAntes = []; render(); return; }
+    case "fin-ok": {
+      const d = ui.drawer, fora = new Set(d.fora || []);
+      const min = d.dias.flatMap((dia) => heDoDia(data, dia)).filter((h) => !fora.has(h.id)).reduce((t, h) => t + h.min, 0);
+      mudar(`${d.dias.length === 1 ? `Escala de ${ddmm(d.dias[0])} finalizada` : `${d.dias.length} dias finalizados`}: ${fmtHoras(min)} de HE no controle`, () => { finalizar(d.dias, fora); ui.drawer = null; });
+      return;
+    }
+    case "fin-reabrir": {
+      const dia = ui.dia, editados = (data.controle || []).filter((c) => c.dia === dia && c.editado && !c.manual).length;
+      if (editados && !confirm(`${editados} lançamento(s) deste dia foram corrigidos no controle. Reabrir apaga essas correções. Continuar?`)) return;
+      mudar(`Escala de ${ddmm(dia)} reaberta: as HEs do dia saíram do controle até finalizar de novo`, () => { data.controle = (data.controle || []).filter((c) => c.dia !== dia || c.manual); });
+      return;
+    }
+    case "abrir-controle": ui.drawer = { tipo: "controle", gm: el.dataset.gm, mes: ui.mes }; render(); return;
+    case "ctl-del": { const c = data.controle.find((x) => x.id === el.dataset.ctl); mudar(`Controle: lançamento de ${nomeGm(c.gm)} em ${ddmm(c.dia)} retirado`, () => { data.controle = data.controle.filter((x) => x !== c); }); return; }
+    case "ctl-add": {
+      const dia = $("#ctl-dia").value, min = lerHoras($("#ctl-h").value), obs = $("#ctl-o").value.trim(), g = ui.drawer.gm;
+      if (!dia || min === null || !min) { toast("Informe o dia e as horas (ex.: 6 ou -6)."); return; }
+      mudar(`Controle: ajuste de ${fmtHoras(Math.abs(min))}${min < 0 ? " a menos" : ""} para ${nomeGm(g)}`, () => { (data.controle ||= []).push({ id: novoId(), tipo: "HE", manual: true, dia, gm: g, min, obs }); });
+      return;
+    }
     case "srv-exemplo": {
       el.disabled = true; el.textContent = "Carregando…";
       const est = criarExemplo(); delete est._versao;
@@ -2241,7 +2368,7 @@ document.addEventListener("click", (e) => {
       return;
     }
     case "desfazer": if (SERVIDOR && desfazer.length) srv.resumos.push("Desfez a última alteração");
-      if (desfazer.length) { const u = JSON.parse(desfazer.pop()); data.ocorrencias = u.o; data.postos = u.p; data.secoes = u.s; data.gms = u.g; data.requerimentos = u.r; data.equipes = u.e; data._versao++; ui.plano = null; salvar(); render(); toast("Última alteração desfeita"); } break;
+      if (desfazer.length) { const u = JSON.parse(desfazer.pop()); data.ocorrencias = u.o; data.postos = u.p; data.secoes = u.s; data.gms = u.g; data.requerimentos = u.r; data.equipes = u.e; data.controle = u.c || []; data._versao++; ui.plano = null; salvar(); render(); toast("Última alteração desfeita"); } break;
     case "imprimir": window.print(); break;
     case "restaurar": ui.confirmar = "restaurar"; $("#restaurar").outerHTML = `<button id="restaurar" class="btn perigo" data-act="restaurar-ok">Apagar meus lançamentos e restaurar</button>`; return;
     case "restaurar-ok": try { localStorage.removeItem(CHAVE); } catch { /* ignora */ } data = criarExemplo(); desfazer.length = 0; $("#restaurar").outerHTML = `<button id="restaurar" class="link" data-act="restaurar">Restaurar exemplo</button>`; render(); toast("Dados de exemplo restaurados"); break;
@@ -2264,6 +2391,19 @@ document.addEventListener("change", (e) => {
   const id = e.target.id, v = e.target.value;
   if (id === "pad-desde" && v) { ui.padrao.desde = v; ui.padrao.mes = mesDe(v); render(); return; }
   if (e.target.closest?.(".form-hf")) { previaHorarioFixo(); return; }
+  if (e.target.dataset?.fin) { // confirmação da finalização: marca/desmarca sem redesenhar
+    const fora = new Set(ui.drawer.fora); if (e.target.checked) fora.delete(e.target.dataset.fin); else fora.add(e.target.dataset.fin); ui.drawer.fora = [...fora];
+    const min = [...document.querySelectorAll("[data-fin]:checked")].reduce((t, x) => t + Number(x.dataset.min), 0);
+    $("#fin-ok").textContent = `Finalizar e lançar ${fmtHoras(min)} no controle`; return;
+  }
+  if (e.target.dataset?.ctl && e.target.matches(".ctl-h, .ctl-o")) {
+    const c = data.controle.find((x) => x.id === e.target.dataset.ctl); if (!c) return;
+    if (e.target.matches(".ctl-h")) {
+      const min = lerHoras(v); if (min === null) { toast("Horas inválidas. Use, por exemplo, 6 ou 6:30."); render(); return; }
+      mudar(`Controle: ${nomeGm(c.gm)} em ${ddmm(c.dia)} passa para ${fmtHoras(min)}`, () => { c.min = min; c.editado = true; });
+    } else mudar(`Controle: observação de ${nomeGm(c.gm)} em ${ddmm(c.dia)}`, () => { c.obs = v.trim(); c.editado = true; });
+    return;
+  }
   if (id === "aj-bras-esq" || id === "aj-bras-dir") {
     const f = e.target.files?.[0];
     if (!f) return;

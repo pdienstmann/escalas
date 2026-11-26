@@ -319,7 +319,7 @@ const compararPrioridade = (teto) => (a, b) => {
 // Duas saídas: remanejar quem está na reserva técnica / à disposição (sem custo) ou chamar HE.
 export function sugerir(data, dia, postoId, ini, fim) {
   const mes = mesDe(dia);
-  const livro = livroMes(data, mes);
+  const livro = horasParaSugestao(data, mes);
   const cd = calcularDia(data, dia);
   const reserva = new Set(data.postos.filter((p) => p.tipo === "reserva").map((p) => p.id));
   const livreParaRemanejar = (d) => d.nat !== "he" && d.nat !== "bh" && (d.posto === null || reserva.has(d.posto));
@@ -420,6 +420,62 @@ export function livroMes(data, mes) {
   return livro;
 }
 
+// ---------- controle de horas extras ----------
+// A escala calcula a HE prevista; o controle só recebe o que foi confirmado ao finalizar a escala do dia,
+// e cada lançamento pode ser corrigido depois (o RH é quem sabe se o GM compareceu).
+// data.controle: { id, tipo: "FECHADO", dia, quando } e { id, tipo: "HE", dia, gm, min, posto, ini, fim, fixa, manual, obs }
+export const diaFinalizado = (data, dia) => (data.controle || []).some((c) => c.tipo === "FECHADO" && c.dia === dia);
+// HE do dia como vai para o controle (uma linha por trecho de HE)
+export function heDoDia(data, dia) {
+  return calcularDia(data, dia).designacoes.filter((d) => d.nat === "he" && d.gm).map((d) => ({
+    id: `h${dia.replaceAll("-", "")}${d.id}`, tipo: "HE", dia, gm: d.gm, min: d.fim - d.ini, posto: d.posto, ini: fmtHm(d.ini), fim: fmtHm(d.fim),
+    fixa: !!(d.fixa || d.recorrente), req: d.fixa ? "" : d.req || "",
+  }));
+}
+// Dias do mês até `ate` que ainda não foram finalizados
+export function diasEmAberto(data, mes, ate) {
+  return diasDoMes(mes).filter((d) => d <= ate && !diaFinalizado(data, d));
+}
+// HE confirmada no controle, com o teto e o que passa para o mês seguinte (mesma regra de livroMes)
+export function controleMes(data, mes) {
+  const teto = (data.config?.tetoHE ?? 60) * 60, ctl = (data.controle || []).filter((c) => c.tipo === "HE");
+  let m = data.config?.mesInicial || mes;
+  if (mes < m) m = mes;
+  const transporte = new Map(Object.entries(data.config?.transporteInicial || {}).map(([k, v]) => [k, v * 60]));
+  let livro;
+  for (let guarda = 0; guarda < 240; guarda++) {
+    const he = new Map(), fixa = new Map();
+    for (const c of ctl) if (c.dia.startsWith(m)) { he.set(c.gm, (he.get(c.gm) || 0) + Number(c.min || 0)); if (c.fixa) fixa.set(c.gm, (fixa.get(c.gm) || 0) + Number(c.min || 0)); }
+    livro = new Map();
+    for (const gm of data.gms) {
+      const anterior = transporte.get(gm.id) || 0, x = he.get(gm.id) || 0, total = anterior + x, paga = Math.max(0, Math.min(teto, total));
+      livro.set(gm.id, { he: x, heFixa: fixa.get(gm.id) || 0, transporte: anterior, total, paga, proximo: Math.max(0, total - paga) });
+    }
+    if (m >= mes) break;
+    for (const [id, l] of livro) transporte.set(id, l.proximo);
+    m = mesSeguinte(m);
+  }
+  return livro;
+}
+// Horas para escolher quem chamar: o que já está no controle (com as correções) + o previsto nos dias em aberto
+const cacheSug = new WeakMap();
+export function horasParaSugestao(data, mes) {
+  const chave = `${data._versao}|${mes}`, c0 = cacheSug.get(data);
+  if (c0?.chave === chave) return c0.r;
+  const r0 = horasSugestaoCalc(data, mes); cacheSug.set(data, { chave, r: r0 }); return r0;
+}
+function horasSugestaoCalc(data, mes) {
+  const ctl = controleMes(data, mes), prev = previstaMes(data, mes), r = new Map();
+  for (const g of data.gms) { const c = ctl.get(g.id) || {}; r.set(g.id, { he: (c.he || 0) + (prev.get(g.id) || 0), transporte: c.transporte || 0 }); }
+  return r;
+}
+// HE prevista pela escala nos dias do mês que ainda não foram finalizados
+export function previstaMes(data, mes) {
+  const r = new Map();
+  for (const d of diasDoMes(mes)) if (!diaFinalizado(data, d)) for (const h of heDoDia(data, d)) r.set(h.gm, (r.get(h.gm) || 0) + h.min);
+  return r;
+}
+
 // Saldo acumulado de banco de horas até o fim do mês.
 export function saldoBH(data, gmId, mes) {
   let m = data.config?.mesInicial || mes, s = 0;
@@ -457,7 +513,7 @@ export function planejarCobertura(data, dias) {
   const reserva = new Set(data.postos.filter((p) => p.tipo === "reserva").map((p) => p.id));
   for (const dia of dias) {
     const cd = calcularDia(data, dia);
-    const livro = livroMes(data, mesDe(dia));
+    const livro = horasParaSugestao(data, mesDe(dia));
     const afast = new Set(data.ocorrencias.filter((o) => (["FERIAS", "LICENCA", "ATESTADO", "CURSO"].includes(o.tipo) && ocorrenciaCobre(o, dia)) || (DE_UM_DIA.includes(o.tipo) && o.de === dia)).map((o) => o.gm));
     const ocup = new Map();
     const marca = (g, a, b) => { if (!ocup.has(g)) ocup.set(g, []); ocup.get(g).push([a, b]); };
