@@ -365,6 +365,35 @@ td.alvo-drop { box-shadow: inset 0 0 0 3px var(--accent); background: var(--acce
 .fantasma { position: fixed; left: 0; top: 0; z-index: 80; pointer-events: none; background: var(--surface); border: 2px solid var(--accent); border-radius: 6px; padding: .25rem .55rem; box-shadow: 0 8px 20px rgba(0,0,0,.25); font: 600 .88rem var(--f-grid); white-space: nowrap; }
 .fantasma span { font: 400 .78rem var(--f-num); color: var(--muted); }
 
+/* modo colar (como o pincel do Excel) */
+.colando { position: fixed; z-index: 65; left: 50%; transform: translateX(-50%); top: calc(env(safe-area-inset-top, 0px) + 8px); display: flex; gap: 1rem; align-items: center; background: var(--accent); color: var(--accent-ink); padding: .5rem .9rem; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.25); max-width: calc(100% - 32px); }
+.colando .link { color: var(--accent-ink); text-decoration: underline; }
+body.modo-colar table.quadro td[data-posto] { cursor: copy; }
+body.modo-colar table.quadro td[data-posto]:hover { box-shadow: inset 0 0 0 3px var(--accent); }
+body.modo-colar table.quadro td[data-posto] * { cursor: copy !important; }
+
+/* edição direta na planilha */
+table.quadro td[data-posto]:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+table.quadro button.chip[data-des]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.chip .nm, .chip .hr { border-radius: 3px; }
+@media (hover: hover) { .chip .nm:hover, .chip .hr:hover { background: var(--surface); color: var(--accent); box-shadow: 0 0 0 1px var(--accent); } }
+.inline { position: fixed; z-index: 75; }
+.ed-in { width: 100%; box-sizing: border-box; font: 600 .95rem var(--f-grid); padding: .3rem .45rem; border: 2px solid var(--accent); border-radius: 4px; background: var(--surface); color: var(--ink); box-shadow: 0 6px 18px rgba(0,0,0,.18); }
+.ed-in.hora { font: 600 .95rem var(--f-num); }
+.ed-dica { margin-top: 3px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 4px; padding: .2rem .45rem; font-size: .78rem; color: var(--muted); white-space: nowrap; box-shadow: 0 6px 18px rgba(0,0,0,.12); }
+.ed-dica.erro { color: var(--furo); }
+.ed-lista-box { position: absolute; left: 0; top: calc(100% + 3px); width: max(100%, 300px); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.22); padding: 4px; }
+.ed-lista-box.cima { top: auto; bottom: calc(100% + 3px); }
+.ed-titulo { margin: 0; padding: .2rem .5rem .3rem; font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+#ed-lista { list-style: none; margin: 0; padding: 0; max-height: 300px; overflow-y: auto; }
+#ed-lista li[data-i] { display: flex; justify-content: space-between; gap: 1rem; padding: .32rem .5rem; border-radius: 4px; cursor: default; font-size: .88rem; }
+#ed-lista li[data-i] b { font-family: var(--f-grid); }
+#ed-lista li[data-i] span { color: var(--muted); font-size: .78rem; white-space: nowrap; }
+#ed-lista li[aria-selected="true"], #ed-lista li[data-i]:hover { background: var(--accent-soft); }
+#ed-lista li.bloq { opacity: .45; }
+#ed-lista li.ed-resto { padding: .3rem .5rem; font-size: .78rem; color: var(--muted); }
+.ed-mais { font-size: .8rem; padding: .2rem .5rem; }
+
 /* modo servidor */
 .sync { align-self: center; font-size: .8rem; font-weight: 600; padding: .2rem .5rem; border-radius: 999px; white-space: nowrap; }
 .sync.ok { color: var(--ok); } .sync.salvando { color: var(--muted); } .sync.erro { color: var(--furo); background: var(--furo-bg); }
@@ -517,5 +546,7 @@ td.m-furo button:hover { outline: 2px solid var(--ink); }
 <aside id="drawer" hidden aria-label="Detalhes"></aside>
 <div id="pop" class="pop" role="dialog" aria-modal="false" hidden></div>
 <div id="menu" class="menu" role="menu" aria-label="Opções" hidden></div>
+<div id="inline" class="inline" hidden></div>
+<div id="colando" class="colando" role="status" hidden></div>
 <div id="toast" role="status" hidden></div>
 <script type="module" src="app.js"></script>

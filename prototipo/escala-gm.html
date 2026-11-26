@@ -372,6 +372,35 @@ td.alvo-drop { box-shadow: inset 0 0 0 3px var(--accent); background: var(--acce
 .fantasma { position: fixed; left: 0; top: 0; z-index: 80; pointer-events: none; background: var(--surface); border: 2px solid var(--accent); border-radius: 6px; padding: .25rem .55rem; box-shadow: 0 8px 20px rgba(0,0,0,.25); font: 600 .88rem var(--f-grid); white-space: nowrap; }
 .fantasma span { font: 400 .78rem var(--f-num); color: var(--muted); }
 
+/* modo colar (como o pincel do Excel) */
+.colando { position: fixed; z-index: 65; left: 50%; transform: translateX(-50%); top: calc(env(safe-area-inset-top, 0px) + 8px); display: flex; gap: 1rem; align-items: center; background: var(--accent); color: var(--accent-ink); padding: .5rem .9rem; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.25); max-width: calc(100% - 32px); }
+.colando .link { color: var(--accent-ink); text-decoration: underline; }
+body.modo-colar table.quadro td[data-posto] { cursor: copy; }
+body.modo-colar table.quadro td[data-posto]:hover { box-shadow: inset 0 0 0 3px var(--accent); }
+body.modo-colar table.quadro td[data-posto] * { cursor: copy !important; }
+
+/* edição direta na planilha */
+table.quadro td[data-posto]:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+table.quadro button.chip[data-des]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.chip .nm, .chip .hr { border-radius: 3px; }
+@media (hover: hover) { .chip .nm:hover, .chip .hr:hover { background: var(--surface); color: var(--accent); box-shadow: 0 0 0 1px var(--accent); } }
+.inline { position: fixed; z-index: 75; }
+.ed-in { width: 100%; box-sizing: border-box; font: 600 .95rem var(--f-grid); padding: .3rem .45rem; border: 2px solid var(--accent); border-radius: 4px; background: var(--surface); color: var(--ink); box-shadow: 0 6px 18px rgba(0,0,0,.18); }
+.ed-in.hora { font: 600 .95rem var(--f-num); }
+.ed-dica { margin-top: 3px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 4px; padding: .2rem .45rem; font-size: .78rem; color: var(--muted); white-space: nowrap; box-shadow: 0 6px 18px rgba(0,0,0,.12); }
+.ed-dica.erro { color: var(--furo); }
+.ed-lista-box { position: absolute; left: 0; top: calc(100% + 3px); width: max(100%, 300px); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.22); padding: 4px; }
+.ed-lista-box.cima { top: auto; bottom: calc(100% + 3px); }
+.ed-titulo { margin: 0; padding: .2rem .5rem .3rem; font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+#ed-lista { list-style: none; margin: 0; padding: 0; max-height: 300px; overflow-y: auto; }
+#ed-lista li[data-i] { display: flex; justify-content: space-between; gap: 1rem; padding: .32rem .5rem; border-radius: 4px; cursor: default; font-size: .88rem; }
+#ed-lista li[data-i] b { font-family: var(--f-grid); }
+#ed-lista li[data-i] span { color: var(--muted); font-size: .78rem; white-space: nowrap; }
+#ed-lista li[aria-selected="true"], #ed-lista li[data-i]:hover { background: var(--accent-soft); }
+#ed-lista li.bloq { opacity: .45; }
+#ed-lista li.ed-resto { padding: .3rem .5rem; font-size: .78rem; color: var(--muted); }
+.ed-mais { font-size: .8rem; padding: .2rem .5rem; }
+
 /* modo servidor */
 .sync { align-self: center; font-size: .8rem; font-weight: 600; padding: .2rem .5rem; border-radius: 999px; white-space: nowrap; }
 .sync.ok { color: var(--ok); } .sync.salvando { color: var(--muted); } .sync.erro { color: var(--furo); background: var(--furo-bg); }
@@ -524,6 +553,8 @@ td.m-furo button:hover { outline: 2px solid var(--ink); }
 <aside id="drawer" hidden aria-label="Detalhes"></aside>
 <div id="pop" class="pop" role="dialog" aria-modal="false" hidden></div>
 <div id="menu" class="menu" role="menu" aria-label="Opções" hidden></div>
+<div id="inline" class="inline" hidden></div>
+<div id="colando" class="colando" role="status" hidden></div>
 <div id="toast" role="status" hidden></div>
 <script>
 (() => {
@@ -1434,7 +1465,7 @@ function vQuadro() {
           if (furo) h += `<button class="furo" data-act="pop-add" data-posto="${p.id}" data-turno="${t.id}">Cobrir · falta ${furo.faltam}</button>`;
           if (!aqui.length && !furo) h = p.rondas ? `<span class="rondas">VTR/RONDAS FREQUENTES</span>` : naoHoje && p.vagas ? `<span class="vazio">não funciona hoje</span>` : "";
           if (!furo) h += `<button class="add" data-act="pop-add" data-posto="${p.id}" data-turno="${t.id}" aria-label="Pôr GM em ${esc(p.nome)}, ${t.nome}">+ pôr GM</button>`;
-          return `<td class="${t.id === "t2" || t.id === "t3" ? "dia" : "noite"}" data-posto="${p.id}" data-turno="${t.id}">${h}</td>`;
+          return `<td class="${t.id === "t2" || t.id === "t3" ? "dia" : "noite"}" data-posto="${p.id}" data-turno="${t.id}" tabindex="-1">${h}</td>`;
         }).join("");
       }
       const aj = cd.ajustesPosto.get(p.id) || {};
@@ -1475,9 +1506,8 @@ function vQuadro() {
     <span><b>${new Set(cd.designacoes.filter((d) => d.posto).map((d) => d.gm)).size}</b> GMs escalados</span>
     <span><b>${cd.afastados.length}</b> fora da escala</span>
     <label class="toggle"><input type="checkbox" id="q-sofuros" ${ui.soFuros ? "checked" : ""}> Só furos</label>
-    ${furosTotal ? `<button class="btn pri" data-act="auto" data-dias="1">Preencher furos sozinho</button>` : ""}
   </div>
-  <p class="dica como">Clique em qualquer nome, posto, viatura ou seção para mudar. <b>Botão direito</b> mostra todas as opções. <b>Arraste</b> o GM para outro posto ou turno.</p>
+  <p class="dica como">Clique no <b>nome</b> ou no <b>horário</b> para editar ali mesmo · <b>botão direito</b> mostra todas as opções · <b>arraste</b> para remanejar · setas, Enter, Delete, Ctrl+C e Ctrl+V também funcionam.</p>
   ${painelPlano()}
   ${cd.alertas.length ? `<div class="alertas">${cd.alertas.map((a) => `<p class="${a.nivel}">${esc(a.texto)}</p>`).join("")}</div>` : ""}
   ${disp}
@@ -2272,6 +2302,8 @@ function itensGm(d) {
     { t: "Afastamento (férias, licença, curso)…", act: "mn-drawer", d: { acao: "afast" } },
     { t: "Mudar lotação…", act: "mn-drawer", d: { acao: "lotacao" } },
     { sep: true },
+    { t: "Copiar", act: "mn-copiar", atalho: "Ctrl+C" },
+    { sep: true },
     { t: "Ver ficha do GM", act: "mn-ficha" },
     ...(req ? [{ t: `Ver tudo do REQ ${req}`, act: "mn-req", d: { req } }] : []),
     ...itensGerais(),
@@ -2295,6 +2327,7 @@ function itensCelula(posto, turno) {
   const cd = calcularDia(data, ui.dia);
   return [
     { t: "Pôr GM aqui…", act: "mn-add", d: { posto, turno }, padrao: true },
+    ...(ui.copiado ? [{ t: `Colar ${nomeGm(ui.copiado.gm)} aqui`, act: "mn-colar", atalho: "Ctrl+V" }] : []),
     ...(cd.furos.length ? [{ t: "Preencher furos do dia sozinho", act: "auto", d: { dias: "1" } }] : []),
     { sep: true },
     ...itensPosto(postoPorId(posto)).slice(0, 2),
@@ -2399,7 +2432,7 @@ function encerrarArrasto() {
   marcarAlvo(null);
 }
 document.addEventListener("pointerdown", (e) => {
-  if (e.pointerType !== "mouse" || e.button !== 0) return; // no toque, use o toque longo (menu) para mover
+  if (e.pointerType !== "mouse" || e.button !== 0 || ui.colando) return; // no toque, use o toque longo (menu) para mover
   const el = e.target.closest("table.quadro button.chip[data-des]");
   if (!el) return;
   const d = ui.desMap.get(el.dataset.des);
@@ -2431,14 +2464,18 @@ document.addEventListener("pointerup", (e) => {
 });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && arr.ativo) { encerrarArrasto(); arr.d = null; ui.ignorarClique = Date.now(); } });
 
-function opcoesSoltar(d, alvo) {
+function opcoesSoltar(d, alvo, copia = false) {
   const t = TURNOS.find((x) => x.id === alvo.turno), p = postoPorId(alvo.posto), pn = p.nome;
   const he = ehHeLancada(d), quem = nomeGm(d.gm);
   const noTurno = sobrepoe(d.ini, d.fim, t.ini, t.fim) > 0;
   const mesmoPosto = d.posto === alvo.posto;
   const it = [];
   const outro = alvo.des && alvo.des.gm !== d.gm ? alvo.des : null;
-  if (he) {
+  if (he && copia) {
+    // colar uma hora extra cria outra hora extra para a mesma pessoa no destino
+    const ocupado = ocupadoEm(d.gm, t.ini, t.fim);
+    it.push({ t: `Hora extra para ${quem} em ${pn} ${fmtHm(t.ini)}–${fmtHm(t.fim)} (${fmtHoras(t.fim - t.ini)})${ocupado ? " · já está trabalhando nesse horário" : ""}`, act: "dr-he", padrao: true, desab: ocupado });
+  } else if (he) {
     // hora extra lançada: só muda de lugar/horário
     const [a, b] = noTurno ? [d.ini, d.fim] : [t.ini, t.fim];
     const ocupado = ocupadoEm(d.gm, a, b, d);
@@ -2461,6 +2498,219 @@ function opcoesSoltar(d, alvo) {
   return [...it, { sep: true }, { t: "Cancelar", act: "dr-cancelar" }];
 }
 
+// ---------- EDIÇÃO DIRETA NA PLANILHA ----------
+// Clique no horário ou no nome: o texto vira um campo ali mesmo (Enter salva, Esc cancela).
+// Célula selecionada + digitar = pôr alguém. Setas andam pela planilha. Ctrl+C/Ctrl+V copiam um GM.
+const ed = { modo: null, d: null, el: null, lista: [], sel: 0, ctx: null, aberto: 0 };
+
+// "7-21", "07:00 às 21:00", "19 01", "7h30-17h" → ["07:00", "21:00"]
+function parseFaixa(txt) {
+  const m = [...String(txt).matchAll(/(\d{1,2})(?:[:hH.]?(\d{2}))?/g)].slice(0, 2);
+  if (m.length < 2) return null;
+  const f = ([, h, mi]) => { const H = Number(h), M = Number(mi || 0); return H > 24 || M > 59 ? null : `${String(H % 24).padStart(2, "0")}:${String(M).padStart(2, "0")}`; };
+  const a = f(m[0]), b = f(m[1]);
+  return a && b && a !== b ? [a, b] : null;
+}
+function aplicarHorario(d, ini, fim) {
+  const [a, b] = intervalo(ini, fim);
+  if (ehHeLancada(d)) { mudar(`Horário da hora extra de ${nomeGm(d.gm)}: ${ini}–${fim}`, () => Object.assign(data.ocorrencias.find((x) => x.id === d.origem), { ini, fim })); return; }
+  const alvo = d.alvo || `${d.ini}-${d.fim}`, [a0, b0] = alvo.split("-").map(Number), quem = d.titular || d.gm;
+  const atual = data.ocorrencias.find((o) => o.tipo === "HORARIO" && o.gm === quem && o.de === ui.dia && o.alvo === alvo);
+  const extra = b - a - sobrepoe(a, b, a0, b0);
+  mudar(`${nomeGm(d.gm)}: ${ini}–${fim}${extra > 0 ? ` (${fmtHoras(extra)} de hora extra)` : ""}`, () => {
+    if (a === a0 && b === b0 && !atual?.req && !atual?.obs) { if (atual) data.ocorrencias = data.ocorrencias.filter((o) => o !== atual); }
+    else if (atual) Object.assign(atual, { ini, fim });
+    else data.ocorrencias.push({ id: novoId(), tipo: "HORARIO", gm: quem, de: ui.dia, alvo, ini, fim });
+  });
+}
+function consequenciaHorario(d, ini, fim) {
+  const [a, b] = intervalo(ini, fim);
+  if (ehHeLancada(d) || d.fixa) return `Hora extra de ${fmtHoras(b - a)}`;
+  const [a0, b0] = (d.alvo || `${d.ini}-${d.fim}`).split("-").map(Number);
+  const extra = b - a - sobrepoe(a, b, a0, b0), falta = b0 - a0 - sobrepoe(a, b, a0, b0);
+  return [extra > 0 ? `+${fmtHoras(extra)} de hora extra` : "", falta > 0 ? `${fmtHoras(falta)} a menos que o normal` : ""].filter(Boolean).join(" · ") || "Horário normal";
+}
+function substituirGm(d, X, via, m) {
+  const T = d.gm;
+  if (m === "TROCA") { mudar(`${nomeGm(X)} assume o serviço de ${nomeGm(T)} (troca)`, () => data.ocorrencias.push({ id: novoId(), tipo: "TROCA", gm: T, substituto: X, de: ui.dia })); return; }
+  mudar(`${TIPOS[m]} para ${nomeGm(T)}; ${nomeGm(X)} ${via === "rem" ? "remanejado" : "com hora extra"}`, () => {
+    data.ocorrencias.push({ id: novoId(), tipo: m, gm: T, de: ui.dia });
+    if (via === "rem") data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: X, de: ui.dia, ate: ui.dia, posto: d.posto, obs: "Remanejado" });
+    else data.ocorrencias.push({ id: novoId(), tipo: "HE", gm: X, de: ui.dia, ini: fmtHm(d.ini), fim: fmtHm(d.fim), posto: d.posto, req: "" });
+  });
+}
+
+function abrirEditor(modo, el, ctx) {
+  fecharMenu(); fecharPop(); fecharEditor();
+  const r = el.getBoundingClientRect(), box = $("#inline");
+  Object.assign(ed, { modo, el, ctx, d: ctx.des || null, sel: 0, aberto: Date.now() });
+  if (modo === "hora") {
+    const v = valoresCartao(ed.d);
+    box.innerHTML = `<input id="ed-in" class="ed-in hora" value="${v.ini}–${v.fim}" aria-label="Horário: entrada e saída" autocomplete="off" spellcheck="false"><div id="ed-dica" class="ed-dica"></div>`;
+  } else {
+    const titulo = modo === "nome" ? `No lugar de ${nomeGm(ed.d.gm)}` : `${postoPorId(ctx.posto).nome} · ${TURNOS.find((t) => t.id === ctx.turno).nome.toLowerCase()}`;
+    box.innerHTML = `<input id="ed-in" class="ed-in" value="${esc(ctx.inicial || "")}" placeholder="Digite o nome do GM" aria-label="${esc(titulo)}" role="combobox" aria-expanded="true" aria-controls="ed-lista" autocomplete="off" spellcheck="false">
+      <div class="ed-lista-box"><p class="ed-titulo">${esc(titulo)}</p><ul id="ed-lista" role="listbox"></ul><button class="link ed-mais" data-act="ed-mais">Mais opções…</button></div>`;
+  }
+  box.hidden = false;
+  box.style.left = Math.max(4, Math.min(r.left - 2, innerWidth - 284)) + "px";
+  box.style.top = r.top - 2 + "px";
+  box.style.minWidth = Math.max(r.width + 4, modo === "hora" ? 150 : 260) + "px";
+  const inp = $("#ed-in");
+  inp.focus();
+  if (modo === "hora") { inp.select(); atualizarDicaHora(); }
+  else { const n = inp.value.length; inp.setSelectionRange(n, n); atualizarLista(); }
+  // se não couber embaixo, a lista abre para cima
+  const lb = box.querySelector(".ed-lista-box");
+  if (lb) lb.classList.toggle("cima", r.bottom + lb.offsetHeight + 8 > innerHeight && r.top > lb.offsetHeight + 8);
+}
+function fecharEditor(devolverFoco) {
+  const box = $("#inline");
+  if (!box || box.hidden) return;
+  box.hidden = true; box.innerHTML = "";
+  const el = ed.el; ed.modo = null;
+  if (devolverFoco && el?.isConnected) el.focus();
+}
+function atualizarDicaHora() {
+  const f = parseFaixa($("#ed-in").value), dica = $("#ed-dica");
+  dica.textContent = f ? `${f[0]}–${f[1]} · ${consequenciaHorario(ed.d, f[0], f[1])} · Enter salva` : "Ex.: 7-19, 13-01, 19 07";
+  dica.classList.toggle("erro", !f);
+}
+function candidatosEditor() {
+  let ini, fim, posto;
+  if (ed.modo === "nome") ({ ini, fim, posto } = ed.d);
+  else { const t = TURNOS.find((x) => x.id === ed.ctx.turno); [ini, fim, posto] = [t.ini, t.fim, ed.ctx.posto]; }
+  const { remanejar, he } = sugerir(data, ui.dia, posto, ini, fim);
+  return [...remanejar.map((x) => ({ ...x, via: "rem" })), ...he.map((x) => ({ ...x, via: "he" }))].map((x) => ({ ...x, dur: fim - ini }));
+}
+function atualizarLista() {
+  const q = norm($("#ed-in").value.trim());
+  const todos = candidatosEditor().filter((x) => !q || norm(x.gm.nome).includes(q));
+  todos.sort((a, b) => (q ? (norm(b.gm.nome).startsWith(q) - norm(a.gm.nome).startsWith(q)) : 0));
+  ed.lista = todos.slice(0, 8);
+  if (ed.sel >= ed.lista.length) ed.sel = 0;
+  $("#ed-lista").innerHTML = ed.lista.length ? ed.lista.map((x, i) => `<li role="option" id="ed-op-${i}" aria-selected="${i === ed.sel}" aria-disabled="${!!x.bloqueado}" data-i="${i}" class="${x.bloqueado ? "bloq" : ""}">
+    <b>${esc(x.gm.nome)}</b><span>${x.via === "rem" ? `${esc(x.origem.toLowerCase())} · sem custo` : `${x.gm.equipe} · ${fmtHoras(x.heMes)} HE no mês${x.bloqueado ? " · não faz HE" : ""}`}</span></li>`).join("")
+    + (todos.length > 8 ? `<li class="ed-resto" aria-hidden="true">+ ${todos.length - 8} — continue digitando</li>` : "")
+    : `<li class="ed-resto">Ninguém livre com esse nome nesse horário</li>`;
+  $("#ed-in").setAttribute("aria-activedescendant", ed.lista.length ? `ed-op-${ed.sel}` : "");
+}
+function escolherEditor(i) {
+  const x = ed.lista[i];
+  if (!x || x.bloqueado) return;
+  const { modo, d, ctx, el } = ed, X = x.gm.id;
+  fecharEditor();
+  if (modo === "add") {
+    const t = TURNOS.find((y) => y.id === ctx.turno), pn = postoPorId(ctx.posto).nome;
+    if (x.via === "rem") mudar(`${nomeGm(X)} remanejado para ${pn}`, () => data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: X, de: ui.dia, ate: ui.dia, posto: ctx.posto, obs: "Remanejado" }));
+    else mudar(`${nomeGm(X)} com hora extra ${fmtHm(t.ini)}–${fmtHm(t.fim)} em ${pn}`, () => data.ocorrencias.push({ id: novoId(), tipo: "HE", gm: X, de: ui.dia, ini: fmtHm(t.ini), fim: fmtHm(t.fim), posto: ctx.posto, req: "" }));
+    return;
+  }
+  if (ehHeLancada(d)) { mudar(`Hora extra passou para ${nomeGm(X)}`, () => { data.ocorrencias.find((o) => o.id === d.origem).gm = X; }); return; }
+  if (d.nat === "troca") { mudar(`Troca: agora ${nomeGm(X)} cobre ${nomeGm(d.titular)}`, () => { data.ocorrencias.find((o) => o.id === d.origem).substituto = X; }); return; }
+  const T = nomeGm(d.gm), r = el.getBoundingClientRect();
+  abrirMenu([
+    { t: `O que aconteceu com ${T}?`, act: "ed-nada", desab: true },
+    { sep: true },
+    { t: "Trocaram de serviço (sem hora extra)", act: "ed-motivo", d: { m: "TROCA" } },
+    { t: "Folga", act: "ed-motivo", d: { m: "FOLGA" } },
+    { t: "Faltou", act: "ed-motivo", d: { m: "FALTA" } },
+    { t: "Atestado", act: "ed-motivo", d: { m: "ATESTADO" } },
+    { t: "Compensação de banco de horas", act: "ed-motivo", d: { m: "BH_COMP" } },
+    { sep: true }, { t: "Cancelar", act: "dr-cancelar" },
+  ], r.left, r.bottom + 2, el, { des: d, escolhido: X, via: x.via });
+}
+
+// teclado dentro do editor
+document.addEventListener("keydown", (e) => {
+  if (!ed.modo || e.target.id !== "ed-in") return;
+  if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); fecharEditor(true); return; }
+  if (ed.modo !== "hora" && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v" && ui.copiado && !e.target.value) {
+    e.preventDefault(); const alvo = ed.el; fecharEditor(); colar(alvo); return; // colar o GM copiado nesta célula
+  }
+  if (ed.modo === "hora") {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const f = parseFaixa(e.target.value);
+      if (!f) { atualizarDicaHora(); return; }
+      const d = ed.d; fecharEditor(); aplicarHorario(d, f[0], f[1]);
+    }
+    return;
+  }
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); if (ed.lista.length) { ed.sel = (ed.sel + (e.key === "ArrowDown" ? 1 : -1) + ed.lista.length) % ed.lista.length; atualizarLista(); } }
+  else if (e.key === "Enter") { e.preventDefault(); escolherEditor(ed.sel); }
+}, true);
+document.addEventListener("input", (e) => {
+  if (e.target.id !== "ed-in") return;
+  if (ed.modo === "hora") atualizarDicaHora(); else { ed.sel = 0; atualizarLista(); }
+});
+document.addEventListener("mousedown", (e) => {
+  const li = e.target.closest("#ed-lista li[data-i]");
+  if (li) { e.preventDefault(); escolherEditor(Number(li.dataset.i)); return; }
+  if (ed.modo && !e.target.closest("#inline")) fecharEditor();
+});
+window.addEventListener("scroll", () => { if (ed.modo && Date.now() - ed.aberto > 400) fecharEditor(); }, { passive: true });
+document.addEventListener("scroll", (e) => { if (ed.modo && e.target !== document && !e.target.closest?.("#inline")) fecharEditor(); }, { passive: true, capture: true });
+
+// navegação e atalhos na planilha
+function focaveisPlanilha() { return [...document.querySelectorAll("table.quadro button.chip[data-des], table.quadro td[data-posto]")].filter((el) => el.tagName !== "TD" || !el.querySelector("button.chip")); }
+function moverSelecao(dir) {
+  const atual = document.activeElement, r0 = atual.getBoundingClientRect(), cx = r0.left + r0.width / 2, cy = r0.top + r0.height / 2;
+  let melhor = null, nota = Infinity;
+  for (const el of focaveisPlanilha()) {
+    if (el === atual) continue;
+    const r = el.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2, dx = x - cx, dy = y - cy;
+    const [prim, sec] = dir === "ArrowDown" ? [dy, dx] : dir === "ArrowUp" ? [-dy, dx] : dir === "ArrowRight" ? [dx, dy] : [-dx, dy];
+    if (prim <= 4) continue;
+    const n = prim + Math.abs(sec) * 3;
+    if (n < nota) { nota = n; melhor = el; }
+  }
+  if (melhor) { melhor.focus(); melhor.scrollIntoView({ block: "nearest", inline: "nearest" }); }
+}
+function copiar(d) {
+  ui.copiado = { ...d }; ui.colando = true;
+  const f = $("#colando");
+  f.innerHTML = `<span><b>${esc(nomeGm(d.gm))}</b> copiado. Clique na célula onde quer colar.</span><button class="link" data-act="colar-cancelar">Cancelar (Esc)</button>`;
+  f.hidden = false;
+  document.body.classList.add("modo-colar");
+}
+function pararColar() { ui.colando = false; $("#colando").hidden = true; document.body.classList.remove("modo-colar"); }
+function colar(alvoEl) {
+  const td = alvoEl.closest("td[data-posto]");
+  if (!ui.copiado || !td) return;
+  pararColar();
+  const alvo = { td, posto: td.dataset.posto, turno: td.dataset.turno, des: null };
+  const itens = opcoesSoltar(ui.copiado, alvo, true);
+  const r = td.getBoundingClientRect();
+  if (itens.length) abrirMenu(itens, r.left + 8, r.top + 18, td, { des: ui.copiado, drop: alvo });
+  else toast(`${nomeGm(ui.copiado.gm)} já está aqui nesse horário.`);
+}
+document.addEventListener("keydown", (e) => {
+  if (ed.modo || !$("#menu").hidden || ui.pop) return;
+  const el = document.activeElement;
+  if (!el?.closest?.("table.quadro")) return;
+  const chipEl = el.matches("button.chip[data-des]") ? el : null, td = el.matches("td[data-posto]") ? el : null;
+  if (!chipEl && !td) return;
+  if (e.key.startsWith("Arrow")) { e.preventDefault(); moverSelecao(e.key); return; }
+  const ctrl = e.ctrlKey || e.metaKey;
+  if (ctrl && e.key.toLowerCase() === "c" && chipEl) { e.preventDefault(); copiar(ui.desMap.get(chipEl.dataset.des)); return; }
+  if (ctrl && e.key.toLowerCase() === "v") { e.preventDefault(); colar(el); return; }
+  if (ctrl || e.altKey) return;
+  if (chipEl) {
+    const d = ui.desMap.get(chipEl.dataset.des);
+    if (e.key === "Enter" || e.key === "F2") { e.preventDefault(); abrirPop("card", chipEl, { des: d }); }
+    else if (e.key === "Delete" || e.key === "Backspace") {
+      e.preventDefault();
+      const r = chipEl.getBoundingClientRect();
+      if (ehHeLancada(d)) abrirMenu([{ t: `Remover a hora extra de ${nomeGm(d.gm)}`, act: "mn-remover-he", padrao: true }, { sep: true }, { t: "Cancelar", act: "dr-cancelar" }], r.left, r.bottom + 2, chipEl, { des: d });
+      else abrirMenu([{ t: `Tirar ${nomeGm(d.gm)} do dia:`, act: "ed-nada", desab: true }, { sep: true }, ...[["FOLGA", "Folga"], ["FALTA", "Faltou"], ["ATESTADO", "Atestado"], ["BH_COMP", "Compensação de banco de horas"]].map(([m, t]) => ({ t, act: "mn-tirar", d: { m } })), { sep: true }, { t: "Cancelar", act: "dr-cancelar" }], r.left, r.bottom + 2, chipEl, { des: d });
+    }
+    return;
+  }
+  if (e.key === "Enter" || e.key === "F2") { e.preventDefault(); abrirEditor("add", td, { posto: td.dataset.posto, turno: td.dataset.turno }); }
+  else if (e.key.length === 1 && /\p{L}/u.test(e.key)) { e.preventDefault(); abrirEditor("add", td, { posto: td.dataset.posto, turno: td.dataset.turno, inicial: e.key }); }
+});
+
 // ---------- eventos ----------
 function abrirFuro(posto, turno) {
   const t = TURNOS.find((x) => x.id === turno);
@@ -2468,6 +2718,7 @@ function abrirFuro(posto, turno) {
   render();
 }
 document.addEventListener("click", (e) => {
+  if (ui.colando && e.target.closest("table.quadro td[data-posto]") && !e.target.closest("#menu, #pop, #inline")) { e.preventDefault(); colar(e.target.closest("td[data-posto]")); return; }
   if (ui.ignorarClique) { const recente = Date.now() - ui.ignorarClique < 400; ui.ignorarClique = 0; if (recente && e.target.closest("table.quadro")) return; } // o clique que encerra um arrasto não abre o cartão
   const noMenu = e.target.closest("#menu");
   if (!noMenu) fecharMenu();
@@ -2491,7 +2742,7 @@ document.addEventListener("click", (e) => {
     case "furo": abrirFuro(el.dataset.posto, el.dataset.turno); break;
     case "pop-hora": abrirPop("hora", el, { des: ui.desMap.get(el.dataset.des) }); return;
     case "pop-gm": abrirPop("gm", el, { des: ui.desMap.get(el.dataset.des) }); return;
-    case "pop-add": { const t = TURNOS.find((x) => x.id === el.dataset.turno); abrirPop("add", el, { posto: el.dataset.posto, turno: t.id, ini: fmtHm(t.ini), fim: fmtHm(t.fim) }); return; }
+    case "pop-add": abrirEditor("add", el, { posto: el.dataset.posto, turno: el.dataset.turno }); return;
     case "pop-fechar": fecharPop(); return;
     case "dr-cancelar": fecharMenu(); return;
     case "dr-rem": case "dr-rem-parcial": {
@@ -2547,9 +2798,22 @@ document.addEventListener("click", (e) => {
       if (viz) mudar(`${p.nome} ${d < 0 ? "subiu" : "desceu"} na escala`, () => { const a = data.postos.indexOf(p), b = data.postos.indexOf(viz); [data.postos[a], data.postos[b]] = [data.postos[b], data.postos[a]]; });
       return;
     }
-    case "mn-add": { const alvo = ui.menu.alvo, t = TURNOS.find((x) => x.id === el.dataset.turno); fecharMenu(); abrirPop("add", alvo, { posto: el.dataset.posto, turno: t.id, ini: fmtHm(t.ini), fim: fmtHm(t.fim) }); return; }
+    case "mn-add": { const alvo = ui.menu.alvo; fecharMenu(); abrirEditor("add", alvo, { posto: el.dataset.posto, turno: el.dataset.turno }); return; }
     case "mn-secao": { const alvo = ui.menu.alvo; fecharMenu(); abrirPop("secao", alvo, { secao: el.dataset.secao }); return; }
-    case "card": { const d = ui.desMap.get(el.dataset.des); if (d) abrirPop("card", el, { des: d }); return; }
+    case "card": {
+      const d = ui.desMap.get(el.dataset.des);
+      if (!d) return;
+      if (e.target.closest(".nm")) abrirEditor("nome", e.target.closest(".nm"), { des: d });
+      else if (e.target.closest(".hr")) abrirEditor("hora", e.target.closest(".hr"), { des: d });
+      else abrirPop("card", el, { des: d });
+      return;
+    }
+    case "ed-mais": { const { modo, el: alvo, ctx, d } = ed; fecharEditor(); if (modo === "add") { const t = TURNOS.find((x) => x.id === ctx.turno); abrirPop("add", alvo, { posto: ctx.posto, turno: t.id, ini: fmtHm(t.ini), fim: fmtHm(t.fim) }); } else abrirPop("gm", alvo, { des: d }); return; }
+    case "ed-motivo": { const { des, escolhido, via } = ui.menu; fecharMenu(); substituirGm(des, escolhido, via, el.dataset.m); return; }
+    case "ed-nada": return;
+    case "mn-copiar": { const d = ui.menu.des; fecharMenu(); copiar(d); return; }
+    case "colar-cancelar": pararColar(); return;
+    case "mn-colar": { const alvo = ui.menu.alvo; fecharMenu(); colar(alvo); return; }
     case "card-trocar": ui.pop.modo = "gm"; desenharPop(); return;
     case "card-tirar": {
       const d = ui.pop.des;
@@ -2859,6 +3123,7 @@ document.addEventListener("keydown", (e) => {
   if (e.target.id === "cmd" && e.key === "Enter") { e.preventDefault(); lancarComando(); return; }
   if (e.target.id === "cmd" && e.key === "Escape") { e.target.blur(); return; }
   if (e.key === "/" && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName || "")) { e.preventDefault(); $("#cmd").focus(); return; }
+  if (e.key === "Escape" && ui.colando && $("#menu").hidden && !ed.modo) { pararColar(); return; }
   if (e.key === "Escape" && ui.pop) { fecharPop(); return; }
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z" && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName || "")) { e.preventDefault(); $("#btn-desfazer").click(); return; }
   if (e.key === "Enter" && ui.pop?.modo === "card" && /p-ini|p-fim|c-req|c-obs/.test(e.target.id)) { $("[data-act=card-salvar]").click(); return; }
