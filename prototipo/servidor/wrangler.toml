@@ -12,3 +12,14 @@ fallthrough = true
 binding = "DB"
 database_name = "escala-gm-piloto"
 database_id = "4507567d-e1fb-4845-8401-0fafea48be37"
+
+# Sistema de Folgas (outro app da conta): usado só para LEITURA, quando o escalante clica em "Buscar do Sistema de Folgas"
+[[d1_databases]]
+binding = "FOLGAS_DB"
+database_name = "folgas-gmnh"
+database_id = "2175ad28-4674-4621-b62a-bac2200795f9"
+
+[[durable_objects.bindings]]
+name = "FOLGAS_COORD"
+class_name = "LeaveCoordinator"
+script_name = "folgas-gmnh-coordinator"

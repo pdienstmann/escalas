@@ -76,6 +76,29 @@ async function lerEstado(env) {
   return { revisao: rev.numero, estado, vazio: !estado.gms.length };
 }
 
+// Sistema de Folgas (outro app da mesma conta): só leitura, e só quando o escalante pede.
+// Lê a competência e os nomes no D1 dele e as folgas no Durable Object da competência (GET /dashboard, que não grava nada).
+async function lerSistemaFolgas(env, mes) {
+  if (!env.FOLGAS_DB || !env.FOLGAS_COORD) return json({ erro: "Ligação com o Sistema de Folgas não configurada." }, 501);
+  if (!/^\d{4}-\d{2}$/.test(mes)) return json({ erro: "Mês inválido." }, 400);
+  const comp = await env.FOLGAS_DB.prepare("SELECT id, month, label, status FROM competencies WHERE month = ?").bind(mes).first();
+  if (!comp) return json({ erro: `O Sistema de Folgas não tem a competência ${mes}.` }, 404);
+  const [nomes, arquivados] = await Promise.all([
+    env.FOLGAS_DB.prepare("SELECT id, name FROM users WHERE role = 'GM'").all(),
+    env.FOLGAS_DB.prepare("SELECT id, name FROM archived_gms").all().catch(() => ({ results: [] })),
+  ]);
+  const nome = new Map([...arquivados.results, ...nomes.results].map((u) => [u.id, u.name]));
+  const stub = env.FOLGAS_COORD.get(env.FOLGAS_COORD.idFromName(`competency:${comp.id}`));
+  const r = await stub.fetch("https://coordinator/dashboard");
+  if (!r.ok) return json({ erro: "O Sistema de Folgas não respondeu. Tente de novo." }, 502);
+  const d = await r.json();
+  const porGm = (lista, id) => (lista || []).filter((x) => x.gm_id === id).map((x) => x.date).sort();
+  const linhas = (d.requests || []).map((q) => ({ nome: nome.get(q.gm_id) || "", folgas: porGm(d.leaveDays, q.gm_id), ferias: !!q.vacation_declared, he: porGm(d.overtime, q.gm_id), protocolo: q.receipt_id || "" })).filter((x) => x.nome);
+  // quem só marcou disponibilidade de HE, sem pedido de folga
+  for (const id of new Set((d.overtime || []).map((x) => x.gm_id))) if (!(d.requests || []).some((q) => q.gm_id === id) && nome.get(id)) linhas.push({ nome: nome.get(id), folgas: [], ferias: false, he: porGm(d.overtime, id), protocolo: "" });
+  return json({ competencia: { mes: comp.month, rotulo: comp.label, situacao: comp.status }, linhas });
+}
+
 const GUARDA = "(SELECT valor FROM meta WHERE chave = 'revisao') = ?";
 async function aplicarComando(env, sessao, corpo) {
   const { revisao, cmd, resumo, ops } = corpo || {};
@@ -147,6 +170,7 @@ export default {
       if (url.pathname === "/api/estado" && req.method === "GET") return json(await lerEstado(env));
       if (url.pathname === "/api/comandos" && req.method === "POST") return await aplicarComando(env, sessao, await req.json());
       if (url.pathname === "/api/importar" && req.method === "POST") return await importar(env, sessao, (await req.json()).estado);
+      if (url.pathname === "/api/folgas" && req.method === "GET") return await lerSistemaFolgas(env, url.searchParams.get("mes") || "");
       if (url.pathname === "/api/eventos" && req.method === "GET") {
         const r = await env.DB.prepare("SELECT quando, quem, resumo, revisao, alteracoes FROM eventos ORDER BY id DESC LIMIT 60").all();
         return json({ eventos: r.results });
