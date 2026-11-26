@@ -91,7 +91,28 @@ function toast(msg, comDesfazer) {
 }
 
 // ---------- QUADRO DO DIA ----------
+// Em que coluna(s) cada serviço aparece, como no PDF: serviço de 8h ou mais é dividido no meio
+// (06–18 → 06–12 | 12–18; 18–06 → 18–00 | 00–06); serviço curto fica só na coluna que mais ocupa.
+const cachePartes = new WeakMap();
+function partesVisuais(d) {
+  if (cachePartes.has(d)) return cachePartes.get(d);
+  const meio = Math.round((d.ini + d.fim) / 2 / 30) * 30;
+  const pedacos = d.fim - d.ini >= 8 * 60 ? [[d.ini, meio], [meio, d.fim]] : [[d.ini, d.fim]];
+  const partes = [];
+  for (const [a, b] of pedacos) {
+    let t = null, ov = 0;
+    for (const x of TURNOS) { const o = sobrepoe(a, b, x.ini, x.fim); if (o > ov) { ov = o; t = x; } }
+    t ||= a < TURNOS[0].ini ? TURNOS[0] : TURNOS[3];
+    const ja = partes.find((p) => p.t === t);
+    if (ja) ja.fim = b; else partes.push({ t, ini: a, fim: b });
+  }
+  cachePartes.set(d, partes);
+  return partes;
+}
+const naColuna = (d, t) => partesVisuais(d).some((p) => p.t === t);
 function textoCelula(d, t) {
+  const pt = partesVisuais(d).find((p) => p.t === t);
+  if (pt) return `${fmtHm(pt.ini)}/${fmtHm(pt.fim)}`;
   const idx = TURNOS.indexOf(t);
   const prev = TURNOS[idx - 1], next = TURNOS[idx + 1];
   const a = d.ini < t.ini && !(prev && sobrepoe(d.ini, d.fim, prev.ini, prev.fim) > 0) ? d.ini : Math.max(d.ini, t.ini);
@@ -106,7 +127,7 @@ function chip(d, t) {
   else if (d.extensao) extras.push(`<span class="tag he">HE+</span>`);
   else if (txt) extras.push(`<span class="tag ${cls}">${txt}</span>`);
   if (d.remanejado) extras.push(`<span class="tag rem">REMANEJ.</span>`);
-  const ultimo = d.fim <= t.fim; // detalhes só na coluna onde o serviço termina
+  const ultimo = partesVisuais(d).at(-1).t === t; // detalhes só na coluna onde o serviço termina
   if (d.bhDebito && ultimo) extras.push(`<span class="tag bhc">BH−${fmtHoras(d.bhDebito)}</span>`);
   if (d.req && !d.fixa) extras.push(`<span class="req">REQ ${esc(d.req)}</span>`);
   const reserva = postoPorId(d.posto)?.tipo === "reserva" ? "reserva" : "";
@@ -137,7 +158,7 @@ function vQuadro() {
         cels = `<td colspan="4" class="fa-cel"><button class="link" data-act="pop-posto" data-posto="${p.id}">${o.tipo === "FA" ? "Viatura em manutenção (FA)" : "Posto fechado"}${o.ate && o.ate !== o.de ? ` até ${ddmm(o.ate)}` : " neste dia"}</button>${o.obs ? " · " + esc(o.obs) : ""} — quem estava aqui foi para <b>À disposição</b></td>`;
       } else {
         cels = TURNOS.map((t) => {
-          const aqui = desP.filter((d) => sobrepoe(d.ini, d.fim, t.ini, t.fim) > 0).sort((a, b) => a.ini - b.ini);
+          const aqui = desP.filter((d) => naColuna(d, t)).sort((a, b) => a.ini - b.ini);
           const furo = furosP.find((f) => f.turno === t.id);
           let h = aqui.map((d) => chip(d, t)).join("");
           if (furo) h += `<button class="furo" data-act="pop-add" data-posto="${p.id}" data-turno="${t.id}">Cobrir · falta ${furo.faltam}</button>`;
@@ -175,7 +196,7 @@ function vQuadro() {
       <div class="periodo"><b>${SEMANA[diaSemana(ui.dia)]} ${ddmm(ui.dia)}</b> 07h → ${SEMANA[diaSemana(amanha)].toLowerCase()} ${ddmm(amanha)} 07h</div>
     </div>
     <div class="equipes">
-      ${[...eqDia, ...eqNoite].map((e) => `<button class="eq ${equipe(e).periodo}" data-act="pop-insp" data-equipe="${e}" title="Clique para trocar o inspetor">${equipe(e).periodo === "dia" ? "Dia" : "Noite"} <b>${e}</b> ${esc(cd.inspetores.get(e) || equipe(e).inspetor || "")}</button>`).join("")}
+      ${[...eqDia, ...eqNoite].map((e) => `<button class="eq ${equipe(e).periodo}" data-act="pop-insp" data-equipe="${e}" title="Clique para trocar o inspetor"><b>${esc(equipe(e).nome)}</b> ${esc(cd.inspetores.get(e) || equipe(e).inspetor || "")}</button>`).join("")}
     </div>
   </div>
   <div class="faixa">
@@ -441,7 +462,7 @@ function vFolha() {
   const faPostos = new Map(cd.fa.map((o) => [o.posto, o]));
   const cel = (p, t) => {
     if (faPostos.has(p.id)) return `<td colspan="2" class="c">${faPostos.get(p.id).tipo === "FA" ? "FA" : "FECHADO"}</td>`;
-    const aqui = cd.designacoes.filter((d) => d.posto === p.id && sobrepoe(d.ini, d.fim, t.ini, t.fim) > 0).sort((a, b) => a.ini - b.ini);
+    const aqui = cd.designacoes.filter((d) => d.posto === p.id && naColuna(d, t)).sort((a, b) => a.ini - b.ini);
     if (!aqui.length) {
       if (p.rondas) return `<td colspan="2" class="c rondas-p">VTR/RONDAS FREQUENTES</td>`;
       if (cd.furos.some((f) => f.posto === p.id && f.turno === t.id)) return `<td colspan="2" class="c furo-p">X</td>`;
