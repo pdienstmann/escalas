@@ -669,6 +669,9 @@ h2 .n { font-size: .8rem; color: var(--muted); font-weight: 600; margin-left: .3
 .fm-lista { list-style: none; padding: 0; margin: .6rem 0; display: grid; gap: .5rem; }
 .fm-lista li { border: 1px solid var(--line); border-radius: 8px; padding: .55rem .7rem; } .fm-lista li.conflito { border-color: var(--warn); background: var(--warn-bg); }
 .fm-dif s { color: var(--muted); } .fm-efeito { font-size: .82rem; color: var(--furo); margin: .2rem 0 .3rem; } .fm-local { font-size: .82rem; color: var(--warn); }
+.ed-nat { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; margin: .15rem 0 .3rem; }
+.ed-chip.on.bh { background: var(--bh-bg); color: var(--bh-txt); border-color: var(--bh); }
+.ed-req { margin-left: auto; font: .78rem var(--f-num); padding: .15rem .3rem; border: 1px solid var(--line-strong); border-radius: 4px; width: 7rem; background: var(--surface); color: inherit; }
 /* finalizar escala e controle de HE */
 .btn.fin { border-color: var(--accent); color: var(--accent); font-weight: 600; padding: .2rem .6rem; }
 .fin-ok { color: var(--ok, #2e7d32); font-weight: 600; } .fin-ok .link { font-weight: 400; margin-left: .3rem; }
@@ -2231,13 +2234,13 @@ function descreveOc(o) {
   return o.obs ? esc(o.obs) : "";
 }
 // ---------- LANÇAMENTOS em seções ----------
-const ABAS_LANC = [["ferias", "Férias"], ["cursos", "Cursos"], ["folgas", "Folgas"], ["atestados", "Atestados e licenças"], ["todos", "Todos os lançamentos"]];
+const ABAS_LANC = [["ferias", "Férias"], ["cursos", "Cursos"], ["folgas", "Folgas"], ["trocas", "Trocas de serviço"], ["atestados", "Atestados e licenças"], ["todos", "Todos os lançamentos"]];
 const cobreMes = (o, m) => o.de.slice(0, 7) <= m && (o.ate || o.de).slice(0, 7) >= m;
 const diasEntre = (a, b) => Math.round((parseData(b) - parseData(a)) / 864e5) + 1;
 function vLancamentos() {
   const L = (ui.lanc ||= { aba: "ferias", sel: [] }), m = ui.filtroLanc.mes;
   if (ui.filtroLanc.req) L.aba = "todos"; // "Ver tudo do REQ" abre a lista completa filtrada
-  const corpo = { ferias: lancFerias, cursos: lancCursos, folgas: lancFolgas, atestados: lancAtestados, todos: vLancTodos }[L.aba]();
+  const corpo = { ferias: lancFerias, cursos: lancCursos, folgas: lancFolgas, trocas: lancTrocas, atestados: lancAtestados, todos: vLancTodos }[L.aba]();
   return `${L.aba === "todos" ? "" : `<div class="barra"><div class="datas"><button class="ic" data-act="lmes" data-n="-1" aria-label="Mês anterior">‹</button><h2 class="titulo-mes">${nomeMes(m)}</h2><button class="ic" data-act="lmes" data-n="1" aria-label="Próximo mês">›</button></div></div>`}
   <div class="abas-pad" role="tablist">${ABAS_LANC.map(([k, t]) => `<button role="tab" aria-selected="${L.aba === k}" data-act="lanc-aba" data-aba="${k}">${t}</button>`).join("")}</div>
   ${corpo}`;
@@ -2292,6 +2295,38 @@ function lancCursos() {
       <table class="lanc lanc-per"><tbody>${os.sort((a, b) => nomeGm(a.gm).localeCompare(nomeGm(b.gm))).map((o) => `<tr><td><button class="link" data-act="abrir-ficha" data-gm="${o.gm}">${esc(nomeGm(o.gm))}</button></td>
         <td class="num"><input type="date" class="lg-data" data-oc="${o.id}" data-campo="de" value="${o.de}"> a <input type="date" class="lg-data" data-oc="${o.id}" data-campo="ate" value="${o.ate || o.de}"></td>
         <td>${faixaMes(m, [[o.de, o.ate || o.de]], "cu")}</td><td>${btnExcluir(o)}</td></tr>`).join("")}</tbody></table></div>`).join("") || `<p class="meta">Nenhum curso neste mês.</p>`}</section></div>`;
+}
+// Troca de serviço: A trabalha no lugar de B num dia, e B devolve trabalhando no lugar de A em outro dia (mesmo REQ).
+function servicoDe(gm, dia) { return calcularDia(data, dia).designacoes.filter((d) => d.gm === gm && (d.origem === "base" || d.nat === "troca") && d.nat !== "he"); }
+function checarTroca(a, b, dia) {
+  if (!a || !b || !dia) return "";
+  const sa = servicoDe(a, dia), sb = calcularDia(data, dia).designacoes.filter((d) => d.gm === b && sa.some((x) => sobrepoe(x.ini, x.fim, d.ini, d.fim) > 0));
+  if (!sa.length) return `${nomeGm(a)} não está escalado em ${ddmm(dia)}`;
+  if (sb.length) return `${nomeGm(b)} já trabalha nesse horário em ${ddmm(dia)}`;
+  return `${nomeGm(b)} cobre ${fmtHm(sa[0].ini)}–${fmtHm(sa.at(-1).fim)} em ${postoPorId(sa[0].posto)?.nome || "—"}`;
+}
+function lancTrocas() {
+  const m = ui.filtroLanc.mes, ts = data.ocorrencias.filter((o) => o.tipo === "TROCA" && o.de.startsWith(m)).sort((a, b) => a.de.localeCompare(b.de));
+  const pares = new Map();
+  for (const o of ts) { const k = o.par || o.id; if (!pares.has(k)) pares.set(k, []); pares.get(k).push(o); }
+  const t = (ui.lanc.troca ||= {});
+  return `<div class="cols-lanc"><section class="painel form-lanc"><h2>Lançar troca de serviço</h2>
+    <p class="dica">Um GM trabalha no lugar do outro num dia e, se for o caso, o outro devolve em outro dia. Na escala, quem cobre aparece no lugar de quem saiu, sem hora extra.</p>
+    <div class="linha"><label>GM que sai <input id="tr-a" list="lg-nomes" value="${esc(t.a ? nomeGm(t.a) : "")}" placeholder="nome"></label><label>GM que cobre <input id="tr-b" list="lg-nomes" value="${esc(t.b ? nomeGm(t.b) : "")}" placeholder="nome"></label></div>
+    <datalist id="lg-nomes">${data.gms.filter((g) => g.ativo !== false).map((g) => `<option value="${esc(g.nome)}">`).join("")}</datalist>
+    <label>Dia do serviço de quem sai <input type="date" id="tr-dia1" value="${t.dia1 || ""}"></label>
+    <p class="meta" id="tr-chk1">${esc(checarTroca(t.a, t.b, t.dia1))}</p>
+    <label class="toggle"><input type="checkbox" id="tr-volta" ${t.volta !== false ? "checked" : ""}> Com devolução (o outro paga em outro dia)</label>
+    <div id="tr-volta-campos" ${t.volta === false ? "hidden" : ""}><label>Dia em que o serviço é devolvido <input type="date" id="tr-dia2" value="${t.dia2 || ""}"></label>
+    <p class="meta" id="tr-chk2">${esc(checarTroca(t.b, t.a, t.dia2))}</p></div>
+    <label>REQ <input id="tr-req" value="${esc(t.req || "")}" placeholder="número do requerimento"></label>
+    <button class="btn pri" data-act="tr-lancar">Lançar troca</button></section>
+  <section class="painel"><h2>Trocas em ${nomeMes(m).toLowerCase()} <span class="n">${pares.size}</span></h2>
+    ${pares.size ? `<div class="tabela-wrap"><table class="lanc"><thead><tr><th>Dia</th><th>Sai</th><th>Cobre</th><th>Devolução</th><th>REQ</th><th></th></tr></thead><tbody>
+      ${[...pares.values()].map((os) => { const [x, y] = os; return `<tr><td class="num">${ddmm(x.de)}</td><td>${esc(nomeGm(x.gm))}</td><td>${esc(nomeGm(x.substituto))}</td>
+        <td class="num">${y ? `${ddmm(y.de)}: ${esc(nomeGm(y.substituto))} cobre ${esc(nomeGm(y.gm))}` : `<span class="meta">sem devolução</span>`}</td><td class="num">${esc(x.req || "")}</td>
+        <td>${ui.confirmar === x.id ? `<button class="btn perigo" data-act="tr-apagar" data-par="${esc(x.par || x.id)}">Confirmar</button>` : `<button class="link" data-act="pre-apagar" data-id="${x.id}">Excluir</button>`}</td></tr>`; }).join("")}
+      </tbody></table></div>` : `<p class="meta">Nenhuma troca neste mês.</p>`}</section></div>`;
 }
 function lancAtestados() {
   const m = ui.filtroLanc.mes, as = data.ocorrencias.filter((o) => ["ATESTADO", "LICENCA"].includes(o.tipo) && cobreMes(o, m)).sort((a, b) => a.de.localeCompare(b.de));
@@ -3275,7 +3310,7 @@ function itensGm(d, turnoId) {
     ...itensEstender(d),
     { sep: true },
     ...(d.recorrente ? [{ t: "Não fazer esta HE recorrente hoje", act: "mn-sem-rec" }]
-    : ehHeLancada(d) ? itensRemoverHE(d, turnoId).map((x) => ({ ...x, padrao: false }))
+    : ehHeLancada(d) ? [{ t: d.nat === "bh" ? "Converter em hora extra" : "Converter em banco de horas (BH+)", act: "mn-converter" }, ...itensRemoverHE(d, turnoId).map((x) => ({ ...x, padrao: false }))]
       : [{ t: "Tirar do dia", sub: [["FOLGA", "Folga"], ["FALTA", "Faltou"], ["ATESTADO", "Atestado"], ["BH_COMP", "Compensação de banco de horas"]].map(([m, t]) => ({ t, act: "mn-tirar", d: { m } })) }]),
     { t: "Remanejar para outro posto…", act: "mn-drawer", d: { acao: "remanej" } },
     { t: "Afastamento (férias, licença, curso)…", act: "mn-drawer", d: { acao: "afast" } },
@@ -3327,7 +3362,8 @@ function itensCelula(posto, turno) {
   const cd = calcularDia(data, ui.dia), t = TURNOS.find((x) => x.id === turno), p = postoPorId(posto);
   const furo = cd.furos.some((f) => f.posto === posto && f.turno === turno);
   const ops = opcoesVaga(posto, turno);
-  const it = ops.map(([a, b, r], i) => ({ t: `Hora extra ${r} (${fmtHm(a)}–${fmtHm(b)})…`, act: "mn-add", d: { posto, turno, ini: a, fim: b }, padrao: i === 0 }));
+  const it = [...ops.map(([a, b, r], i) => ({ t: `Hora extra ${r} (${fmtHm(a)}–${fmtHm(b)})…`, act: "mn-add", d: { posto, turno, ini: a, fim: b }, padrao: i === 0 })),
+    { t: "Banco de horas (BH+)", sub: ops.map(([a, b, r]) => ({ t: `${r} (${fmtHm(a)}–${fmtHm(b)})…`, act: "mn-add", d: { posto, turno, ini: a, fim: b, nat: "bh" } })) }];
   // estender quem termina antes deste turno; começar mais cedo quem entra depois dele (no mesmo posto)
   const aqui = cd.designacoes.filter((d) => d.posto === posto && d.nat !== "he" && !d.fixa);
   const estender = aqui.filter((d) => d.fim === t.ini).map((d) => ({ t: `Estender ${nomeGm(d.gm)} até ${fmtHm(t.fim)} (+${fmtHoras(t.fim - t.ini)} de HE)`, act: "mn-est-cel", d: { des: d.id, fim: fmtHm(t.fim) } }));
@@ -3608,7 +3644,7 @@ function abrirEditor(modo, el, ctx) {
     if (modo === "add" && ctx.ini == null) [ctx.ini, ctx.fim] = intervaloVaga(ctx.posto, ctx.turno);
     const titulo = modo === "nome" ? `No lugar de ${nomeGm(ed.d.gm)}` : modo === "padrao" ? `${postoPorId(ctx.posto).nome} · ${ctx.per} · padrão ${ui.padrao.aba === "impar" ? "ímpar" : "par"}` : `${postoPorId(ctx.posto).nome}`;
     box.innerHTML = `<input id="ed-in" class="ed-in" value="${esc(ctx.inicial || "")}" placeholder="Digite o nome do GM" aria-label="${esc(titulo)}" role="combobox" aria-expanded="true" aria-controls="ed-lista" autocomplete="off" spellcheck="false">
-      <div class="ed-lista-box"><p class="ed-titulo">${esc(titulo)}</p>${modo === "add" && ctx.ini != null ? `<div class="ed-chips ed-dur">${opcoesVaga(ctx.posto, ctx.turno).map(([a, b, r]) => `<button class="ed-chip ${a === ctx.ini && b === ctx.fim ? "on" : ""}" data-act="ed-dur" data-ini="${a}" data-fim="${b}" tabindex="-1">${r} · ${fmtHm(a)}–${fmtHm(b)}</button>`).join("")}</div>` : ""}<ul id="ed-lista" role="listbox"></ul><button class="link ed-mais" data-act="ed-mais">Mais opções…</button></div>`;
+      <div class="ed-lista-box"><p class="ed-titulo">${esc(titulo)}</p>${modo === "add" && ctx.ini != null ? `<div class="ed-chips ed-dur">${opcoesVaga(ctx.posto, ctx.turno).map(([a, b, r]) => `<button class="ed-chip ${a === ctx.ini && b === ctx.fim ? "on" : ""}" data-act="ed-dur" data-ini="${a}" data-fim="${b}" tabindex="-1">${r} · ${fmtHm(a)}–${fmtHm(b)}</button>`).join("")}</div>` : ""}${modo === "add" ? `<div class="ed-chips ed-nat"><button class="ed-chip ${ctx.nat !== "bh" ? "on" : ""}" data-act="ed-nat" data-nat="he" tabindex="-1">Hora extra</button><button class="ed-chip ${ctx.nat === "bh" ? "on bh" : ""}" data-act="ed-nat" data-nat="bh" tabindex="-1">Banco de horas (BH+)</button><input id="ed-req" class="ed-req" placeholder="REQ (opcional)" size="9" autocomplete="off"></div>` : ""}<ul id="ed-lista" role="listbox"></ul><button class="link ed-mais" data-act="ed-mais">Mais opções…</button></div>`;
   }
   box.hidden = false;
   box.style.left = Math.max(4, Math.min(r.left - 2, innerWidth - 284)) + "px";
@@ -3690,13 +3726,13 @@ function atualizarLista() {
 function escolherEditor(i) {
   const x = ed.lista[i];
   if (!x || x.bloqueado) return;
-  const { modo, d, ctx, el } = ed, X = x.gm.id;
+  const { modo, d, ctx, el } = ed, X = x.gm.id, reqEd = $("#ed-req")?.value.trim() || "";
   fecharEditor();
   if (modo === "padrao") { colocarNoPadrao(x.gm, ctx.posto, ctx.per); return; }
   if (modo === "add") {
     const [vi, vf] = ctx.ini != null ? [ctx.ini, ctx.fim] : intervaloVaga(ctx.posto, ctx.turno), pn = postoPorId(ctx.posto).nome;
     if (x.via === "rem") mudar(`${nomeGm(X)} remanejado para ${pn}`, () => data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: X, de: ui.dia, ate: ui.dia, posto: ctx.posto }));
-    else lancarHE(X, vi, vf, ctx.posto);
+    else lancarHE(X, vi, vf, ctx.posto, ctx.nat, reqEd);
     return;
   }
   if (ehHeLancada(d)) { mudar(`Hora extra passou para ${nomeGm(X)}`, () => { data.ocorrencias.find((o) => o.id === d.origem).gm = X; }); return; }
@@ -3863,11 +3899,12 @@ function opcoesVaga(postoId, turnoId) {
   return ops.filter(([a, b], i, arr) => arr.findIndex(([c, d]) => c === a && d === b) === i);
 }
 // Lança HE numa vaga. Quem já trabalha hoje colado à vaga só estende 6h; o resto continua vaga a cobrir.
-function lancarHE(X, ini, fim, posto) {
+function lancarHE(X, ini, fim, posto, nat = "he", req = "") {
   const eja = horarioEja(data, ui.dia, X, posto, ini, fim);
   const [a, b] = eja || limitarExtensao(data, ui.dia, X, ini, fim), pn = postoPorId(posto).nome, resto = eja ? 0 : fim - ini - (b - a);
-  mudar(`${nomeGm(X)} com hora extra ${fmtHm(a)}–${fmtHm(b)} em ${pn}${eja && a !== ini ? ` (começa quando termina o serviço dele; clique no horário para mudar)` : ""}${resto ? ` (estende ${fmtHoras(b - a)}; faltam ${fmtHoras(resto)} a cobrir)` : ""}`,
-    () => data.ocorrencias.push({ id: novoId(), tipo: "HE", gm: X, de: ui.dia, ini: fmtHm(a), fim: fmtHm(b), posto, req: "" }));
+  const bh = nat === "bh";
+  mudar(`${nomeGm(X)} com ${bh ? "banco de horas (BH+)" : "hora extra"} ${fmtHm(a)}–${fmtHm(b)} em ${pn}${req ? ` · REQ ${req}` : ""}${eja && a !== ini ? ` (começa quando termina o serviço dele; clique no horário para mudar)` : ""}${resto ? ` (estende ${fmtHoras(b - a)}; faltam ${fmtHoras(resto)} a cobrir)` : ""}`,
+    () => data.ocorrencias.push({ id: novoId(), tipo: bh ? "BH_MAIS" : "HE", gm: X, de: ui.dia, ini: fmtHm(a), fim: fmtHm(b), posto, req }));
 }
 // Tirar uma hora extra: só o turno clicado ou ela toda
 function itensRemoverHE(d, turnoId) {
@@ -4233,6 +4270,7 @@ document.addEventListener("click", (e) => {
     case "mn-card": abrirPop("card", ui.menu.alvo, { des: ui.menu.des }); fecharMenu(); return;
     case "mn-trocar": abrirPop("gm", ui.menu.alvo, { des: ui.menu.des }); fecharMenu(); return;
     case "mn-tirar": { const d = ui.menu.des; fecharMenu(); tirarDoDia(d, el.dataset.m); return; }
+    case "mn-converter": { const d = ui.menu.des, o = data.ocorrencias.find((x) => x.id === d.origem); fecharMenu(); if (!o) return; const bh = o.tipo !== "BH_MAIS"; mudar(`${nomeGm(o.gm)}: ${bh ? "agora é banco de horas (BH+)" : "agora é hora extra"} ${o.ini}–${o.fim}`, () => { o.tipo = bh ? "BH_MAIS" : "HE"; }); return; }
     case "mn-remover-turno": { const d = ui.menu.des, t = el.dataset.turno; fecharMenu(); removerTurnoHE(d, t); return; }
     case "mn-remover-he": { const d = ui.menu.des; fecharMenu(); mudar(`Hora extra de ${nomeGm(d.gm)} removida`, () => { data.ocorrencias = data.ocorrencias.filter((o) => o.id !== d.origem); }); return; }
     case "mn-drawer": { const d = ui.menu.des; fecharMenu(); ui.drawer = { tipo: "gm", gm: d.gm, acao: el.dataset.acao }; render(); if (el.dataset.acao === "lotacao") previaHorarioFixo(); return; }
@@ -4247,9 +4285,10 @@ document.addEventListener("click", (e) => {
       if (viz) mudar(`${p.nome} ${d < 0 ? "subiu" : "desceu"} na escala`, () => { const a = data.postos.indexOf(p), b = data.postos.indexOf(viz); [data.postos[a], data.postos[b]] = [data.postos[b], data.postos[a]]; });
       return;
     }
-    case "mn-add": { const alvo = ui.menu.alvo; fecharMenu(); abrirEditor("add", alvo, { posto: el.dataset.posto, turno: el.dataset.turno, ...(el.dataset.ini ? { ini: Number(el.dataset.ini), fim: Number(el.dataset.fim) } : {}) }); return; }
+    case "mn-add": { const alvo = ui.menu.alvo; fecharMenu(); abrirEditor("add", alvo, { posto: el.dataset.posto, turno: el.dataset.turno, nat: el.dataset.nat || "he", ...(el.dataset.ini ? { ini: Number(el.dataset.ini), fim: Number(el.dataset.fim) } : {}) }); return; }
     case "mn-est-cel": { const d = ui.desMap.get(el.dataset.des); fecharMenu(); if (d) aplicarHorario(d, valoresCartao(d).ini, el.dataset.fim); return; }
     case "mn-cedo-cel": { const d = ui.desMap.get(el.dataset.des); fecharMenu(); if (d) aplicarHorario(d, el.dataset.ini, valoresCartao(d).fim); return; }
+    case "ed-nat": { ed.ctx.nat = el.dataset.nat; document.querySelectorAll(".ed-nat .ed-chip").forEach((c) => { c.classList.toggle("on", c === el); c.classList.toggle("bh", c === el && el.dataset.nat === "bh"); }); $("#ed-in").focus(); return; }
     case "ed-dur": { ed.ctx.ini = Number(el.dataset.ini); ed.ctx.fim = Number(el.dataset.fim); document.querySelectorAll(".ed-dur .ed-chip").forEach((c) => c.classList.toggle("on", c === el)); ed.sel = 0; atualizarLista(); $("#ed-in").focus(); return; }
     case "mn-secao": { const alvo = ui.menu.alvo; fecharMenu(); abrirPop("secao", alvo, { secao: el.dataset.secao, excluir: !!el.dataset.excluir }); return; }
     case "card": {
@@ -4415,6 +4454,23 @@ document.addEventListener("click", (e) => {
       });
       return;
     }
+    case "tr-lancar": {
+      const t = ui.lanc.troca, a = acharGmPorNome($("#tr-a").value)?.id, b = acharGmPorNome($("#tr-b").value)?.id, d1 = $("#tr-dia1").value, volta = $("#tr-volta").checked, d2 = $("#tr-dia2")?.value, req = $("#tr-req").value.trim();
+      if (!a || !b || a === b) { toast("Escolha os dois GMs."); return; }
+      if (!d1) { toast("Informe o dia do serviço."); return; }
+      if (!servicoDe(a, d1).length) { toast(`${nomeGm(a)} não está escalado em ${ddmm(d1)}.`); return; }
+      if (volta && !d2) { toast("Informe o dia da devolução (ou desmarque “com devolução”)."); return; }
+      if (volta && !servicoDe(b, d2).length) { toast(`${nomeGm(b)} não está escalado em ${ddmm(d2)}.`); return; }
+      const par = novoId();
+      mudar(`Troca: ${nomeGm(b)} cobre ${nomeGm(a)} em ${ddmm(d1)}${volta ? ` e ${nomeGm(a)} devolve em ${ddmm(d2)}` : ""}${req ? ` · REQ ${req}` : ""}`, () => {
+        data.ocorrencias.push({ id: novoId(), tipo: "TROCA", gm: a, substituto: b, de: d1, par, ...(req ? { req } : {}) });
+        if (volta) data.ocorrencias.push({ id: novoId(), tipo: "TROCA", gm: b, substituto: a, de: d2, par, ...(req ? { req } : {}) });
+        if (req) { data.requerimentos ||= {}; data.requerimentos[req] ||= { tipo: "TROCA" }; }
+        ui.lanc.troca = {}; void t;
+      });
+      return;
+    }
+    case "tr-apagar": { const par = el.dataset.par; ui.confirmar = null; mudar("Troca excluída", () => { data.ocorrencias = data.ocorrencias.filter((o) => !(o.tipo === "TROCA" && (o.par === par || o.id === par))); }); return; }
     case "lc-mais": { const c = el.dataset.curso, o = data.ocorrencias.find((x) => x.tipo === "CURSO" && x.curso === c); ui.lanc.sel = []; redesenharSel(); $("#lc-nome").value = c; if (o) { $("#lc-local").value = o.local || ""; $("#lg-de").value = o.de; $("#lg-ate").value = o.ate || o.de; } $("#lg-gm").focus(); return; }
     case "fg-cancelar": ui.lanc.import = null; render(); return;
     case "folgas-mud": {
@@ -4640,14 +4696,14 @@ document.addEventListener("click", (e) => {
     case "letra": { const on = document.documentElement.classList.toggle("letra-grande"); try { localStorage.setItem("escala-letra", on ? "1" : ""); } catch { /* ignora */ } el.setAttribute("aria-pressed", String(on)); if (ui.pop) desenharPop(); return; }
     case "remanejar": mudar(`${nomeGm(el.dataset.gm)} remanejado para ${postoPorId(d.posto).nome}`, () => { data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: el.dataset.gm, de: ui.dia, ate: ui.dia, posto: d.posto }); ui.drawer = null; }); break;
     case "pend-rem": fecharMenu(); mudar(`${nomeGm(el.dataset.gm)} remanejado para ${postoPorId(el.dataset.posto).nome} em ${ddmm(el.dataset.dia)}`, () => data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: el.dataset.gm, de: el.dataset.dia, ate: el.dataset.dia, posto: el.dataset.posto })); break;
-    case "pend-he": fecharMenu(); mudar(`HE: ${nomeGm(el.dataset.gm)} ${el.dataset.ini}–${el.dataset.fim} em ${postoPorId(el.dataset.posto).nome} (${ddmm(el.dataset.dia)})`, () => data.ocorrencias.push({ id: novoId(), tipo: "HE", gm: el.dataset.gm, de: el.dataset.dia, ini: el.dataset.ini, fim: el.dataset.fim, posto: el.dataset.posto, req: "" })); break;
+    case "pend-he": fecharMenu(); mudar(`${el.dataset.nat === "bh" ? "BH+" : "HE"}: ${nomeGm(el.dataset.gm)} ${el.dataset.ini}–${el.dataset.fim} em ${postoPorId(el.dataset.posto).nome} (${ddmm(el.dataset.dia)})`, () => data.ocorrencias.push({ id: novoId(), tipo: el.dataset.nat === "bh" ? "BH_MAIS" : "HE", gm: el.dataset.gm, de: el.dataset.dia, ini: el.dataset.ini, fim: el.dataset.fim, posto: el.dataset.posto, req: "" })); break;
     case "pend-mais": { const k = el.dataset.k; ui.pendMais.has(k) ? ui.pendMais.delete(k) : ui.pendMais.add(k); render(); return; }
     case "pend-pergunta": {
       const x = el.dataset, r = el.getBoundingClientRect(), p = postoPorId(x.posto)?.nome;
       const txt = x.via === "rem" ? `Remanejar ${nomeGm(x.gm)} para ${p} em ${ddmm(x.dia)}?` : `Lançar HE de ${nomeGm(x.gm)} ${x.ini}–${x.fim} em ${p} (${ddmm(x.dia)})?`;
       abrirMenu([{ t: txt, act: "ed-nada", desab: true }, { sep: true },
         { t: x.via === "rem" ? "Sim, remanejar" : "Sim, lançar", act: x.via === "rem" ? "pend-rem" : "pend-he", d: { dia: x.dia, posto: x.posto, gm: x.gm, ini: x.ini || "", fim: x.fim || "" }, padrao: true },
-        ...(x.via === "rem" ? [] : [{ t: "Mudar o horário antes…", act: "pend-abrir", d: { dia: x.dia, posto: x.posto, turno: TURNOS.find((t) => sobrepoe(intervalo(x.ini, x.fim)[0], intervalo(x.ini, x.fim)[1], t.ini, t.fim) > 0)?.id || "t2" } }]),
+        ...(x.via === "rem" ? [] : [{ t: "Lançar como banco de horas (BH+)", act: "pend-he", d: { dia: x.dia, posto: x.posto, gm: x.gm, ini: x.ini, fim: x.fim, nat: "bh" } }, { t: "Mudar o horário antes…", act: "pend-abrir", d: { dia: x.dia, posto: x.posto, turno: TURNOS.find((t) => sobrepoe(intervalo(x.ini, x.fim)[0], intervalo(x.ini, x.fim)[1], t.ini, t.fim) > 0)?.id || "t2" } }]),
         { t: "Cancelar", act: "dr-cancelar" }], r.left, r.bottom + 2, el, {});
       return;
     }
@@ -4786,6 +4842,12 @@ document.addEventListener("change", (e) => {
   if (e.target.id === "fg-arq") {
     const f = e.target.files?.[0]; if (!f) return;
     f.text().then((txt) => { const r = lerCsvFolgas(txt); if (!r || !r.linhas.length) { toast("Não reconheci o arquivo. Use o CSV exportado pelo Sistema de Folgas."); return; } ui.lanc.import = r; render(); });
+    return;
+  }
+  if (["tr-a", "tr-b", "tr-dia1", "tr-dia2", "tr-req", "tr-volta"].includes(e.target.id)) {
+    const t = (ui.lanc.troca ||= {});
+    t.a = acharGmPorNome($("#tr-a").value)?.id; t.b = acharGmPorNome($("#tr-b").value)?.id; t.dia1 = $("#tr-dia1").value; t.dia2 = $("#tr-dia2")?.value; t.req = $("#tr-req").value; t.volta = $("#tr-volta").checked;
+    $("#tr-volta-campos").hidden = !t.volta; $("#tr-chk1").textContent = checarTroca(t.a, t.b, t.dia1); $("#tr-chk2").textContent = checarTroca(t.b, t.a, t.dia2);
     return;
   }
   if (e.target.dataset?.imp) { ui.lanc.import.linhas[Number(e.target.dataset.imp)].gm = v; render(); return; }
