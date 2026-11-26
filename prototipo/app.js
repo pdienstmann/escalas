@@ -182,9 +182,10 @@ function vQuadro() {
         }).join("");
       }
       const aj = cd.ajustesPosto.get(p.id) || {};
-      corpo += `<tr class="${s.grupamento ? "em-grupo" : ""}"><th scope="row" class="posto"><button class="posto-btn" data-act="pop-posto" data-posto="${p.id}" title="Clique para mudar este ${ehViatura(p) ? "viatura" : "posto"}">
+      const ninguem = !p.rondas && !faPostos.has(p.id) && !cd.designacoes.some((d) => d.posto === p.id);
+      corpo += `<tr class="${s.grupamento ? "em-grupo" : ""} ${ninguem ? "ninguem" : ""}"><th scope="row" class="posto"><button class="posto-btn" data-act="pop-posto" data-posto="${p.id}" title="Clique para mudar este ${ehViatura(p) ? "viatura" : "posto"}">
         <span class="pn">${iconePosto(p)}${esc(nomeNoDia(p, cd))}</span>${p.sub ? `<span class="ps">${esc(p.sub)}</span>` : ""}${p.obs ? `<span class="po">(${esc(p.obs)})</span>` : ""}
-        ${aj.vagas ? `<span class="tag rem">vagas do dia alteradas</span>` : ""}<span class="lapis" aria-hidden="true">✎</span></button></th>${cels}</tr>`;
+        ${aj.vagas ? `<span class="tag rem">vagas do dia alteradas</span>` : ""}${ninguem ? `<span class="tag vazio" title="Ninguém escalado neste dia. Botão direito: excluir ou mudar as vagas.">ninguém escalado</span>` : ""}<span class="lapis" aria-hidden="true">✎</span></button></th>${cels}</tr>`;
     }
     const vazioGrupo = s.grupamento && !cd.designacoes.some((d) => postos.some((p) => p.id === d.posto));
     if (vazioGrupo) continue; // grupamento sem ninguém escalado no dia não aparece
@@ -1154,6 +1155,8 @@ function itensPosto(p) {
     { t: "Cadastro (nome, zona, vagas)…", act: "mn-posto", d: { aba: "sempre" } },
     { t: "Subir", act: "mn-mover", d: { d: "-1" }, desab: i <= 0 },
     { t: "Descer", act: "mn-mover", d: { d: "1" }, desab: i >= irmaos.length - 1 },
+    { sep: true },
+    { t: `Excluir ${ehViatura(p) ? "viatura" : "posto"}…`, act: "mn-excluir-posto" },
     ...itensGerais(),
   ];
 }
@@ -1168,7 +1171,7 @@ function itensPostoPadrao(p) {
     { t: "Subir", act: "mn-mover", d: { d: "-1" }, desab: i <= 0 },
     { t: "Descer", act: "mn-mover", d: { d: "1" }, desab: i >= irmaos.length - 1 },
     { sep: true },
-    { t: `Desativar ${ehViatura(p) ? "viatura" : "posto"}…`, act: "mn-posto", d: { aba: "sempre" } },
+    { t: `Excluir ${ehViatura(p) ? "viatura" : "posto"}…`, act: "mn-excluir-posto" },
     ...itensGerais(),
   ];
 }
@@ -2147,6 +2150,15 @@ document.addEventListener("click", (e) => {
       mudar(`${nome} cadastrado: ${textoHorario(lot.segmentos)} em ${postoPorId(lot.posto).nome}`, () => data.gms.push({ id: novoId(), nome, equipe: eqId, lotacao: lot, ...(semanal ? { dias } : {}) }));
       return;
     }
+    case "mn-excluir-posto": {
+      const p = postoPorId(ui.menu.posto), r = ui.menu.alvo.getBoundingClientRect(), alvo = ui.menu.alvo;
+      const lot = data.gms.filter((g) => g.ativo !== false && vigente(g, ui.dia).lotacao?.posto === p.id).length;
+      fecharMenu();
+      abrirMenu([{ t: `Excluir ${p.nome}?${lot ? ` ${lot} GM${lot === 1 ? " lotado" : "s lotados"} aqui ${lot === 1 ? "vai" : "vão"} para À disposição.` : ""}`, act: "ed-nada", desab: true }, { sep: true },
+        { t: "Sim, excluir", act: "mn-excluir-ok", padrao: true }, { t: "Cancelar", act: "dr-cancelar" }], r.left, r.bottom + 2, alvo, { posto: p.id });
+      return;
+    }
+    case "mn-excluir-ok": { const p = postoPorId(ui.menu.posto); fecharMenu(); mudar(`${p.nome} excluído (desfazer volta ele)`, () => { p.ativo = false; }); return; }
     case "pad-posto": abrirPop("posto", el, { posto: el.dataset.posto, aba: "sempre" }); return;
     case "pad-semvaga": mudarVagasPeriodo(postoPorId(el.dataset.posto), el.dataset.per, 0); return;
     case "pad-vagas": { const p = postoPorId(ui.menu.posto); fecharMenu(); mudarVagasPeriodo(p, el.dataset.per, Number(el.dataset.n)); return; }
