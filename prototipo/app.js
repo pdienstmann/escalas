@@ -214,7 +214,7 @@ function vQuadro() {
       <div class="periodo"><b>${SEMANA[diaSemana(ui.dia)]} ${ddmm(ui.dia)}</b> 07h → ${SEMANA[diaSemana(amanha)].toLowerCase()} ${ddmm(amanha)} 07h</div>
     </div>
     <div class="equipes">
-      ${[...eqDia, ...eqNoite].map((e) => `<button class="eq ${equipe(e).periodo}" data-act="pop-insp" data-equipe="${e}" title="Clique para trocar o inspetor"><b>${esc(rotuloEquipe(equipe(e)))}</b> ${esc(cd.inspetores.get(e) || equipe(e).inspetor || "")}</button>`).join("")}
+      ${[...eqDia, ...eqNoite].map((e) => `<button class="eq ${equipe(e).periodo}" data-act="pop-insp" data-equipe="${e}" title="Clique para trocar o inspetor"><b>${esc(rotuloEquipe(equipe(e)))}</b> ${cd.inspetores.get(e) === "" ? `<span class="sem-insp">sem inspetor</span>` : esc(cd.inspetores.get(e) || equipe(e).inspetor || "")}</button>`).join("")}
     </div>
   </div>
   <div class="faixa">
@@ -546,7 +546,7 @@ function vFolha() {
   const cd = calcularDia(data, ui.dia);
   const amanha = somaDias(ui.dia, 1);
   const eqs = cd.equipes.map(equipe);
-  const insp = (per) => eqs.filter((e) => e.periodo === per).map((e) => cd.inspetores.get(e.id) || e.inspetor).join(", ");
+  const insp = (per) => eqs.filter((e) => e.periodo === per).map((e) => (cd.inspetores.has(e.id) ? cd.inspetores.get(e.id) : e.inspetor)).filter(Boolean).join(", ");
   const faPostos = new Map(cd.fa.map((o) => [o.posto, o]));
   const cel = (p, t) => {
     if (faPostos.has(p.id)) return `<td colspan="2" class="c">${faPostos.get(p.id).tipo === "FA" ? "FA" : "FECHADO"}</td>`;
@@ -2001,16 +2001,22 @@ function vPadroes() {
 // inspetor de um dia/período: escala mensal; sem ela, o da equipe que trabalha no dia
 function inspetorDe(dia, per) {
   const cd = calcularDia(data, dia);
-  return data.inspetores?.[dia]?.[per] || cd.equipes.map(equipe).filter((e) => e.periodo === per).map((e) => cd.inspetores.get(e.id) || e.inspetor).filter(Boolean)[0] || "";
+  const x = data.inspetores?.[dia];
+  if (x && per in x) return x[per];
+  return cd.equipes.map(equipe).filter((e) => e.periodo === per).map((e) => cd.inspetores.get(e.id) || e.inspetor).filter(Boolean)[0] || "";
 }
-const nomesInspetores = () => [...new Set([...Object.values(data.inspetores || {}).flatMap((x) => [x.dia, x.noite]), ...data.equipes.map((e) => e.inspetor), ...(data.config.rodizioInsp?.dia || []), ...(data.config.rodizioInsp?.noite || [])].filter(Boolean))].sort();
+const afastInsp = () => data.inspetores?._afast || [];
+const afastDoInspetor = (nome, dia) => afastInsp().find((a) => norm(a.nome) === norm(nome) && a.de <= dia && dia <= a.ate);
+const nomesInspetores = () => [...new Set([...Object.entries(data.inspetores || {}).filter(([k]) => /^\d{4}-/.test(k)).flatMap(([, x]) => [x.dia, x.noite]), ...afastInsp().map((a) => a.nome), ...data.equipes.map((e) => e.inspetor), ...(data.config.rodizioInsp?.dia || []), ...(data.config.rodizioInsp?.noite || [])].filter(Boolean))].sort();
 function tabelaInspetores(mes) {
   const dias = diasDoMes(mes), rod = data.config.rodizioInsp || {}, nomes = nomesInspetores();
-  const afastado = (nome, dia) => { const g = data.gms.find((x) => norm(x.nome) === norm(nome)); return g && afastamentoNoDia(data, g.id, dia); };
+  const afastado = (nome, dia) => { const a = afastDoInspetor(nome, dia); if (a) return { tipo: a.tipo }; const g = data.gms.find((x) => norm(x.nome) === norm(nome)); return g && afastamentoNoDia(data, g.id, dia); };
+  const quemFalta = (dia) => afastInsp().filter((a) => a.de <= dia && dia <= a.ate).map((a) => `${a.nome} (${(TIPOS[a.tipo] || a.tipo).toLowerCase()})`).join(", ");
   const conta = {};
-  for (const d of dias) for (const per of ["dia", "noite"]) { const n = inspetorDe(d, per); if (n) conta[n] = (conta[n] || 0) + 1; }
-  const cel = (d, per) => { const n = inspetorDe(d, per), proprio = !!data.inspetores?.[d]?.[per], af = n && afastado(n, d);
-    return `<td class="insp-${per} ${af ? "insp-af" : ""}"><input class="insp-in ${proprio ? "" : "herdado"}" list="insp-nomes" data-insp-dia="${d}" data-insp-per="${per}" value="${esc(n)}" aria-label="Inspetor ${per} ${ddmm(d)}" title="${af ? `${esc(n)} está afastado neste dia (${esc(TIPOS[af.tipo] || af.tipo)})` : proprio ? "" : "Sem escala mensal: inspetor da equipe"}"></td>`; };
+  let faltam = 0;
+  for (const d of dias) for (const per of ["dia", "noite"]) { const n = inspetorDe(d, per); if (n) conta[n] = (conta[n] || 0) + 1; else if (data.inspetores?.[d] && per in data.inspetores[d]) faltam++; }
+  const cel = (d, per) => { const n = inspetorDe(d, per), x = data.inspetores?.[d], proprio = !!(x && per in x), af = n && afastado(n, d), falta = proprio && !n;
+    return `<td class="insp-${per} ${af ? "insp-af" : ""} ${falta ? "insp-falta" : ""}"><input class="insp-in ${proprio ? "" : "herdado"}" list="insp-nomes" data-insp-dia="${d}" data-insp-per="${per}" value="${esc(n)}" placeholder="${falta ? `falta inspetor${quemFalta(d) ? ` · ${esc(quemFalta(d))}` : ""}` : ""}" aria-label="Inspetor ${per} ${ddmm(d)}" title="${af ? `${esc(n)} está afastado neste dia (${esc(TIPOS[af.tipo] || af.tipo)})` : falta ? "Sem inspetor: escreva quem cobre" : proprio ? "" : "Sem escala mensal: inspetor da equipe"}"></td>`; };
   return `<div class="insp-wrap"><div class="tabela-wrap"><table class="lanc insp"><thead><tr><th>Dia</th><th class="th-d">DIA</th><th class="th-n">NOITE</th></tr></thead><tbody>
     ${dias.map((d) => `<tr class="${[0, 6].includes(diaSemana(d)) ? "fds" : ""} ${d === ui.dia ? "hoje" : ""}"><td class="num">${Number(d.slice(8))} <small>${SEMANA[diaSemana(d)].slice(0, 3).toLowerCase()}</small></td>${cel(d, "dia")}${cel(d, "noite")}</tr>`).join("")}
     </tbody></table><datalist id="insp-nomes">${nomes.map((n) => `<option value="${esc(n)}">`).join("")}</datalist></div>
@@ -2021,11 +2027,14 @@ function tabelaInspetores(mes) {
       <label>Noite <input id="rod-noite" value="${esc((rod.noite || []).join(", "))}" placeholder="ex.: RIBEIRO, PEREIRA, DA CRUZ"></label>
       <label>A partir do dia <input type="date" id="rod-de" value="${mes}-01"></label>
       <button class="btn pri" data-act="insp-rodizio">Preencher o mês</button></section>
-    <section class="painel"><h3>Substituir no período</h3>
-      <p class="dica">Férias, curso, troca: põe outro inspetor no lugar só nesses dias.</p>
-      <div class="linha"><label>De <input type="date" id="sub-de" value="${ui.dia.startsWith(mes) ? ui.dia : mes + "-01"}"></label><label>Até <input type="date" id="sub-ate" value="${dias.at(-1)}"></label></div>
-      <div class="linha"><label>Sai <input id="sub-quem" list="insp-nomes" placeholder="quem sai"></label><label>Entra <input id="sub-por" list="insp-nomes" placeholder="quem entra"></label></div>
-      <button class="btn" data-act="insp-substituir">Substituir</button></section>
+    ${faltam ? `<p class="aviso-falta"><b>${faltam}</b> serviço${faltam === 1 ? "" : "s"} sem inspetor neste mês (em vermelho na tabela). Escreva quem cobre em cada um.</p>` : ""}
+    <section class="painel"><h3>Férias, curso, afastamento</h3>
+      <p class="dica">Tira o inspetor da escala nesses dias. Os serviços dele ficam em vermelho para você escolher quem cobre, dia a dia (pode ser um chefe do dia cobrindo a noite).</p>
+      <label>Inspetor <input id="af-quem" list="insp-nomes" placeholder="nome"></label>
+      <div class="linha"><label>Motivo <select id="af-tipo">${["FERIAS", "CURSO", "LICENCA", "ATESTADO", "FOLGA"].map((t) => `<option value="${t}">${esc(TIPOS[t])}</option>`).join("")}</select></label>
+        <label>De <input type="date" id="af-de" value="${ui.dia.startsWith(mes) ? ui.dia : mes + "-01"}"></label><label>Até <input type="date" id="af-ate" value="${dias.at(-1)}"></label></div>
+      <button class="btn pri" data-act="insp-afastar">Lançar</button>
+      ${afastInsp().filter((a) => a.ate >= mes + "-01" && a.de <= dias.at(-1)).length ? `<ul class="lista-oc">${afastInsp().filter((a) => a.ate >= mes + "-01" && a.de <= dias.at(-1)).map((a) => `<li><span><b>${esc(a.nome)}</b> · ${esc(TIPOS[a.tipo] || a.tipo)} · ${ddmm(a.de)} a ${ddmm(a.ate)}</span><button class="link" data-act="insp-afast-del" data-id="${a.id}" title="Tira o registro; os nomes já colocados na tabela continuam">remover</button></li>`).join("")}</ul>` : ""}</section>
     <section class="painel"><h3>Serviços no mês</h3><ul class="insp-conta">${Object.entries(conta).sort((a, b) => b[1] - a[1]).map(([n, c]) => `<li><b>${esc(n)}</b> <span class="num">${c}</span></li>`).join("") || "<li class='meta'>—</li>"}</ul></section>
   </aside></div>`;
 }
@@ -2316,24 +2325,25 @@ document.addEventListener("click", (e) => {
       const dias = diasDoMes(mes).filter((d) => d >= de);
       mudar(`Inspetores de ${nomeMes(mes).toLowerCase()} preenchidos pelo rodízio a partir de ${ddmm(de)}`, () => {
         data.inspetores ||= {}; data.config.rodizioInsp = { dia: rd, noite: rn };
-        dias.forEach((d, i) => { const x = (data.inspetores[d] ||= {}); if (rd.length) x.dia = rd[i % rd.length]; if (rn.length) x.noite = rn[i % rn.length]; });
+        const nome = (n, d) => (afastDoInspetor(n, d) ? "" : n); // quem está afastado não entra: o serviço fica "falta inspetor"
+        dias.forEach((d, i) => { const x = (data.inspetores[d] ||= {}); if (rd.length) x.dia = nome(rd[i % rd.length], d); if (rn.length) x.noite = nome(rn[i % rn.length], d); });
         data.ocorrencias = data.ocorrencias.filter((o) => !(o.tipo === "INSPETOR" && dias.includes(o.de)));
       });
       return;
     }
-    case "insp-substituir": {
-      const de = $("#sub-de").value, ate = $("#sub-ate").value || de, quem = $("#sub-quem").value.trim().toUpperCase(), por = $("#sub-por").value.trim().toUpperCase();
-      if (!de || !quem || !por) { toast("Informe o período, quem sai e quem entra."); return; }
-      let n = 0;
+    case "insp-afastar": {
+      const quem = $("#af-quem").value.trim().toUpperCase(), tipo = $("#af-tipo").value, de = $("#af-de").value, ate = $("#af-ate").value || de;
+      if (!quem || !de) { toast("Informe o inspetor e o período."); return; }
       const alvo = [];
       for (let d = de; d <= ate; d = somaDias(d, 1)) for (const per of ["dia", "noite"]) if (norm(inspetorDe(d, per)) === norm(quem)) alvo.push([d, per]);
-      if (!alvo.length) { toast(`${quem} não está escalado entre ${ddmm(de)} e ${ddmm(ate)}.`); return; }
-      mudar(`${por} no lugar de ${quem} de ${ddmm(de)} a ${ddmm(ate)} (${alvo.length} serviço${alvo.length === 1 ? "" : "s"})`, () => {
+      mudar(`${quem}: ${TIPOS[tipo].toLowerCase()} de ${ddmm(de)} a ${ddmm(ate)}${alvo.length ? ` · ${alvo.length} serviço${alvo.length === 1 ? "" : "s"} ficaram sem inspetor` : ""}`, () => {
         data.inspetores ||= {};
-        for (const [d, per] of alvo) { (data.inspetores[d] ||= {})[per] = por; n++; }
+        (data.inspetores._afast ||= []).push({ id: novoId(), nome: quem, tipo, de, ate });
+        for (const [d, per] of alvo) (data.inspetores[d] ||= {})[per] = "";
       });
-      void n; return;
+      return;
     }
+    case "insp-afast-del": { const id = el.dataset.id; mudar("Registro de afastamento removido", () => { data.inspetores._afast = afastInsp().filter((a) => a.id !== id); }); return; }
     case "fr-sit": { const v = data.frota.find((x) => x.id === el.dataset.fr), k = el.dataset.sit; if (v.situacao === k) return; mudar(`Viatura ${v.prefixo}: ${SIT[k][0]}`, () => { v.situacao = k; }); return; }
     case "fr-filtro": ui.frota.sit = ui.frota.sit === el.dataset.sit ? "" : el.dataset.sit; render(); return;
     case "fr-add": { const id = novoId(); mudar(`Nova viatura em ${el.dataset.modelo}`, () => (data.frota ||= []).push({ id, prefixo: "", modelo: el.dataset.modelo, situacao: "QAP", finalidade: "", guarnicao: "" })); document.querySelector(`[data-fr="${id}"][data-campo=prefixo]`)?.focus(); return; }

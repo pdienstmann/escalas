@@ -272,7 +272,7 @@ export function calcularDia(data, dia) {
   for (const oc of ocs.filter((o) => o.tipo === "INSPETOR")) inspetores.set(oc.equipe, oc.nome);
   // escala mensal dos inspetores de serviço (dia e noite)
   const escInsp = data.inspetores?.[dia];
-  if (escInsp) for (const e of data.equipes) if (e.periodo && escInsp[e.periodo] && !inspetores.has(e.id)) inspetores.set(e.id, escInsp[e.periodo]);
+  if (escInsp) for (const e of data.equipes) if (e.periodo && e.periodo in escInsp && !inspetores.has(e.id)) inspetores.set(e.id, escInsp[e.periodo]); // "" = sem inspetor (afastado)
   const res = { dia, inspetores, designacoes: des, afastados, furos, alertas, fa: [...fa.values()].filter((o) => o.tipo !== "INATIVO"), ajustesPosto,
     disposicao: des.filter((d) => d.posto === null), equipes: equipesDoDia(data, dia) };
   void postoPorId;
