@@ -50,7 +50,7 @@ export function criarExemplo() {
     { id: "upacan", secao: "diversos", nome: "UPA CANUDOS", vagas: T(1, 1, 1, 1) },
     { id: "centropop", secao: "diversos", nome: "CENTRO POP", rondas: true },
     { id: "ubs", secao: "diversos", nome: "UBS SANTO AFONSO", rondas: true },
-    { id: "emef1", secao: "diversos", nome: "EMEF BOA SAÚDE · EJA", rondas: true, obs: "SEG A SEX" },
+    { id: "emef1", secao: "diversos", nome: "EMEF BOA SAÚDE · EJA", rondas: true, obs: "SEG A SEX", reforco: { ini: "19:00", fim: "23:00" }, vagas: { t4: 1 }, dias: [1, 2, 3, 4, 5] },
     { id: "emef2", secao: "diversos", nome: "EMEF ARNALDO GRIN", rondas: true },
     { id: "bombas", secao: "diversos", nome: "CASA DE BOMBAS", vagas: T(0, 0, 1, 1) },
     { id: "v1319", secao: "vtr", nome: "VTR 1319", sub: "B3 DIA · INSPETOR DE SERVIÇO", tipo: "vtr", vagas: T(2, 2, 0, 0) },

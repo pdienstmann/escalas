@@ -294,7 +294,7 @@ export function afastamentoNoDia(data, gmId, dia) {
 // Ordem: 0 escala oposta do mesmo posto e do mesmo turno (dia/noite) · 1 quem já está no posto hoje (estende)
 // · 2 outros GMs do mesmo turno · 3 mesmo posto, turno oposto · 4 o resto. Dentro de cada grupo: abaixo do teto e menos horas.
 export function prioridadeHE(x, teto) {
-  const grupo = x.noPostoHoje ? 1 : x.mesmoPosto && x.mesmoPeriodo ? 0 : x.mesmoPeriodo ? 2 : x.mesmoPosto ? 3 : 4;
+  const grupo = x.eja ? -1 : x.noPostoHoje ? 1 : x.mesmoPosto && x.mesmoPeriodo ? 0 : x.mesmoPeriodo ? 2 : x.mesmoPosto ? 3 : 4;
   return [x.bloqueado ? 1 : 0, grupo, x.heMes + x.transporte >= teto ? 1 : 0, x.heMes + x.transporte];
 }
 // dia (07–19) ou noite (19–07) de um horário em minutos
@@ -302,6 +302,20 @@ export const periodoDoHorario = (m) => { const x = ((m % 1440) + 1440) % 1440; r
 export function mesmoPeriodo(data, gm, dia, ini) {
   const eq = data.equipes.find((e) => e.id === vigente(gm, dia).equipe);
   return !!eq?.periodo && eq.periodo === periodoDoHorario(ini);
+}
+// Vaga de reforço (EJA): quem cobre normalmente é o GM do dia que estende. A HE começa quando o serviço dele termina
+// (06–18 → EJA a partir das 18h; 07–19 → a partir das 19h), com a mesma duração do reforço.
+export function horarioEja(data, dia, gmId, postoId, ini, fim) {
+  const p = data.postos.find((x) => x.id === postoId);
+  if (!p?.reforco) return null;
+  const [ri, rf] = intervalo(p.reforco.ini, p.reforco.fim);
+  if (sobrepoe(ini, fim, ri, rf) <= 0) return null;
+  const d = calcularDia(data, dia).designacoes.filter((x) => x.gm === gmId && x.nat !== "he" && x.nat !== "bh" && x.fim <= ri && ri - x.fim <= 120 && x.ini < ri - 240).sort((a, b) => b.fim - a.fim)[0];
+  return d ? [d.fim, d.fim + (fim - ini)] : null;
+}
+// Horário proposto para um GM numa vaga: EJA a partir do fim do serviço dele; senão, no máximo 6h para quem já trabalha colado.
+export function horarioProposto(data, dia, gmId, postoId, ini, fim) {
+  return horarioEja(data, dia, gmId, postoId, ini, fim) || limitarExtensao(data, dia, gmId, ini, fim);
 }
 // Quem já trabalha hoje colado ao horário da vaga só estende 6h (um turno): ninguém faz 12h normais + 12h extras.
 export function limitarExtensao(data, dia, gmId, ini, fim, max = 360) {
@@ -344,8 +358,10 @@ export function sugerir(data, dia, postoId, ini, fim) {
     if (ontemNoite.includes(gm.id)) continue;
     const teto = (data.config?.tetoHE ?? 60) * 60, total = base.heMes + base.transporte;
     const notas = [];
-    const [ea, eb] = limitarExtensao(data, dia, gm.id, ini, fim);
-    if (base.mesmoPosto && !base.noPostoHoje) notas.push(base.mesmoPeriodo ? "escala oposta deste posto" : "deste posto · turno oposto");
+    const eja = horarioEja(data, dia, gm.id, postoId, ini, fim);
+    const [ea, eb] = eja || limitarExtensao(data, dia, gm.id, ini, fim);
+    if (eja) { base.eja = eja; notas.push(`do dia · estende ${fmtHm(eja[0])}–${fmtHm(eja[1])}`); }
+    else if (base.mesmoPosto && !base.noPostoHoje) notas.push(base.mesmoPeriodo ? "escala oposta deste posto" : "deste posto · turno oposto");
     else if (base.mesmoPeriodo) notas.push("de folga · mesmo turno");
     if (base.noPostoHoje) notas.push(eb - ea < fim - ini ? `já está neste posto hoje · estende ${fmtHm(ea)}–${fmtHm(eb)}` : "já está neste posto hoje · estende");
     else if (eb - ea < fim - ini) notas.push(`trabalha hoje · estende ${fmtHm(ea)}–${fmtHm(eb)}`);
@@ -534,7 +550,7 @@ export function planejarCobertura(data, dias) {
         const l = livro.get(gm.id) || { he: 0, transporte: 0 };
         const x = { gm, heMes: l.he + (heExtra.get(gm.id + mes) || 0), transporte: l.transporte, mesmoPosto: vigente(gm, dia).lotacao?.posto === p.posto,
           noPostoHoje: cd.designacoes.some((d) => d.gm === gm.id && d.posto === p.posto && d.nat !== "he"), bloqueado: false,
-          mesmoPeriodo: !cd.designacoes.some((d) => d.gm === gm.id) && mesmoPeriodo(data, gm, dia, p.ini) };
+          mesmoPeriodo: !cd.designacoes.some((d) => d.gm === gm.id) && mesmoPeriodo(data, gm, dia, p.ini), eja: !!horarioEja(data, dia, gm.id, p.posto, p.ini, p.fim) };
         if (!melhor || compararPrioridade(teto)(x, melhor) < 0) melhor = x;
       }
       // reserva técnica / à disposição só se ninguém puder fazer HE
@@ -546,8 +562,9 @@ export function planejarCobertura(data, dias) {
       }
       if (!melhor) { plano.push({ dia, posto: p.posto, tipo: null, ini: p.ini, fim: p.fim }); continue; }
       // quem já trabalha colado só estende 6h; o resto da vaga vai para outro GM
-      const [ea, eb] = limitarExtensao(data, dia, melhor.gm.id, p.ini, p.fim);
-      if (ea > p.ini) fila.push([p.ini, ea]); if (eb < p.fim) fila.push([eb, p.fim]);
+      const ej = horarioEja(data, dia, melhor.gm.id, p.posto, p.ini, p.fim);
+      const [ea, eb] = ej || limitarExtensao(data, dia, melhor.gm.id, p.ini, p.fim);
+      if (!ej) { if (ea > p.ini) fila.push([p.ini, ea]); if (eb < p.fim) fila.push([eb, p.fim]); }
       melhor.horas = melhor.heMes + melhor.transporte; melhor.mesmo = melhor.mesmoPosto;
       marca(melhor.gm.id, ea, eb);
       heExtra.set(melhor.gm.id + mes, (heExtra.get(melhor.gm.id + mes) || 0) + eb - ea);

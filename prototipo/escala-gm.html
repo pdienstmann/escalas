@@ -593,6 +593,8 @@ td.m-furo button:hover { outline: 2px solid var(--ink); }
 .furo-pad { display: flex; flex-wrap: wrap; gap: .2rem .6rem; align-items: baseline; margin: .2rem 0; padding: .25rem .5rem; border: 1px dashed var(--furo); border-radius: 5px; color: var(--furo); background: var(--furo-bg); font-weight: 600; font-size: .8rem; }
 .furo-pad .link { font-weight: 400; font-size: .75rem; color: var(--muted); }
 table.padrao .posto-btn { width: 100%; text-align: left; }
+.abas-pad .add-gm { margin-left: auto; }
+.campo-nome { display: block; font-weight: 600; } .campo-nome input { display: block; width: 100%; font-size: 1.05rem; padding: .45rem .6rem; margin-top: .25rem; box-sizing: border-box; }
 /* finalizar escala e controle de HE */
 .btn.fin { border-color: var(--accent); color: var(--accent); font-weight: 600; padding: .2rem .6rem; }
 .fin-ok { color: var(--ok, #2e7d32); font-weight: 600; } .fin-ok .link { font-weight: 400; margin-left: .3rem; }
@@ -941,7 +943,7 @@ function afastamentoNoDia(data, gmId, dia) {
 // Ordem: 0 escala oposta do mesmo posto e do mesmo turno (dia/noite) · 1 quem já está no posto hoje (estende)
 // · 2 outros GMs do mesmo turno · 3 mesmo posto, turno oposto · 4 o resto. Dentro de cada grupo: abaixo do teto e menos horas.
 function prioridadeHE(x, teto) {
-  const grupo = x.noPostoHoje ? 1 : x.mesmoPosto && x.mesmoPeriodo ? 0 : x.mesmoPeriodo ? 2 : x.mesmoPosto ? 3 : 4;
+  const grupo = x.eja ? -1 : x.noPostoHoje ? 1 : x.mesmoPosto && x.mesmoPeriodo ? 0 : x.mesmoPeriodo ? 2 : x.mesmoPosto ? 3 : 4;
   return [x.bloqueado ? 1 : 0, grupo, x.heMes + x.transporte >= teto ? 1 : 0, x.heMes + x.transporte];
 }
 // dia (07–19) ou noite (19–07) de um horário em minutos
@@ -949,6 +951,20 @@ const periodoDoHorario = (m) => { const x = ((m % 1440) + 1440) % 1440; return x
 function mesmoPeriodo(data, gm, dia, ini) {
   const eq = data.equipes.find((e) => e.id === vigente(gm, dia).equipe);
   return !!eq?.periodo && eq.periodo === periodoDoHorario(ini);
+}
+// Vaga de reforço (EJA): quem cobre normalmente é o GM do dia que estende. A HE começa quando o serviço dele termina
+// (06–18 → EJA a partir das 18h; 07–19 → a partir das 19h), com a mesma duração do reforço.
+function horarioEja(data, dia, gmId, postoId, ini, fim) {
+  const p = data.postos.find((x) => x.id === postoId);
+  if (!p?.reforco) return null;
+  const [ri, rf] = intervalo(p.reforco.ini, p.reforco.fim);
+  if (sobrepoe(ini, fim, ri, rf) <= 0) return null;
+  const d = calcularDia(data, dia).designacoes.filter((x) => x.gm === gmId && x.nat !== "he" && x.nat !== "bh" && x.fim <= ri && ri - x.fim <= 120 && x.ini < ri - 240).sort((a, b) => b.fim - a.fim)[0];
+  return d ? [d.fim, d.fim + (fim - ini)] : null;
+}
+// Horário proposto para um GM numa vaga: EJA a partir do fim do serviço dele; senão, no máximo 6h para quem já trabalha colado.
+function horarioProposto(data, dia, gmId, postoId, ini, fim) {
+  return horarioEja(data, dia, gmId, postoId, ini, fim) || limitarExtensao(data, dia, gmId, ini, fim);
 }
 // Quem já trabalha hoje colado ao horário da vaga só estende 6h (um turno): ninguém faz 12h normais + 12h extras.
 function limitarExtensao(data, dia, gmId, ini, fim, max = 360) {
@@ -991,8 +1007,10 @@ function sugerir(data, dia, postoId, ini, fim) {
     if (ontemNoite.includes(gm.id)) continue;
     const teto = (data.config?.tetoHE ?? 60) * 60, total = base.heMes + base.transporte;
     const notas = [];
-    const [ea, eb] = limitarExtensao(data, dia, gm.id, ini, fim);
-    if (base.mesmoPosto && !base.noPostoHoje) notas.push(base.mesmoPeriodo ? "escala oposta deste posto" : "deste posto · turno oposto");
+    const eja = horarioEja(data, dia, gm.id, postoId, ini, fim);
+    const [ea, eb] = eja || limitarExtensao(data, dia, gm.id, ini, fim);
+    if (eja) { base.eja = eja; notas.push(`do dia · estende ${fmtHm(eja[0])}–${fmtHm(eja[1])}`); }
+    else if (base.mesmoPosto && !base.noPostoHoje) notas.push(base.mesmoPeriodo ? "escala oposta deste posto" : "deste posto · turno oposto");
     else if (base.mesmoPeriodo) notas.push("de folga · mesmo turno");
     if (base.noPostoHoje) notas.push(eb - ea < fim - ini ? `já está neste posto hoje · estende ${fmtHm(ea)}–${fmtHm(eb)}` : "já está neste posto hoje · estende");
     else if (eb - ea < fim - ini) notas.push(`trabalha hoje · estende ${fmtHm(ea)}–${fmtHm(eb)}`);
@@ -1181,7 +1199,7 @@ function planejarCobertura(data, dias) {
         const l = livro.get(gm.id) || { he: 0, transporte: 0 };
         const x = { gm, heMes: l.he + (heExtra.get(gm.id + mes) || 0), transporte: l.transporte, mesmoPosto: vigente(gm, dia).lotacao?.posto === p.posto,
           noPostoHoje: cd.designacoes.some((d) => d.gm === gm.id && d.posto === p.posto && d.nat !== "he"), bloqueado: false,
-          mesmoPeriodo: !cd.designacoes.some((d) => d.gm === gm.id) && mesmoPeriodo(data, gm, dia, p.ini) };
+          mesmoPeriodo: !cd.designacoes.some((d) => d.gm === gm.id) && mesmoPeriodo(data, gm, dia, p.ini), eja: !!horarioEja(data, dia, gm.id, p.posto, p.ini, p.fim) };
         if (!melhor || compararPrioridade(teto)(x, melhor) < 0) melhor = x;
       }
       // reserva técnica / à disposição só se ninguém puder fazer HE
@@ -1193,8 +1211,9 @@ function planejarCobertura(data, dias) {
       }
       if (!melhor) { plano.push({ dia, posto: p.posto, tipo: null, ini: p.ini, fim: p.fim }); continue; }
       // quem já trabalha colado só estende 6h; o resto da vaga vai para outro GM
-      const [ea, eb] = limitarExtensao(data, dia, melhor.gm.id, p.ini, p.fim);
-      if (ea > p.ini) fila.push([p.ini, ea]); if (eb < p.fim) fila.push([eb, p.fim]);
+      const ej = horarioEja(data, dia, melhor.gm.id, p.posto, p.ini, p.fim);
+      const [ea, eb] = ej || limitarExtensao(data, dia, melhor.gm.id, p.ini, p.fim);
+      if (!ej) { if (ea > p.ini) fila.push([p.ini, ea]); if (eb < p.fim) fila.push([eb, p.fim]); }
       melhor.horas = melhor.heMes + melhor.transporte; melhor.mesmo = melhor.mesmoPosto;
       marca(melhor.gm.id, ea, eb);
       heExtra.set(melhor.gm.id + mes, (heExtra.get(melhor.gm.id + mes) || 0) + eb - ea);
@@ -1290,7 +1309,7 @@ function criarExemplo() {
     { id: "upacan", secao: "diversos", nome: "UPA CANUDOS", vagas: T(1, 1, 1, 1) },
     { id: "centropop", secao: "diversos", nome: "CENTRO POP", rondas: true },
     { id: "ubs", secao: "diversos", nome: "UBS SANTO AFONSO", rondas: true },
-    { id: "emef1", secao: "diversos", nome: "EMEF BOA SAÚDE · EJA", rondas: true, obs: "SEG A SEX" },
+    { id: "emef1", secao: "diversos", nome: "EMEF BOA SAÚDE · EJA", rondas: true, obs: "SEG A SEX", reforco: { ini: "19:00", fim: "23:00" }, vagas: { t4: 1 }, dias: [1, 2, 3, 4, 5] },
     { id: "emef2", secao: "diversos", nome: "EMEF ARNALDO GRIN", rondas: true },
     { id: "bombas", secao: "diversos", nome: "CASA DE BOMBAS", vagas: T(0, 0, 1, 1) },
     { id: "v1319", secao: "vtr", nome: "VTR 1319", sub: "B3 DIA · INSPETOR DE SERVIÇO", tipo: "vtr", vagas: T(2, 2, 0, 0) },
@@ -1821,6 +1840,7 @@ function vDrawer() {
   if (d.tipo === "gm") return drawerGm(d);
   if (d.tipo === "finalizar") return drawerFinalizar(d);
   if (d.tipo === "controle") return drawerControle(d);
+  if (d.tipo === "gmnovo") return drawerGmNovo(d);
   return "";
 }
 // ---------- FINALIZAR ESCALA E CONTROLE DE HE ----------
@@ -3166,6 +3186,11 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "Enter") { e.preventDefault(); escolherEditor(ed.sel); }
 }, true);
 document.addEventListener("input", (e) => {
+  if (e.target.id === "ng-nome") {
+    const g = data.gms.find((x) => norm(x.nome) === norm(e.target.value.trim()));
+    $("#ng-info").textContent = !e.target.value.trim() ? "" : g ? `Já cadastrado: ${rotuloEquipe(equipe(vigente(g, ui.dia).equipe))} · ${rotuloLotacao(g)}. Será transferido.` : "GM novo: será cadastrado.";
+    return;
+  }
   if (e.target.closest?.(".form-hf")) { previaHorarioFixo(); return; }
   if (e.target.name === "ed-m") { atualizarDicaHora(true); $("#ed-in").focus(); return; }
   if (e.target.id !== "ed-in") return;
@@ -3279,8 +3304,9 @@ function opcoesVaga(postoId, turnoId) {
 }
 // Lança HE numa vaga. Quem já trabalha hoje colado à vaga só estende 6h; o resto continua vaga a cobrir.
 function lancarHE(X, ini, fim, posto) {
-  const [a, b] = limitarExtensao(data, ui.dia, X, ini, fim), pn = postoPorId(posto).nome, resto = fim - ini - (b - a);
-  mudar(`${nomeGm(X)} com hora extra ${fmtHm(a)}–${fmtHm(b)} em ${pn}${resto ? ` (estende ${fmtHoras(b - a)}; faltam ${fmtHoras(resto)} a cobrir)` : ""}`,
+  const eja = horarioEja(data, ui.dia, X, posto, ini, fim);
+  const [a, b] = eja || limitarExtensao(data, ui.dia, X, ini, fim), pn = postoPorId(posto).nome, resto = eja ? 0 : fim - ini - (b - a);
+  mudar(`${nomeGm(X)} com hora extra ${fmtHm(a)}–${fmtHm(b)} em ${pn}${eja && a !== ini ? ` (começa quando termina o serviço dele; clique no horário para mudar)` : ""}${resto ? ` (estende ${fmtHoras(b - a)}; faltam ${fmtHoras(resto)} a cobrir)` : ""}`,
     () => data.ocorrencias.push({ id: novoId(), tipo: "HE", gm: X, de: ui.dia, ini: fmtHm(a), fim: fmtHm(b), posto, req: "" }));
 }
 // Tirar uma hora extra: só o turno clicado ou ela toda
@@ -3362,6 +3388,19 @@ function formHorarioFixo(g, desde) {
     <p id="hf-previa" class="previa"></p>
     <button class="btn pri" data-act="hf-salvar">Salvar</button></div>`;
 }
+// Adicionar GM: novo cadastro ou GM que já existe, com escala, posto, horário, HE fixa e dias
+function drawerGmNovo(d) {
+  const eq = equipe(d.equipe) || data.equipes.find((e) => e.tipo === "semanal") || data.equipes[0];
+  const g0 = { nome: "", equipe: eq.id, dias: [1, 2, 3, 4, 5], lotacao: { posto: d.posto || data.postos.find((p) => p.ativo !== false)?.id, funcao: "", segmentos: eq.tipo === "semanal" ? [{ ini: "07:00", fim: "12:00" }, { ini: "13:00", fim: "19:00" }] : eq.periodo === "noite" ? [{ ini: "19:00", fim: "07:00" }] : [{ ini: "07:00", fim: "19:00" }] } };
+  return `<div class="dw-head"><div><p class="eyebrow">Padrões</p><h2>Adicionar GM</h2><p class="meta">Escreva o nome de guerra. Se o GM já existir, ele é transferido para cá a partir da data escolhida; se não, é cadastrado.</p></div>
+    <button class="ic" data-act="fechar" aria-label="Fechar">×</button></div>
+  <div class="dw-body">
+    <label class="campo-nome">Nome do GM <input id="ng-nome" list="ng-lista" placeholder="ex.: SILVA" autocomplete="off" value="${esc(d.nome || "")}"></label>
+    <datalist id="ng-lista">${data.gms.filter((g) => g.ativo !== false).map((g) => `<option value="${esc(g.nome)}">`).join("")}</datalist>
+    <p class="meta" id="ng-info"></p>
+    ${formHorarioFixo(g0, ui.padrao?.desde || ui.dia).replace('data-act="hf-salvar">Salvar', 'data-act="ng-salvar">Adicionar')}
+  </div>`;
+}
 function previaHorarioFixo() {
   const el = $("#hf-previa");
   if (!el) return null;
@@ -3439,7 +3478,8 @@ function vPadroes() {
   }
   return `<div class="barra"><div class="datas"><button class="ic" data-act="pad-mes" data-n="-1" aria-label="Mês anterior">‹</button><h2 class="titulo-mes">${nomeMes(mes)}</h2><button class="ic" data-act="pad-mes" data-n="1" aria-label="Próximo mês">›</button></div>
     <label class="desde">Mudanças valem a partir de <input type="date" id="pad-desde" value="${pd.desde}"></label></div>
-  <div class="abas-pad" role="tablist">${abas.map(([k, t]) => `<button role="tab" aria-selected="${pd.aba === k}" data-act="pad-aba" data-aba="${k}">${t}</button>`).join("")}</div>
+  <div class="abas-pad" role="tablist">${abas.map(([k, t]) => `<button role="tab" aria-selected="${pd.aba === k}" data-act="pad-aba" data-aba="${k}">${t}</button>`).join("")}
+    <button class="btn pri add-gm" data-act="pad-novo-gm">+ Adicionar GM${pd.aba === "semanal" ? " na semanal" : ""}</button></div>
   <p class="dica">${pd.aba === "semanal" ? "Quem trabalha de segunda a sexta, com o horário fixo e a HE fixa de cada um. Clique no nome para editar." : `Composição do padrão ${pd.aba === "impar" ? "ímpar" : "par"} em ${nomeMes(mes).toLowerCase()} (quem trabalha nos dias ${pd.aba === "impar" ? "ímpares" : "pares"}), sem folgas e afastamentos. Clique no GM, no posto ou na seção para editar; o botão direito mostra mais opções (novo posto, subir/descer, desativar). Em vermelho: vaga sem GM ou quantidade diferente do outro padrão.`}</p>
   ${corpo}`;
 }
@@ -3685,6 +3725,25 @@ document.addEventListener("click", (e) => {
       return;
     }
     case "pop-posto": abrirPop("posto", el, { posto: el.dataset.posto, aba: "dia" }); return;
+    case "pad-novo-gm": {
+      const pd = ui.padrao, eqs = pd.aba === "semanal" ? [] : equipesDoPadrao(pd.aba, pd.mes);
+      const eq = pd.aba === "semanal" ? data.equipes.find((e) => e.tipo === "semanal") : data.equipes.find((e) => eqs.includes(e.id) && e.periodo === "dia");
+      ui.drawer = { tipo: "gmnovo", equipe: eq?.id }; render(); previaHorarioFixo(); $("#ng-nome")?.focus(); return;
+    }
+    case "ng-salvar": {
+      const nome = $("#ng-nome").value.trim().toUpperCase(), r = previaHorarioFixo(), desde = $("#hf-desde").value;
+      if (!nome) { toast("Escreva o nome do GM."); $("#ng-nome").focus(); return; }
+      if (!r) return;
+      const eqId = $("#hf-eq").value, semanal = equipe(eqId)?.tipo === "semanal";
+      const lot = { posto: $("#hf-posto").value, funcao: $("#hf-fn").value.trim(), segmentos: r.segs, ...(r.alt ? { alternativa: r.alt } : {}) };
+      const dias = semanal ? [...document.querySelectorAll("#hf-dias input:checked")].map((i) => Number(i.value)) : undefined;
+      if (semanal && !dias.length) { toast("Marque pelo menos um dia."); return; }
+      const existe = data.gms.find((g) => norm(g.nome) === norm(nome));
+      ui.drawer = null;
+      if (existe) { if (existe.ativo === false) existe.ativo = true; mudarLotacao(existe, { equipe: eqId, lotacao: lot, ...(semanal ? { dias } : {}) }, desde || ui.dia, `${existe.nome} passa para ${rotuloEquipe(equipe(eqId), desde)} · ${textoHorario(lot.segmentos)} em ${postoPorId(lot.posto).nome}`); return; }
+      mudar(`${nome} cadastrado: ${textoHorario(lot.segmentos)} em ${postoPorId(lot.posto).nome}`, () => data.gms.push({ id: novoId(), nome, equipe: eqId, lotacao: lot, ...(semanal ? { dias } : {}) }));
+      return;
+    }
     case "pad-posto": abrirPop("posto", el, { posto: el.dataset.posto, aba: "sempre" }); return;
     case "pad-semvaga": mudarVagasPeriodo(postoPorId(el.dataset.posto), el.dataset.per, 0); return;
     case "pad-vagas": { const p = postoPorId(ui.menu.posto); fecharMenu(); mudarVagasPeriodo(p, el.dataset.per, Number(el.dataset.n)); return; }

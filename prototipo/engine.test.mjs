@@ -343,3 +343,20 @@ test("controle de HE: só dias finalizados contam, correções valem, previsão 
   const l = controleMes(data, mes).get("c");
   assert.equal(l.paga, 60 * 60); assert.equal(l.proximo, 10 * 60);
 });
+
+test("EJA: primeiro os GMs do dia que estendem, começando quando o serviço deles termina; depois a noite", async () => {
+  const { horarioEja } = await import("./engine.js");
+  const data = base();
+  data.postos.push({ id: "eja", nome: "EMEF · EJA", vagas: { t4: 1 }, reforco: { ini: "19:00", fim: "23:00" } });
+  data.gms.push({ id: "s6", nome: "S6", equipe: "D1", lotacao: { posto: "hosp", segmentos: [{ ini: "06:00", fim: "18:00" }] } });
+  data.equipes.push({ id: "N2", tipo: "alternado", paridade: 1, periodo: "noite" });
+  data.gms.push({ id: "nn", nome: "NN", equipe: "N2", lotacao: { posto: "noite", segmentos: [{ ini: "19:00", fim: "07:00" }] } });
+  data._versao++;
+  const d = diaDe(data, "D1");
+  assert.deepEqual(horarioEja(data, d, "s6", "eja", 1140, 1380), [1080, 1320]); // 06–18 → EJA 18–22
+  assert.deepEqual(horarioEja(data, d, "a", "eja", 1140, 1380), [1140, 1380]); // 07–19 → EJA 19–23
+  assert.equal(horarioEja(data, d, "nn", "eja", 1140, 1380), null); // noturno de folga: horário normal da vaga
+  const ids = sugerir(data, d, "eja", 1140, 1380).he.map((x) => x.gm.id);
+  assert.ok(["a", "b", "s6"].every((g) => ids.indexOf(g) < ids.indexOf("nn")));
+  assert.ok(ids.indexOf("nn") < ids.indexOf("c")); // noturno de folga antes do diurno de folga
+});

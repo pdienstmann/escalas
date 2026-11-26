@@ -1,7 +1,7 @@
 import {
   TURNOS, TIPOS, AFASTAMENTOS, calcularDia, sugerir, livroMes, resumoMes, saldoBH, somaDias, diaSemana, diasDoMes,
   mesDe, mesSeguinte, fmtHm, fmtHoras, intervalo, sobrepoe, trabalhaNoDia, hm, planejarCobertura, vigente, TIPOS_REQ, montarSegmentos, lerFaixas, descreverSegmentos,
-  limitarExtensao, diaFinalizado, heDoDia, diasEmAberto, controleMes, previstaMes,
+  limitarExtensao, horarioEja, diaFinalizado, heDoDia, diasEmAberto, controleMes, previstaMes,
 } from "./engine.js";
 import { criarExemplo } from "./seed.js";
 import { interpretar, norm } from "./comando.js";
@@ -243,6 +243,7 @@ function vDrawer() {
   if (d.tipo === "gm") return drawerGm(d);
   if (d.tipo === "finalizar") return drawerFinalizar(d);
   if (d.tipo === "controle") return drawerControle(d);
+  if (d.tipo === "gmnovo") return drawerGmNovo(d);
   return "";
 }
 // ---------- FINALIZAR ESCALA E CONTROLE DE HE ----------
@@ -1588,6 +1589,11 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "Enter") { e.preventDefault(); escolherEditor(ed.sel); }
 }, true);
 document.addEventListener("input", (e) => {
+  if (e.target.id === "ng-nome") {
+    const g = data.gms.find((x) => norm(x.nome) === norm(e.target.value.trim()));
+    $("#ng-info").textContent = !e.target.value.trim() ? "" : g ? `Já cadastrado: ${rotuloEquipe(equipe(vigente(g, ui.dia).equipe))} · ${rotuloLotacao(g)}. Será transferido.` : "GM novo: será cadastrado.";
+    return;
+  }
   if (e.target.closest?.(".form-hf")) { previaHorarioFixo(); return; }
   if (e.target.name === "ed-m") { atualizarDicaHora(true); $("#ed-in").focus(); return; }
   if (e.target.id !== "ed-in") return;
@@ -1701,8 +1707,9 @@ function opcoesVaga(postoId, turnoId) {
 }
 // Lança HE numa vaga. Quem já trabalha hoje colado à vaga só estende 6h; o resto continua vaga a cobrir.
 function lancarHE(X, ini, fim, posto) {
-  const [a, b] = limitarExtensao(data, ui.dia, X, ini, fim), pn = postoPorId(posto).nome, resto = fim - ini - (b - a);
-  mudar(`${nomeGm(X)} com hora extra ${fmtHm(a)}–${fmtHm(b)} em ${pn}${resto ? ` (estende ${fmtHoras(b - a)}; faltam ${fmtHoras(resto)} a cobrir)` : ""}`,
+  const eja = horarioEja(data, ui.dia, X, posto, ini, fim);
+  const [a, b] = eja || limitarExtensao(data, ui.dia, X, ini, fim), pn = postoPorId(posto).nome, resto = eja ? 0 : fim - ini - (b - a);
+  mudar(`${nomeGm(X)} com hora extra ${fmtHm(a)}–${fmtHm(b)} em ${pn}${eja && a !== ini ? ` (começa quando termina o serviço dele; clique no horário para mudar)` : ""}${resto ? ` (estende ${fmtHoras(b - a)}; faltam ${fmtHoras(resto)} a cobrir)` : ""}`,
     () => data.ocorrencias.push({ id: novoId(), tipo: "HE", gm: X, de: ui.dia, ini: fmtHm(a), fim: fmtHm(b), posto, req: "" }));
 }
 // Tirar uma hora extra: só o turno clicado ou ela toda
@@ -1784,6 +1791,19 @@ function formHorarioFixo(g, desde) {
     <p id="hf-previa" class="previa"></p>
     <button class="btn pri" data-act="hf-salvar">Salvar</button></div>`;
 }
+// Adicionar GM: novo cadastro ou GM que já existe, com escala, posto, horário, HE fixa e dias
+function drawerGmNovo(d) {
+  const eq = equipe(d.equipe) || data.equipes.find((e) => e.tipo === "semanal") || data.equipes[0];
+  const g0 = { nome: "", equipe: eq.id, dias: [1, 2, 3, 4, 5], lotacao: { posto: d.posto || data.postos.find((p) => p.ativo !== false)?.id, funcao: "", segmentos: eq.tipo === "semanal" ? [{ ini: "07:00", fim: "12:00" }, { ini: "13:00", fim: "19:00" }] : eq.periodo === "noite" ? [{ ini: "19:00", fim: "07:00" }] : [{ ini: "07:00", fim: "19:00" }] } };
+  return `<div class="dw-head"><div><p class="eyebrow">Padrões</p><h2>Adicionar GM</h2><p class="meta">Escreva o nome de guerra. Se o GM já existir, ele é transferido para cá a partir da data escolhida; se não, é cadastrado.</p></div>
+    <button class="ic" data-act="fechar" aria-label="Fechar">×</button></div>
+  <div class="dw-body">
+    <label class="campo-nome">Nome do GM <input id="ng-nome" list="ng-lista" placeholder="ex.: SILVA" autocomplete="off" value="${esc(d.nome || "")}"></label>
+    <datalist id="ng-lista">${data.gms.filter((g) => g.ativo !== false).map((g) => `<option value="${esc(g.nome)}">`).join("")}</datalist>
+    <p class="meta" id="ng-info"></p>
+    ${formHorarioFixo(g0, ui.padrao?.desde || ui.dia).replace('data-act="hf-salvar">Salvar', 'data-act="ng-salvar">Adicionar')}
+  </div>`;
+}
 function previaHorarioFixo() {
   const el = $("#hf-previa");
   if (!el) return null;
@@ -1861,7 +1881,8 @@ function vPadroes() {
   }
   return `<div class="barra"><div class="datas"><button class="ic" data-act="pad-mes" data-n="-1" aria-label="Mês anterior">‹</button><h2 class="titulo-mes">${nomeMes(mes)}</h2><button class="ic" data-act="pad-mes" data-n="1" aria-label="Próximo mês">›</button></div>
     <label class="desde">Mudanças valem a partir de <input type="date" id="pad-desde" value="${pd.desde}"></label></div>
-  <div class="abas-pad" role="tablist">${abas.map(([k, t]) => `<button role="tab" aria-selected="${pd.aba === k}" data-act="pad-aba" data-aba="${k}">${t}</button>`).join("")}</div>
+  <div class="abas-pad" role="tablist">${abas.map(([k, t]) => `<button role="tab" aria-selected="${pd.aba === k}" data-act="pad-aba" data-aba="${k}">${t}</button>`).join("")}
+    <button class="btn pri add-gm" data-act="pad-novo-gm">+ Adicionar GM${pd.aba === "semanal" ? " na semanal" : ""}</button></div>
   <p class="dica">${pd.aba === "semanal" ? "Quem trabalha de segunda a sexta, com o horário fixo e a HE fixa de cada um. Clique no nome para editar." : `Composição do padrão ${pd.aba === "impar" ? "ímpar" : "par"} em ${nomeMes(mes).toLowerCase()} (quem trabalha nos dias ${pd.aba === "impar" ? "ímpares" : "pares"}), sem folgas e afastamentos. Clique no GM, no posto ou na seção para editar; o botão direito mostra mais opções (novo posto, subir/descer, desativar). Em vermelho: vaga sem GM ou quantidade diferente do outro padrão.`}</p>
   ${corpo}`;
 }
@@ -2107,6 +2128,25 @@ document.addEventListener("click", (e) => {
       return;
     }
     case "pop-posto": abrirPop("posto", el, { posto: el.dataset.posto, aba: "dia" }); return;
+    case "pad-novo-gm": {
+      const pd = ui.padrao, eqs = pd.aba === "semanal" ? [] : equipesDoPadrao(pd.aba, pd.mes);
+      const eq = pd.aba === "semanal" ? data.equipes.find((e) => e.tipo === "semanal") : data.equipes.find((e) => eqs.includes(e.id) && e.periodo === "dia");
+      ui.drawer = { tipo: "gmnovo", equipe: eq?.id }; render(); previaHorarioFixo(); $("#ng-nome")?.focus(); return;
+    }
+    case "ng-salvar": {
+      const nome = $("#ng-nome").value.trim().toUpperCase(), r = previaHorarioFixo(), desde = $("#hf-desde").value;
+      if (!nome) { toast("Escreva o nome do GM."); $("#ng-nome").focus(); return; }
+      if (!r) return;
+      const eqId = $("#hf-eq").value, semanal = equipe(eqId)?.tipo === "semanal";
+      const lot = { posto: $("#hf-posto").value, funcao: $("#hf-fn").value.trim(), segmentos: r.segs, ...(r.alt ? { alternativa: r.alt } : {}) };
+      const dias = semanal ? [...document.querySelectorAll("#hf-dias input:checked")].map((i) => Number(i.value)) : undefined;
+      if (semanal && !dias.length) { toast("Marque pelo menos um dia."); return; }
+      const existe = data.gms.find((g) => norm(g.nome) === norm(nome));
+      ui.drawer = null;
+      if (existe) { if (existe.ativo === false) existe.ativo = true; mudarLotacao(existe, { equipe: eqId, lotacao: lot, ...(semanal ? { dias } : {}) }, desde || ui.dia, `${existe.nome} passa para ${rotuloEquipe(equipe(eqId), desde)} · ${textoHorario(lot.segmentos)} em ${postoPorId(lot.posto).nome}`); return; }
+      mudar(`${nome} cadastrado: ${textoHorario(lot.segmentos)} em ${postoPorId(lot.posto).nome}`, () => data.gms.push({ id: novoId(), nome, equipe: eqId, lotacao: lot, ...(semanal ? { dias } : {}) }));
+      return;
+    }
     case "pad-posto": abrirPop("posto", el, { posto: el.dataset.posto, aba: "sempre" }); return;
     case "pad-semvaga": mudarVagasPeriodo(postoPorId(el.dataset.posto), el.dataset.per, 0); return;
     case "pad-vagas": { const p = postoPorId(ui.menu.posto); fecharMenu(); mudarVagasPeriodo(p, el.dataset.per, Number(el.dataset.n)); return; }
