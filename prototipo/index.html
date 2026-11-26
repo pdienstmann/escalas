@@ -675,6 +675,13 @@ table.quadro tr.secao.operacao th { background: linear-gradient(90deg, var(--op-
 .op-nova { display: flex; gap: .6rem; align-items: center; padding: .35rem .5rem; background: var(--op-bg); border-radius: 6px; } .op-nova label { display: flex; align-items: center; gap: .3rem; margin-left: auto; } .op-nova input { width: 3.5rem; }
 .aviso-mini { font-size: .72rem; color: var(--warn); font-weight: 600; }
 .pt tr.sec.op th { background: #ffd8bf; }
+.he-pill { display: inline-block; font: 700 .68rem var(--f-ui); padding: .05rem .4rem; border-radius: 999px; white-space: nowrap; vertical-align: 1px; margin-left: .25rem; }
+.he-pill.ok { background: var(--ok-bg); color: var(--ok); } .he-pill.perto { background: var(--warn-bg); color: var(--warn); } .he-pill.acima { background: var(--furo-forte); color: #fff; }
+.pacoes .btn .hr, .pend-extras .hr { display: block; font-family: var(--f-grid); text-decoration: none; }
+.pend-extras .hr { display: inline; }
+#ed-lista li[data-i] > span { display: flex; gap: .4rem; align-items: center; min-width: 0; }
+#ed-lista li[data-i] .mot { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; } #ed-lista .he-pill { flex: none; }
+.pacoes .btn .nm-l { display: flex; align-items: center; gap: .2rem; } .pacoes .btn .nm-l .he-pill { margin-left: auto; }
 /* finalizar escala e controle de HE */
 .btn.fin { border-color: var(--accent); color: var(--accent); font-weight: 600; padding: .2rem .6rem; }
 .fin-ok { color: var(--ok, #2e7d32); font-weight: 600; } .fin-ok .link { font-weight: 400; margin-left: .3rem; }

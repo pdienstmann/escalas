@@ -1,7 +1,7 @@
 import {
   TURNOS, TIPOS, AFASTAMENTOS, calcularDia, sugerir, livroMes, resumoMes, saldoBH, somaDias, diaSemana, diasDoMes,
   mesDe, mesSeguinte, fmtHm, fmtHoras, intervalo, sobrepoe, trabalhaNoDia, hm, planejarCobertura, vigente, TIPOS_REQ, montarSegmentos, lerFaixas, descreverSegmentos,
-  limitarExtensao, cargoProprio, parseData, postoAtivoEm, secaoOperacao, horarioEja, horarioProposto, pendencias, diaFinalizado, afastamentoNoDia, heDoDia, diasEmAberto, controleMes, previstaMes,
+  limitarExtensao, cargoProprio, parseData, horasParaSugestao, postoAtivoEm, secaoOperacao, horarioEja, horarioProposto, pendencias, diaFinalizado, afastamentoNoDia, heDoDia, diasEmAberto, controleMes, previstaMes,
 } from "./engine.js";
 import { criarExemplo } from "./seed.js";
 import { interpretar, norm } from "./comando.js";
@@ -994,6 +994,12 @@ function juntarPlano(plano) {
   }
   return out;
 }
+// Horas de HE do GM no mês (controle + previstas) num selo colorido: verde, âmbar perto do teto, vermelho acima
+const minHE = (gm, dia) => { const l = horasParaSugestao(data, mesDe(dia)).get(gm); return l ? l.he + l.transporte : 0; };
+function seloHE(min) {
+  const teto = (data.config.tetoHE || 60) * 60, cls = min >= teto ? "acima" : min >= teto * 0.75 ? "perto" : "ok";
+  return `<span class="he-pill ${cls}" title="HE no mês (já no controle + prevista na escala)${min >= teto ? " · passou do teto" : ""}">${fmtHoras(min)} HE</span>`;
+}
 // Motivo da sugestão em poucas palavras
 const motivoSug = (x) => (x.notas || []).filter((n) => !/teto/.test(n))[0] || "";
 // Cartões do "O que falta resolver": para cada dia, um plano sem repetir GM (o mesmo do "Preencher sozinho"),
@@ -1011,18 +1017,18 @@ function cartoesPendencias(porDia) {
         const extras = livres.slice(2, 12);
         const btn = (gm, ini, fim, via, motivo, principal) => via === "rem"
           ? `<button class="btn rem ${principal ? "" : "alt"}" data-act="pend-pergunta" data-via="rem" data-dia="${d}" data-posto="${x.posto.id}" data-gm="${gm}">Remanejar <b>${esc(nomeGm(gm))}</b><small>${esc(motivo)}</small></button>`
-          : `<button class="btn hebtn ${principal ? "" : "alt"}" data-act="pend-pergunta" data-via="he" data-dia="${d}" data-posto="${x.posto.id}" data-gm="${gm}" data-ini="${fmtHm(ini)}" data-fim="${fmtHm(fim)}"><b>${esc(nomeGm(gm))}</b> <span class="hr">${fmtHm(ini)}–${fmtHm(fim)}</span><small>${esc(motivo)}</small></button>`;
+          : `<button class="btn hebtn ${principal ? "" : "alt"}" data-act="pend-pergunta" data-via="he" data-dia="${d}" data-posto="${x.posto.id}" data-gm="${gm}" data-ini="${fmtHm(ini)}" data-fim="${fmtHm(fim)}"><span class="nm-l"><b>${esc(nomeGm(gm))}</b>${seloHE(minHE(gm, d))}</span><span class="hr">${fmtHm(ini)}–${fmtHm(fim)}</span><small>${esc(motivo)}</small></button>`;
         const principais = meus.filter((y) => y.tipo).map((y) => {
           const s = he.find((z) => z.gm.id === y.gm) || remanejar.find((z) => z.gm.id === y.gm);
-          return btn(y.gm, y.ini, y.fim, y.tipo === "REMANEJ" ? "rem" : "he", y.tipo === "REMANEJ" ? `da ${y.de}` : `${motivoSug(s) || "menos horas no mês"} · ${fmtHoras((s?.heMes || 0) + (s?.transporte || 0))} no mês`, true);
+          return btn(y.gm, y.ini, y.fim, y.tipo === "REMANEJ" ? "rem" : "he", y.tipo === "REMANEJ" ? `da ${y.de}` : motivoSug(s) || "menos horas no mês", true);
         }).join("");
-        const outras = alts.map((s) => { const [a, b] = horarioProposto(data, d, s.gm.id, x.posto.id, x.ini, x.fim); return btn(s.gm.id, a, b, "he", `${motivoSug(s) || "livre"} · ${fmtHoras(s.heMes + s.transporte)}`, false); }).join("");
+        const outras = alts.map((s) => { const [a, b] = horarioProposto(data, d, s.gm.id, x.posto.id, x.ini, x.fim); return btn(s.gm.id, a, b, "he", motivoSug(s) || "livre", false); }).join("");
         return `<li><div class="pinfo"><b>${esc(x.posto.nome)}</b> <span class="meta">${x.posto.reforco ? "Reforço" : x.per === "dia" ? "Dia" : "Noite"} ${fmtHm(x.ini)}–${fmtHm(x.fim)}${x.faltam > 1 ? ` · faltam ${x.faltam}` : ""}</span></div>
           <div class="pacoes">${principais || `<span class="meta">ninguém livre</span>`}${outras ? `<span class="ou">ou</span>${outras}` : ""}
           ${extras.length ? `<button class="link" data-act="pend-mais" data-k="${esc(chave)}" aria-expanded="${aberto}">${aberto ? "menos" : `+${extras.length} opções`}</button>` : ""}
           <button class="link" data-act="pend-abrir" data-dia="${d}" data-posto="${x.posto.id}" data-turno="${x.turnos[0]}" title="Abrir no quadro do dia, com todas as opções">quadro…</button></div>
           ${aberto ? `<ul class="pend-extras">${extras.map((s2) => { const [a, b] = horarioProposto(data, d, s2.gm.id, x.posto.id, x.ini, x.fim);
-            return `<li><button class="link" data-act="pend-pergunta" data-via="he" data-dia="${d}" data-posto="${x.posto.id}" data-gm="${s2.gm.id}" data-ini="${fmtHm(a)}" data-fim="${fmtHm(b)}"><b>${esc(s2.gm.nome)}</b> <span class="hr">${fmtHm(a)}–${fmtHm(b)}</span></button> <span class="meta">${esc(motivoSug(s2) || "livre")} · ${fmtHoras(s2.heMes + s2.transporte)}</span></li>`; }).join("")}</ul>` : ""}</li>`;
+            return `<li><button class="link" data-act="pend-pergunta" data-via="he" data-dia="${d}" data-posto="${x.posto.id}" data-gm="${s2.gm.id}" data-ini="${fmtHm(a)}" data-fim="${fmtHm(b)}"><b>${esc(s2.gm.nome)}</b></button> ${seloHE(s2.heMes + s2.transporte)} <span class="hr">${fmtHm(a)}–${fmtHm(b)}</span> <span class="meta">${esc(motivoSug(s2) || "livre")}</span></li>`; }).join("")}</ul>` : ""}</li>`;
       }).join("")}</ul></section>`;
   }).join("");
 }
@@ -2023,7 +2029,7 @@ function atualizarLista() {
   ed.lista = todos.slice(0, 25); // mais opções, com rolagem (as mesmas informações de cada uma)
   if (ed.sel >= ed.lista.length) ed.sel = 0;
   $("#ed-lista").innerHTML = ed.lista.length ? ed.lista.map((x, i) => `<li role="option" id="ed-op-${i}" aria-selected="${i === ed.sel}" aria-disabled="${!!x.bloqueado}" data-i="${i}" class="${x.bloqueado ? "bloq" : ""}">
-    <b>${esc(x.gm.nome)}</b><span>${x.via === "pad" ? esc(x.notas[0]) : x.via === "rem" ? `${esc(x.origem.toLowerCase())} · ${x.daEscala ? "tirar da escala (abre vaga lá)" : "remanejar"}` : `${x.notas?.length ? esc(x.notas[0]) + " · " : ""}${fmtHoras(x.heMes + x.transporte)} HE no mês`}</span></li>`).join("")
+    <b>${esc(x.gm.nome)}</b><span>${x.via === "pad" ? esc(x.notas[0]) : x.via === "rem" ? `${esc(x.origem.toLowerCase())} · ${x.daEscala ? "tirar da escala (abre vaga lá)" : "remanejar"}` : `${x.notas?.length ? `<span class="mot">${esc(x.notas[0])}</span>` : ""}`}${x.via === "rem" ? "" : seloHE(x.heMes + x.transporte)}</span></li>`).join("")
     + (todos.length > 25 ? `<li class="ed-resto" aria-hidden="true">+ ${todos.length - 25} — continue digitando</li>` : "")
     : `<li class="ed-resto">Ninguém livre com esse nome nesse horário</li>`;
   $("#ed-in").setAttribute("aria-activedescendant", ed.lista.length ? `ed-op-${ed.sel}` : "");
