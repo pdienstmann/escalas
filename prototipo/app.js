@@ -239,11 +239,11 @@ function drawerFuro(d) {
   return `<div class="dw-head"><div><p class="eyebrow">Cobrir vaga · ${SEMANA[diaSemana(ui.dia)].toLowerCase()} ${ddmm(ui.dia)}</p>
     <h2>${esc(p.nome)}</h2><p class="meta">${esc(p.sub || "")} ${t.nome}</p></div><button class="ic" data-act="fechar" aria-label="Fechar">×</button></div>
   <div class="dw-body">
-    <section class="bloco-rem"><h3>1 · Sem custo: remanejar</h3>
+    <section class="bloco-rem" style="order:9"><h3>Reserva técnica / à disposição (por último)</h3>
     ${remanejar.length ? `<ul class="sug">${remanejar.map((s) => `<li><div class="sg"><b>${esc(s.gm.nome)}</b> <span class="meta">${s.gm.equipe} · está em ${esc(s.origem)} ${fmtHm(s.ini)}–${fmtHm(s.fim)}</span></div><span></span>
       <button class="btn pri" data-act="remanejar" data-gm="${s.gm.id}">Remanejar</button></li>`).join("")}</ul>`
       : `<p class="dica">Ninguém na reserva técnica ou à disposição nesse horário.</p>`}</section>
-    <section><h3>2 · Hora extra</h3>
+    <section><h3>Hora extra</h3>
     <fieldset class="horario"><legend>Horário</legend>
       <div class="opts">${opcoes.map(([a, b, l]) => `<button class="opt ${a === d.ini && b === d.fim ? "on" : ""}" data-act="furo-hora" data-ini="${a}" data-fim="${b}">${l}<small>${a}–${b}</small></button>`).join("")}</div>
       <div class="linha"><label>Início <input type="time" id="f-ini" value="${d.ini}"></label><label>Fim <input type="time" id="f-fim" value="${d.fim}"></label>
@@ -252,7 +252,7 @@ function drawerFuro(d) {
       <p class="dica">${fmtHoras(fim - ini)} · ${d.nat === "HE" ? "conta no livro de HE do mês" : "crédito no banco de horas"}</p>
     </fieldset></section>
     <div class="busca"><input type="search" id="f-busca" placeholder="Buscar GM" aria-label="Buscar GM"></div>
-    <p class="dica">Ordem: quem já trabalha neste posto, depois quem tem menos HE no mês (somando o que veio do mês anterior).</p>
+    <p class="dica">Ordem: escala oposta deste posto, quem já está no posto hoje (estende), depois quem tem menos HE no mês. Quem passou do teto vai para o fim; reserva técnica por último.</p>
     <ul class="sug">${he.map((s, i) => `<li data-nome="${esc(s.gm.nome.toLowerCase())}" ${i >= 15 ? 'class="mais" hidden' : ""}>
       <div class="sg"><b>${esc(s.gm.nome)}</b> <span class="meta">${s.gm.equipe} · ${esc(postoPorId(s.gm.lotacao?.posto)?.nome || "")}</span>
       <div class="notas">${s.notas.map((n) => `<span class="nota ${/não realiza/.test(n) ? "atencao" : ""}">${esc(n)}</span>`).join("")}</div></div>
@@ -569,8 +569,8 @@ function vPendencias() {
         const { remanejar, he } = sugerir(data, d, x.posto.id, x.ini, x.fim);
         const r = remanejar[0], h = he.find((s) => !s.bloqueado);
         return `<li><div class="pinfo"><b>${esc(x.posto.nome)}</b> <span class="meta">${x.per === "dia" ? "Dia" : "Noite"} ${fmtHm(x.ini)}–${fmtHm(x.fim)}${x.faltam > 1 ? ` · faltam ${x.faltam}` : ""}</span></div>
-          <div class="pacoes">${r ? `<button class="btn rem" data-act="pend-rem" data-dia="${d}" data-posto="${x.posto.id}" data-gm="${r.gm.id}" title="Remanejar ${esc(r.gm.nome)} da ${esc(r.origem)}">Remanejar <b>${esc(r.gm.nome)}</b><small>${esc(r.origem)} · sem custo</small></button>` : ""}
-          ${h ? `<button class="btn hebtn" data-act="pend-he" data-dia="${d}" data-posto="${x.posto.id}" data-gm="${h.gm.id}" data-ini="${fmtHm(x.ini)}" data-fim="${fmtHm(x.fim)}">HE <b>${esc(h.gm.nome)}</b><small>${fmtHoras(x.fim - x.ini)} · tem ${fmtHoras(h.heMes)} no mês</small></button>` : ""}
+          <div class="pacoes">${h ? `<button class="btn hebtn" data-act="pend-he" data-dia="${d}" data-posto="${x.posto.id}" data-gm="${h.gm.id}" data-ini="${fmtHm(x.ini)}" data-fim="${fmtHm(x.fim)}">HE <b>${esc(h.gm.nome)}</b><small>${fmtHoras(x.fim - x.ini)} · ${h.notas?.[0] ? esc(h.notas[0]) + " · " : ""}${fmtHoras(h.heMes + h.transporte)} no mês</small></button>` : ""}
+          ${r ? `<button class="btn rem" data-act="pend-rem" data-dia="${d}" data-posto="${x.posto.id}" data-gm="${r.gm.id}" title="Remanejar ${esc(r.gm.nome)} da ${esc(r.origem)}">Remanejar <b>${esc(r.gm.nome)}</b><small>${esc(r.origem)}</small></button>` : ""}
           <button class="link" data-act="pend-abrir" data-dia="${d}" data-posto="${x.posto.id}" data-turno="${x.turnos[0]}">Outras opções</button></div></li>`;
       }).join("")}</ul></section>`).join("");
 
@@ -754,14 +754,14 @@ function popGm(s) {
   }
   const { remanejar, he } = sugerir(data, ui.dia, posto, ini, fim);
   const linhaHe = (x, i) => `<li data-nome="${esc(norm(x.gm.nome))}" ${i >= 6 ? 'class="mais" hidden' : ""}><button class="pessoa" data-act="pop-escolher" data-gm="${x.gm.id}" data-via="he" ${x.bloqueado ? "disabled" : ""}>
-    <b>${esc(x.gm.nome)}</b><small>${x.gm.equipe} · ${fmtHoras(x.heMes)} de HE no mês${x.mesmoPosto ? " · conhece o posto" : ""}${x.bloqueado ? " · não realiza HE" : ""}</small><span class="via he">hora extra</span></button></li>`;
+    <b>${esc(x.gm.nome)}</b><small>${x.notas?.length ? esc(x.notas.join(" · ")) + " · " : ""}${fmtHoras(x.heMes + x.transporte)} de HE no mês</small><span class="via he">hora extra</span></button></li>`;
   return `${cabPop(titulo, sub)}<div class="pop-corpo">${topo}
-    ${remanejar.length ? `<p class="grupo">Sem custo</p><ul class="pessoas">${remanejar.map((x) => `<li data-nome="${esc(norm(x.gm.nome))}"><button class="pessoa" data-act="pop-escolher" data-gm="${x.gm.id}" data-via="rem" data-origem="${esc(x.origem.toLowerCase())}">
-      <b>${esc(x.gm.nome)}</b><small>está na ${esc(x.origem.toLowerCase())}</small><span class="via rem">remanejar</span></button></li>`).join("")}</ul>` : ""}
     <p class="grupo">Livres nesse horário · ${fmtHoras(fim - ini)} de hora extra</p>
     <input type="search" id="p-busca" placeholder="Digite o nome" aria-label="Buscar GM">
     <ul class="pessoas" id="p-lista">${he.map(linhaHe).join("")}</ul>
     ${!he.length ? `<p class="dica">Ninguém livre nesse horário.</p>` : ""}
+    ${remanejar.length ? `<p class="grupo">Reserva técnica / à disposição</p><ul class="pessoas">${remanejar.map((x) => `<li data-nome="${esc(norm(x.gm.nome))}"><button class="pessoa" data-act="pop-escolher" data-gm="${x.gm.id}" data-via="rem" data-origem="${esc(x.origem.toLowerCase())}">
+      <b>${esc(x.gm.nome)}</b><small>está na ${esc(x.origem.toLowerCase())}</small><span class="via rem">remanejar</span></button></li>`).join("")}</ul>` : ""}
     ${s.modo === "add" ? `<button class="link" data-act="pop-drawer">Mais opções (banco de horas, REQ…)</button>` : ""}</div>`;
 }
 function popMotivo(s) {
@@ -1070,13 +1070,21 @@ function itensPosto(p) {
   ];
 }
 function itensCelula(posto, turno) {
-  const cd = calcularDia(data, ui.dia);
+  const cd = calcularDia(data, ui.dia), t = TURNOS.find((x) => x.id === turno), p = postoPorId(posto);
+  const furo = cd.furos.some((f) => f.posto === posto && f.turno === turno);
+  const ops = opcoesVaga(posto, turno);
+  const it = ops.map(([a, b, r], i) => ({ t: `Hora extra ${r} (${fmtHm(a)}–${fmtHm(b)})…`, act: "mn-add", d: { posto, turno, ini: a, fim: b }, padrao: i === 0 }));
+  // estender quem termina antes deste turno; começar mais cedo quem entra depois dele (no mesmo posto)
+  const aqui = cd.designacoes.filter((d) => d.posto === posto && d.nat !== "he" && !d.fixa);
+  const estender = aqui.filter((d) => d.fim === t.ini).map((d) => ({ t: `Estender ${nomeGm(d.gm)} até ${fmtHm(t.fim)} (+${fmtHoras(t.fim - t.ini)} de HE)`, act: "mn-est-cel", d: { des: d.id, fim: fmtHm(t.fim) } }));
+  const cedo = aqui.filter((d) => d.ini === t.fim).map((d) => ({ t: `${nomeGm(d.gm)} começa mais cedo, às ${fmtHm(t.ini)} (+${fmtHoras(t.fim - t.ini)} de HE)`, act: "mn-cedo-cel", d: { des: d.id, ini: fmtHm(t.ini) } }));
   return [
-    { t: "Pôr GM aqui…", act: "mn-add", d: { posto, turno }, padrao: true },
-    ...(ui.copiado ? [{ t: `Colar ${nomeGm(ui.copiado.gm)} aqui`, act: "mn-colar", atalho: "Ctrl+V" }] : []),
-    ...(cd.furos.length ? [{ t: "Preencher furos do dia sozinho", act: "auto", d: { dias: "1" } }] : []),
+    ...(furo || !aqui.some((d) => naColuna(d, t)) ? it : [{ t: "Pôr mais um GM aqui…", act: "mn-add", d: { posto, turno }, padrao: true }]),
+    ...(estender.length || cedo.length ? [{ sep: true }, ...estender, ...cedo] : []),
+    ...(ui.copiado ? [{ sep: true }, { t: `Colar ${nomeGm(ui.copiado.gm)} aqui`, act: "mn-colar", atalho: "Ctrl+V" }] : []),
+    ...(cd.furos.length ? [{ sep: true }, { t: "Preencher furos do dia sozinho", act: "auto", d: { dias: "1" } }] : []),
     { sep: true },
-    ...itensPosto(postoPorId(posto)).slice(0, 2),
+    ...itensPosto(p).slice(0, 2),
     ...itensGerais(),
   ];
 }
@@ -1325,9 +1333,10 @@ function abrirEditor(modo, el, ctx) {
       <div id="ed-modo" class="ed-modo" hidden><label><input type="radio" name="ed-m" value="he" checked> As horas a mais são <b>hora extra</b></label><label><input type="radio" name="ed-m" value="sem"> Só mudou o horário (<b>sem HE</b>)</label></div>
       <div id="ed-dica" class="ed-dica"></div></div>`;
   } else {
-    const titulo = modo === "nome" ? `No lugar de ${nomeGm(ed.d.gm)}` : `${postoPorId(ctx.posto).nome} · ${intervaloVaga(ctx.posto, ctx.turno).map(fmtHm).join("–")}`;
+    if (modo === "add" && ctx.ini == null) [ctx.ini, ctx.fim] = intervaloVaga(ctx.posto, ctx.turno);
+    const titulo = modo === "nome" ? `No lugar de ${nomeGm(ed.d.gm)}` : `${postoPorId(ctx.posto).nome}`;
     box.innerHTML = `<input id="ed-in" class="ed-in" value="${esc(ctx.inicial || "")}" placeholder="Digite o nome do GM" aria-label="${esc(titulo)}" role="combobox" aria-expanded="true" aria-controls="ed-lista" autocomplete="off" spellcheck="false">
-      <div class="ed-lista-box"><p class="ed-titulo">${esc(titulo)}</p><ul id="ed-lista" role="listbox"></ul><button class="link ed-mais" data-act="ed-mais">Mais opções…</button></div>`;
+      <div class="ed-lista-box"><p class="ed-titulo">${esc(titulo)}</p>${modo === "add" ? `<div class="ed-chips ed-dur">${opcoesVaga(ctx.posto, ctx.turno).map(([a, b, r]) => `<button class="ed-chip ${a === ctx.ini && b === ctx.fim ? "on" : ""}" data-act="ed-dur" data-ini="${a}" data-fim="${b}" tabindex="-1">${r} · ${fmtHm(a)}–${fmtHm(b)}</button>`).join("")}</div>` : ""}<ul id="ed-lista" role="listbox"></ul><button class="link ed-mais" data-act="ed-mais">Mais opções…</button></div>`;
   }
   box.hidden = false;
   box.style.left = Math.max(4, Math.min(r.left - 2, innerWidth - 284)) + "px";
@@ -1362,12 +1371,14 @@ function atualizarDicaHora(trocouModo) {
   dica.textContent = f ? `${f[0]}–${f[1]} · ${sem ? "sem hora extra (só mudou o horário)" : consequenciaHorario(d, f[0], f[1])} · Enter salva` : "Ex.: 7-19, 13-01, 19 07";
   dica.classList.toggle("erro", !f);
 }
+function intervaloEd() { return ed.ctx.ini != null ? [ed.ctx.ini, ed.ctx.fim] : intervaloVaga(ed.ctx.posto, ed.ctx.turno); }
 function candidatosEditor() {
   let ini, fim, posto;
   if (ed.modo === "nome") ({ ini, fim, posto } = ed.d);
-  else { [ini, fim] = intervaloVaga(ed.ctx.posto, ed.ctx.turno); posto = ed.ctx.posto; }
+  else { [ini, fim] = intervaloEd(); posto = ed.ctx.posto; }
   const { remanejar, he } = sugerir(data, ui.dia, posto, ini, fim);
-  return [...remanejar.map((x) => ({ ...x, via: "rem" })), ...he.map((x) => ({ ...x, via: "he" }))].map((x) => ({ ...x, dur: fim - ini }));
+  // hora extra primeiro (escala oposta do posto, quem está no posto, menos horas); reserva técnica por último
+  return [...he.map((x) => ({ ...x, via: "he" })), ...remanejar.map((x) => ({ ...x, via: "rem" }))].map((x) => ({ ...x, dur: fim - ini }));
 }
 function atualizarLista() {
   const q = norm($("#ed-in").value.trim());
@@ -1376,7 +1387,7 @@ function atualizarLista() {
   ed.lista = todos.slice(0, 8);
   if (ed.sel >= ed.lista.length) ed.sel = 0;
   $("#ed-lista").innerHTML = ed.lista.length ? ed.lista.map((x, i) => `<li role="option" id="ed-op-${i}" aria-selected="${i === ed.sel}" aria-disabled="${!!x.bloqueado}" data-i="${i}" class="${x.bloqueado ? "bloq" : ""}">
-    <b>${esc(x.gm.nome)}</b><span>${x.via === "rem" ? `${esc(x.origem.toLowerCase())} · sem custo` : `${x.gm.equipe} · ${fmtHoras(x.heMes)} HE no mês${x.bloqueado ? " · não faz HE" : ""}`}</span></li>`).join("")
+    <b>${esc(x.gm.nome)}</b><span>${x.via === "rem" ? `${esc(x.origem.toLowerCase())} · remanejar` : `${x.notas?.length ? esc(x.notas[0]) + " · " : ""}${fmtHoras(x.heMes + x.transporte)} HE no mês`}</span></li>`).join("")
     + (todos.length > 8 ? `<li class="ed-resto" aria-hidden="true">+ ${todos.length - 8} — continue digitando</li>` : "")
     : `<li class="ed-resto">Ninguém livre com esse nome nesse horário</li>`;
   $("#ed-in").setAttribute("aria-activedescendant", ed.lista.length ? `ed-op-${ed.sel}` : "");
@@ -1387,7 +1398,7 @@ function escolherEditor(i) {
   const { modo, d, ctx, el } = ed, X = x.gm.id;
   fecharEditor();
   if (modo === "add") {
-    const [vi, vf] = intervaloVaga(ctx.posto, ctx.turno), t = { ini: vi, fim: vf }, pn = postoPorId(ctx.posto).nome;
+    const [vi, vf] = ctx.ini != null ? [ctx.ini, ctx.fim] : intervaloVaga(ctx.posto, ctx.turno), t = { ini: vi, fim: vf }, pn = postoPorId(ctx.posto).nome;
     if (x.via === "rem") mudar(`${nomeGm(X)} remanejado para ${pn}`, () => data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: X, de: ui.dia, ate: ui.dia, posto: ctx.posto, obs: "Remanejado" }));
     else mudar(`${nomeGm(X)} com hora extra ${fmtHm(t.ini)}–${fmtHm(t.fim)} em ${pn}`, () => data.ocorrencias.push({ id: novoId(), tipo: "HE", gm: X, de: ui.dia, ini: fmtHm(t.ini), fim: fmtHm(t.fim), posto: ctx.posto, req: "" }));
     return;
@@ -1509,7 +1520,7 @@ document.addEventListener("keydown", (e) => {
 });
 
 // ---------- HE FIXA COMO NO PADRÃO, ÍCONES, SEÇÕES, ESTENDER ----------
-// "VIGANON (13:00/19:00) 3HE": o trecho normal e a HE fixa colada nele aparecem juntos, com o número em vermelho.
+// "FULANO (13:00/19:00) 3HE": o trecho normal e a HE fixa colada nele aparecem juntos, com o número em vermelho.
 const fmtHE = (min) => `${String(Math.round((min / 60) * 10) / 10).replace(".", ",")}HE`;
 function juntarHeFixa(lista, t, todas) {
   const fora = new Set(), junto = new Map();
@@ -1534,7 +1545,18 @@ const iconePosto = (p) => (p.tipo === "moto" ? ICONES.moto : p.tipo === "vtr" ? 
 function intervaloVaga(postoId, turnoId) {
   const p = postoPorId(postoId), t = TURNOS.find((x) => x.id === turnoId);
   if (p?.reforco) { const [a, b] = intervalo(p.reforco.ini, p.reforco.fim); if (sobrepoe(a, b, t.ini, t.fim) > 0) return [a, b]; }
-  return [t.ini, t.fim];
+  // padrão de 12h (período inteiro); só 6h se a outra metade do período já tem gente
+  const [x, y] = periodoDoTurno(turnoId), outro = TURNOS.find((o) => o.id !== turnoId && o.ini >= x && o.fim <= y);
+  const furos = calcularDia(data, ui.dia).furos;
+  return outro && furos.some((f) => f.posto === postoId && f.turno === outro.id) || !outro || !postoPorId(postoId)?.vagas?.[outro.id] ? [x, y] : [t.ini, t.fim];
+}
+const periodoDoTurno = (turnoId) => (["t2", "t3"].includes(turnoId) ? [420, 1140] : [1140, 1860]);
+// opções de horário para pôr alguém numa vaga: 12h, 6h do turno, e o reforço do posto
+function opcoesVaga(postoId, turnoId) {
+  const t = TURNOS.find((x) => x.id === turnoId), [x, y] = periodoDoTurno(turnoId), p = postoPorId(postoId);
+  const ops = [[x, y, "12h"], [t.ini, t.fim, "6h"]];
+  if (p?.reforco) { const [a, b] = intervalo(p.reforco.ini, p.reforco.fim); ops.unshift([a, b, fmtHoras(b - a)]); }
+  return ops.filter(([a, b], i, arr) => arr.findIndex(([c, d]) => c === a && d === b) === i);
 }
 // nome dos turnos que um horário cobre: "3º e 4º turno"
 function turnosDe(a, b) {
@@ -1661,7 +1683,10 @@ document.addEventListener("click", (e) => {
       if (viz) mudar(`${p.nome} ${d < 0 ? "subiu" : "desceu"} na escala`, () => { const a = data.postos.indexOf(p), b = data.postos.indexOf(viz); [data.postos[a], data.postos[b]] = [data.postos[b], data.postos[a]]; });
       return;
     }
-    case "mn-add": { const alvo = ui.menu.alvo; fecharMenu(); abrirEditor("add", alvo, { posto: el.dataset.posto, turno: el.dataset.turno }); return; }
+    case "mn-add": { const alvo = ui.menu.alvo; fecharMenu(); abrirEditor("add", alvo, { posto: el.dataset.posto, turno: el.dataset.turno, ...(el.dataset.ini ? { ini: Number(el.dataset.ini), fim: Number(el.dataset.fim) } : {}) }); return; }
+    case "mn-est-cel": { const d = ui.desMap.get(el.dataset.des); fecharMenu(); if (d) aplicarHorario(d, valoresCartao(d).ini, el.dataset.fim); return; }
+    case "mn-cedo-cel": { const d = ui.desMap.get(el.dataset.des); fecharMenu(); if (d) aplicarHorario(d, el.dataset.ini, valoresCartao(d).fim); return; }
+    case "ed-dur": { ed.ctx.ini = Number(el.dataset.ini); ed.ctx.fim = Number(el.dataset.fim); document.querySelectorAll(".ed-dur .ed-chip").forEach((c) => c.classList.toggle("on", c === el)); ed.sel = 0; atualizarLista(); $("#ed-in").focus(); return; }
     case "mn-secao": { const alvo = ui.menu.alvo; fecharMenu(); abrirPop("secao", alvo, { secao: el.dataset.secao, excluir: !!el.dataset.excluir }); return; }
     case "card": {
       const d = ui.desMap.get(el.dataset.des);

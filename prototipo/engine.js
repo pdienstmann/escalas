@@ -278,6 +278,19 @@ export function afastamentoNoDia(data, gmId, dia) {
 }
 
 // ---------- sugestão para cobrir furo ----------
+// Ordem de prioridade para HE:
+// 0) lotado neste posto e de folga hoje (a escala oposta do posto);
+// 1) lotado neste posto e trabalhando hoje no período oposto (pode estender);
+// 2) demais, por necessidade: menos HE no mês (contando o que veio do mês anterior);
+// quem já passou do teto vai para o fim; reserva técnica / à disposição ficam por último.
+export function prioridadeHE(x, teto) {
+  return [x.bloqueado ? 1 : 0, x.mesmoPosto ? (x.noPostoHoje ? 1 : 0) : 2, x.heMes + x.transporte >= teto ? 1 : 0, x.heMes + x.transporte];
+}
+const compararPrioridade = (teto) => (a, b) => {
+  const pa = prioridadeHE(a, teto), pb = prioridadeHE(b, teto);
+  for (let i = 0; i < pa.length; i++) if (pa[i] !== pb[i]) return pa[i] - pb[i];
+  return a.gm.nome.localeCompare(b.gm.nome);
+};
 // Duas saídas: remanejar quem está na reserva técnica / à disposição (sem custo) ou chamar HE.
 export function sugerir(data, dia, postoId, ini, fim) {
   const mes = mesDe(dia);
@@ -293,7 +306,8 @@ export function sugerir(data, dia, postoId, ini, fim) {
     if (afastados.has(gm.id)) continue;
     const minhas = cd.designacoes.filter((d) => d.gm === gm.id);
     const l = livro.get(gm.id) || { he: 0, transporte: 0 };
-    const base = { gm, heMes: l.he, transporte: l.transporte, mesmoPosto: gm.lotacao?.posto === postoId };
+    const lotPosto = vigente(gm, dia).lotacao?.posto;
+    const base = { gm, heMes: l.he, transporte: l.transporte, mesmoPosto: lotPosto === postoId, noPostoHoje: minhas.some((d) => d.posto === postoId && d.nat !== "he") };
     const sobre = minhas.filter((d) => sobrepoe(d.ini, d.fim, ini, fim) > 0);
     if (sobre.length) {
       if (sobre.every(livreParaRemanejar)) {
@@ -303,12 +317,16 @@ export function sugerir(data, dia, postoId, ini, fim) {
       continue;
     }
     if (ontemNoite.includes(gm.id)) continue;
+    const teto = (data.config?.tetoHE ?? 60) * 60, total = base.heMes + base.transporte;
     const notas = [];
-    if (base.mesmoPosto) notas.push("conhece o posto");
+    if (base.mesmoPosto && !base.noPostoHoje) notas.push("escala oposta deste posto");
+    if (base.noPostoHoje) notas.push("já está neste posto hoje · estende");
+    if (total >= teto) notas.push("já passou do teto de HE");
+    else if (total + (fim - ini) > teto) notas.push("vai passar do teto de HE");
     if (gm.naoFazHE) notas.push("não realiza HE");
     he.push({ ...base, notas, bloqueado: !!gm.naoFazHE });
   }
-  he.sort((a, b) => (a.bloqueado - b.bloqueado) || (b.mesmoPosto - a.mesmoPosto) || (a.heMes + a.transporte - b.heMes - b.transporte) || a.gm.nome.localeCompare(b.gm.nome));
+  he.sort(compararPrioridade((data.config?.tetoHE ?? 60) * 60));
   remanejar.sort((a, b) => (a.origem === "À disposição" ? 0 : 1) - (b.origem === "À disposição" ? 0 : 1) || a.gm.nome.localeCompare(b.gm.nome));
   return { remanejar, he };
 }
@@ -419,24 +437,27 @@ export function planejarCobertura(data, dias) {
     for (const d of calcularDia(data, somaDias(dia, -1)).designacoes) if (d.fim > 1440) marca(d.gm, d.ini - 1440, d.fim - 1440);
     const livres = cd.designacoes.filter((d) => d.nat === "normal" && (d.posto === null || reserva.has(d.posto)));
     const usados = new Set();
+    const teto = (data.config?.tetoHE ?? 60) * 60;
     for (const p of pendencias(data, dia)) for (let k = 0; k < p.faltam; k++) {
-      const rv = livres.find((d) => !usados.has(d.gm) && sobrepoe(d.ini, d.fim, p.ini, p.fim) >= Math.min(360, p.fim - p.ini));
-      if (rv) {
-        usados.add(rv.gm);
-        plano.push({ dia, posto: p.posto, tipo: "REMANEJ", gm: rv.gm, ini: rv.ini, fim: rv.fim, de: rv.posto === null ? "à disposição" : "reserva técnica" });
-        continue;
-      }
       const mes = mesDe(dia);
       let melhor = null;
       for (const gm of data.gms) {
         if (gm.ativo === false || gm.naoFazHE || afast.has(gm.id)) continue;
         if ((ocup.get(gm.id) || []).some(([a, b]) => sobrepoe(a, b, p.ini, p.fim) > 0)) continue;
         const l = livro.get(gm.id) || { he: 0, transporte: 0 };
-        const horas = l.he + l.transporte + (heExtra.get(gm.id + mes) || 0);
-        const mesmo = gm.lotacao?.posto === p.posto ? 1 : 0;
-        if (!melhor || mesmo > melhor.mesmo || (mesmo === melhor.mesmo && horas < melhor.horas) || (mesmo === melhor.mesmo && horas === melhor.horas && gm.nome < melhor.gm.nome)) melhor = { gm, horas, mesmo };
+        const x = { gm, heMes: l.he + (heExtra.get(gm.id + mes) || 0), transporte: l.transporte, mesmoPosto: vigente(gm, dia).lotacao?.posto === p.posto,
+          noPostoHoje: cd.designacoes.some((d) => d.gm === gm.id && d.posto === p.posto && d.nat !== "he"), bloqueado: false };
+        if (!melhor || compararPrioridade(teto)(x, melhor) < 0) melhor = x;
+      }
+      // reserva técnica / à disposição só se ninguém puder fazer HE
+      const rv = !melhor && livres.find((d) => !usados.has(d.gm) && sobrepoe(d.ini, d.fim, p.ini, p.fim) >= Math.min(360, p.fim - p.ini));
+      if (rv) {
+        usados.add(rv.gm);
+        plano.push({ dia, posto: p.posto, tipo: "REMANEJ", gm: rv.gm, ini: rv.ini, fim: rv.fim, de: rv.posto === null ? "à disposição" : "reserva técnica" });
+        continue;
       }
       if (!melhor) { plano.push({ dia, posto: p.posto, tipo: null, ini: p.ini, fim: p.fim }); continue; }
+      melhor.horas = melhor.heMes + melhor.transporte; melhor.mesmo = melhor.mesmoPosto;
       marca(melhor.gm.id, p.ini, p.fim);
       heExtra.set(melhor.gm.id + mes, (heExtra.get(melhor.gm.id + mes) || 0) + p.fim - p.ini);
       plano.push({ dia, posto: p.posto, tipo: "HE", gm: melhor.gm.id, ini: p.ini, fim: p.fim, horasNoMes: melhor.horas, conhecePosto: !!melhor.mesmo });
