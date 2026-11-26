@@ -342,6 +342,21 @@ button.eq:hover { border-color: var(--accent); }
 .links-pop { margin: 0; font-size: .88rem; color: var(--muted); }
 .aviso { margin: 0; padding: .4rem .55rem; border-radius: 6px; background: var(--warn-bg); color: var(--warn); font-size: .85rem; }
 
+/* menu do botão direito, no padrão do Windows */
+.menu { position: fixed; z-index: 70; min-width: 15rem; max-width: calc(100vw - 8px); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 6px; padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,.22); font: 400 .88rem var(--f-ui); }
+.mn-item { display: flex; align-items: center; gap: 1.5rem; width: 100%; border: 0; background: none; color: var(--ink); text-align: left; padding: .38rem .8rem .38rem 1.6rem; border-radius: 4px; cursor: default; font: inherit; white-space: nowrap; }
+.mn-item:hover:not(:disabled), .mn-item:focus-visible, .mn-sub.aberto > .mn-item { background: var(--accent-soft); outline: none; }
+.mn-item:disabled { color: var(--muted); opacity: .55; }
+.mn-item.padrao { font-weight: 700; }
+.mn-atalho, .mn-seta { margin-left: auto; color: var(--muted); font-size: .8rem; }
+.mn-seta { font-size: 1rem; line-height: 1; }
+.mn-sep { height: 1px; background: var(--line); margin: 4px 6px; }
+.mn-sub { position: relative; }
+.mn-fly { display: none; position: absolute; left: calc(100% + 2px); top: -5px; min-width: 14rem; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 6px; padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,.22); }
+.menu.abre-esq .mn-fly { left: auto; right: calc(100% + 2px); }
+@media (hover: hover) { .mn-sub:hover > .mn-fly { display: block; } }
+.mn-sub.aberto > .mn-fly, .mn-sub:focus-within > .mn-fly { display: block; }
+
 /* modo servidor */
 .sync { align-self: center; font-size: .8rem; font-weight: 600; padding: .2rem .5rem; border-radius: 999px; white-space: nowrap; }
 .sync.ok { color: var(--ok); } .sync.salvando { color: var(--muted); } .sync.erro { color: var(--furo); background: var(--furo-bg); }
@@ -493,5 +508,6 @@ td.m-furo button:hover { outline: 2px solid var(--ink); }
 <div id="veu" hidden></div>
 <aside id="drawer" hidden aria-label="Detalhes"></aside>
 <div id="pop" class="pop" role="dialog" aria-modal="false" hidden></div>
+<div id="menu" class="menu" role="menu" aria-label="Opções" hidden></div>
 <div id="toast" role="status" hidden></div>
 <script type="module" src="app.js"></script>

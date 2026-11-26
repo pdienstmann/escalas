@@ -349,6 +349,21 @@ button.eq:hover { border-color: var(--accent); }
 .links-pop { margin: 0; font-size: .88rem; color: var(--muted); }
 .aviso { margin: 0; padding: .4rem .55rem; border-radius: 6px; background: var(--warn-bg); color: var(--warn); font-size: .85rem; }
 
+/* menu do botão direito, no padrão do Windows */
+.menu { position: fixed; z-index: 70; min-width: 15rem; max-width: calc(100vw - 8px); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 6px; padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,.22); font: 400 .88rem var(--f-ui); }
+.mn-item { display: flex; align-items: center; gap: 1.5rem; width: 100%; border: 0; background: none; color: var(--ink); text-align: left; padding: .38rem .8rem .38rem 1.6rem; border-radius: 4px; cursor: default; font: inherit; white-space: nowrap; }
+.mn-item:hover:not(:disabled), .mn-item:focus-visible, .mn-sub.aberto > .mn-item { background: var(--accent-soft); outline: none; }
+.mn-item:disabled { color: var(--muted); opacity: .55; }
+.mn-item.padrao { font-weight: 700; }
+.mn-atalho, .mn-seta { margin-left: auto; color: var(--muted); font-size: .8rem; }
+.mn-seta { font-size: 1rem; line-height: 1; }
+.mn-sep { height: 1px; background: var(--line); margin: 4px 6px; }
+.mn-sub { position: relative; }
+.mn-fly { display: none; position: absolute; left: calc(100% + 2px); top: -5px; min-width: 14rem; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 6px; padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,.22); }
+.menu.abre-esq .mn-fly { left: auto; right: calc(100% + 2px); }
+@media (hover: hover) { .mn-sub:hover > .mn-fly { display: block; } }
+.mn-sub.aberto > .mn-fly, .mn-sub:focus-within > .mn-fly { display: block; }
+
 /* modo servidor */
 .sync { align-self: center; font-size: .8rem; font-weight: 600; padding: .2rem .5rem; border-radius: 999px; white-space: nowrap; }
 .sync.ok { color: var(--ok); } .sync.salvando { color: var(--muted); } .sync.erro { color: var(--furo); background: var(--furo-bg); }
@@ -500,6 +515,7 @@ td.m-furo button:hover { outline: 2px solid var(--ink); }
 <div id="veu" hidden></div>
 <aside id="drawer" hidden aria-label="Detalhes"></aside>
 <div id="pop" class="pop" role="dialog" aria-modal="false" hidden></div>
+<div id="menu" class="menu" role="menu" aria-label="Opções" hidden></div>
 <div id="toast" role="status" hidden></div>
 <script>
 (() => {
@@ -1400,7 +1416,7 @@ function vQuadro() {
           if (furo) h += `<button class="furo" data-act="pop-add" data-posto="${p.id}" data-turno="${t.id}">Cobrir · falta ${furo.faltam}</button>`;
           if (!aqui.length && !furo) h = p.rondas ? `<span class="rondas">VTR/RONDAS FREQUENTES</span>` : naoHoje && p.vagas ? `<span class="vazio">não funciona hoje</span>` : "";
           if (!furo) h += `<button class="add" data-act="pop-add" data-posto="${p.id}" data-turno="${t.id}" aria-label="Pôr GM em ${esc(p.nome)}, ${t.nome}">+ pôr GM</button>`;
-          return `<td class="${t.id === "t2" || t.id === "t3" ? "dia" : "noite"}">${h}</td>`;
+          return `<td class="${t.id === "t2" || t.id === "t3" ? "dia" : "noite"}" data-posto="${p.id}" data-turno="${t.id}">${h}</td>`;
         }).join("");
       }
       const aj = cd.ajustesPosto.get(p.id) || {};
@@ -1443,7 +1459,7 @@ function vQuadro() {
     <label class="toggle"><input type="checkbox" id="q-sofuros" ${ui.soFuros ? "checked" : ""}> Só furos</label>
     ${furosTotal ? `<button class="btn pri" data-act="auto" data-dias="1">Preencher furos sozinho</button>` : ""}
   </div>
-  <p class="dica como">Clique em qualquer nome, posto, viatura ou seção para mudar.</p>
+  <p class="dica como">Clique em qualquer nome, posto, viatura ou seção para mudar. <b>Botão direito</b> mostra todas as opções.</p>
   ${painelPlano()}
   ${cd.alertas.length ? `<div class="alertas">${cd.alertas.map((a) => `<p class="${a.nivel}">${esc(a.texto)}</p>`).join("")}</div>` : ""}
   ${disp}
@@ -2217,6 +2233,114 @@ async function carregarHistorico() {
   } catch { el.innerHTML = `<p class="dica">Não consegui carregar o histórico.</p>`; }
 }
 
+// ---------- MENU DO BOTÃO DIREITO (estilo Windows) ----------
+// Mostra todas as opções do GM, posto, célula ou seção num menu pequeno. A opção em negrito é a mesma do clique normal.
+function tirarDoDia(d, m) {
+  const quem = d.nat === "troca" ? d.titular : d.gm;
+  mudar(`${TIPOS[m]} para ${nomeGm(quem)}. A vaga ficou aberta: clique em "Cobrir".`, () => {
+    if (d.nat === "troca") data.ocorrencias = data.ocorrencias.filter((o) => o.id !== d.origem);
+    data.ocorrencias.push({ id: novoId(), tipo: m, gm: quem, de: ui.dia });
+  });
+}
+function itensGm(d) {
+  const req = valoresCartao(d).req;
+  return [
+    { t: "Editar horário, REQ e observação…", act: "mn-card", padrao: true },
+    { t: "Trocar o GM…", act: "mn-trocar" },
+    { sep: true },
+    ehHeLancada(d) ? { t: "Remover esta hora extra", act: "mn-remover-he" }
+      : { t: "Tirar do dia", sub: [["FOLGA", "Folga"], ["FALTA", "Faltou"], ["ATESTADO", "Atestado"], ["BH_COMP", "Compensação de banco de horas"]].map(([m, t]) => ({ t, act: "mn-tirar", d: { m } })) },
+    { t: "Remanejar para outro posto…", act: "mn-drawer", d: { acao: "remanej" } },
+    { t: "Afastamento (férias, licença, curso)…", act: "mn-drawer", d: { acao: "afast" } },
+    { t: "Mudar lotação…", act: "mn-drawer", d: { acao: "lotacao" } },
+    { sep: true },
+    { t: "Ver ficha do GM", act: "mn-ficha" },
+    ...(req ? [{ t: `Ver tudo do REQ ${req}`, act: "mn-req", d: { req } }] : []),
+    ...itensGerais(),
+  ];
+}
+function itensPosto(p) {
+  const cd = calcularDia(data, ui.dia), fa = cd.fa.find((o) => o.posto === p.id), irmaos = data.postos.filter((x) => x.secao === p.secao), i = irmaos.indexOf(p);
+  return [
+    { t: `Editar ${ehViatura(p) ? "viatura" : "posto"} neste dia…`, act: "mn-posto", d: { aba: "dia" }, padrao: true },
+    fa ? { t: "Voltar a funcionar a partir de hoje", act: "mn-reabrir", d: { oc: fa.id } }
+      : { t: ehViatura(p) ? "Pôr em manutenção (FA) hoje" : "Fechar o posto hoje", act: "mn-fechar", d: { tipo: ehViatura(p) ? "FA" : "FECHADO" } },
+    ...(ehViatura(p) && !fa ? [{ t: "Usar outra viatura hoje…", act: "mn-posto", d: { aba: "dia" } }] : []),
+    { sep: true },
+    { t: "Cadastro (nome, zona, vagas)…", act: "mn-posto", d: { aba: "sempre" } },
+    { t: "Subir", act: "mn-mover", d: { d: "-1" }, desab: i <= 0 },
+    { t: "Descer", act: "mn-mover", d: { d: "1" }, desab: i >= irmaos.length - 1 },
+    ...itensGerais(),
+  ];
+}
+function itensCelula(posto, turno) {
+  const cd = calcularDia(data, ui.dia);
+  return [
+    { t: "Pôr GM aqui…", act: "mn-add", d: { posto, turno }, padrao: true },
+    ...(cd.furos.length ? [{ t: "Preencher furos do dia sozinho", act: "auto", d: { dias: "1" } }] : []),
+    { sep: true },
+    ...itensPosto(postoPorId(posto)).slice(0, 2),
+    ...itensGerais(),
+  ];
+}
+function itensSecao(id) {
+  return [{ t: "Renomear, ordenar ou criar posto…", act: "mn-secao", d: { secao: id }, padrao: true }, ...itensGerais()];
+}
+const itensGerais = () => desfazer.length ? [{ sep: true }, { t: "Desfazer", act: "desfazer", atalho: "Ctrl+Z" }] : [];
+
+function htmlItens(itens) {
+  return itens.map((i) => {
+    if (i.sep) return `<div class="mn-sep" role="separator"></div>`;
+    const dados = Object.entries(i.d || {}).map(([k, v]) => ` data-${k}="${esc(v)}"`).join("");
+    if (i.sub) return `<div class="mn-sub"><button class="mn-item" role="menuitem" aria-haspopup="menu" aria-expanded="false">${esc(i.t)}<span class="mn-seta" aria-hidden="true">›</span></button><div class="mn-fly" role="menu">${htmlItens(i.sub)}</div></div>`;
+    return `<button class="mn-item ${i.padrao ? "padrao" : ""}" role="menuitem" data-act="${i.act}"${dados} ${i.desab ? "disabled" : ""}>${esc(i.t)}${i.atalho ? `<span class="mn-atalho">${i.atalho}</span>` : ""}</button>`;
+  }).join("");
+}
+function abrirMenu(itens, x, y, alvo, ctx) {
+  const m = $("#menu");
+  ui.menu = { alvo, ...ctx, aberto: Date.now() };
+  m.innerHTML = htmlItens(itens);
+  m.hidden = false;
+  m.style.left = "0px"; m.style.top = "0px";
+  const w = m.offsetWidth, h = m.offsetHeight;
+  const L = Math.max(4, Math.min(x, innerWidth - w - 4)), T = Math.max(4, Math.min(y, innerHeight - h - 4));
+  m.style.left = L + "px"; m.style.top = T + "px";
+  m.classList.toggle("abre-esq", L + w + 220 > innerWidth);
+  m.querySelector(".mn-item:not([disabled])")?.focus();
+}
+function fecharMenu() { const m = $("#menu"); if (m && !m.hidden) { m.hidden = true; m.innerHTML = ""; ui.menu = null; } }
+
+document.addEventListener("contextmenu", (e) => {
+  if (e.target.closest("input, textarea, select, #pop, #drawer")) return; // nesses lugares fica o menu normal do navegador
+  const chipEl = e.target.closest("button.chip[data-des]"), postoEl = e.target.closest(".posto-btn"), secEl = e.target.closest(".secao-btn"), cel = e.target.closest("table.quadro td[data-posto]");
+  const alvo = chipEl || postoEl || secEl || cel;
+  if (!alvo) return;
+  e.preventDefault();
+  fecharPop();
+  const r = alvo.getBoundingClientRect();
+  const x = e.clientX || r.left + 8, y = e.clientY || r.bottom; // teclado (Shift+F10) não informa posição
+  if (chipEl) { const d = ui.desMap.get(chipEl.dataset.des); if (d) abrirMenu(itensGm(d), x, y, chipEl, { des: d }); }
+  else if (postoEl) abrirMenu(itensPosto(postoPorId(postoEl.dataset.posto)), x, y, postoEl, { posto: postoEl.dataset.posto });
+  else if (secEl) abrirMenu(itensSecao(secEl.dataset.secao), x, y, secEl, {});
+  else abrirMenu(itensCelula(cel.dataset.posto, cel.dataset.turno), x, y, cel, { posto: cel.dataset.posto });
+});
+// Teclado dentro do menu: setas, Enter, Esc
+document.addEventListener("keydown", (e) => {
+  const m = $("#menu");
+  if (!m || m.hidden) return;
+  const atual = document.activeElement?.closest(".mn-item");
+  const lista = atual ? [...atual.closest("[role=menu], #menu").querySelectorAll(":scope > .mn-item:not([disabled]), :scope > .mn-sub > .mn-item")] : [];
+  const mover = (n) => { if (!lista.length) return; const i = lista.indexOf(atual); lista[(i + n + lista.length) % lista.length].focus(); };
+  if (e.key === "ArrowDown") { e.preventDefault(); mover(1); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); mover(-1); }
+  else if (e.key === "ArrowRight" && atual?.parentElement.classList.contains("mn-sub")) { e.preventDefault(); atual.parentElement.classList.add("aberto"); atual.setAttribute("aria-expanded", "true"); atual.nextElementSibling.querySelector(".mn-item")?.focus(); }
+  else if (e.key === "ArrowLeft" && atual?.closest(".mn-fly")) { e.preventDefault(); const sub = atual.closest(".mn-sub"); sub.classList.remove("aberto"); sub.firstElementChild.setAttribute("aria-expanded", "false"); sub.firstElementChild.focus(); }
+  else if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); const el = ui.menu?.alvo; fecharMenu(); el?.focus?.(); }
+  else if (e.key === "Tab") { fecharMenu(); }
+}, true);
+window.addEventListener("resize", fecharMenu);
+window.addEventListener("scroll", () => { if (ui.menu && Date.now() - ui.menu.aberto > 400) fecharMenu(); }, { passive: true });
+
 // ---------- eventos ----------
 function abrirFuro(posto, turno) {
   const t = TURNOS.find((x) => x.id === turno);
@@ -2224,6 +2348,14 @@ function abrirFuro(posto, turno) {
   render();
 }
 document.addEventListener("click", (e) => {
+  const noMenu = e.target.closest("#menu");
+  if (!noMenu) fecharMenu();
+  else {
+    const sub = e.target.closest(".mn-sub > .mn-item");
+    if (sub) { const aberto = sub.parentElement.classList.toggle("aberto"); sub.setAttribute("aria-expanded", String(aberto)); if (aberto) sub.nextElementSibling.querySelector(".mn-item")?.focus(); return; }
+    const it = e.target.closest(".mn-item[data-act]");
+    if (it && !it.dataset.act.startsWith("mn-")) setTimeout(fecharMenu);
+  }
   if (ui.pop && !e.target.closest("#pop")) fecharPop();
   const el = e.target.closest("[data-act],[data-nav]");
   if (!el) return;
@@ -2240,6 +2372,24 @@ document.addEventListener("click", (e) => {
     case "pop-gm": abrirPop("gm", el, { des: ui.desMap.get(el.dataset.des) }); return;
     case "pop-add": { const t = TURNOS.find((x) => x.id === el.dataset.turno); abrirPop("add", el, { posto: el.dataset.posto, turno: t.id, ini: fmtHm(t.ini), fim: fmtHm(t.fim) }); return; }
     case "pop-fechar": fecharPop(); return;
+    case "mn-card": abrirPop("card", ui.menu.alvo, { des: ui.menu.des }); fecharMenu(); return;
+    case "mn-trocar": abrirPop("gm", ui.menu.alvo, { des: ui.menu.des }); fecharMenu(); return;
+    case "mn-tirar": { const d = ui.menu.des; fecharMenu(); tirarDoDia(d, el.dataset.m); return; }
+    case "mn-remover-he": { const d = ui.menu.des; fecharMenu(); mudar(`Hora extra de ${nomeGm(d.gm)} removida`, () => { data.ocorrencias = data.ocorrencias.filter((o) => o.id !== d.origem); }); return; }
+    case "mn-drawer": { const d = ui.menu.des; fecharMenu(); ui.drawer = { tipo: "gm", gm: d.gm, acao: el.dataset.acao }; render(); return; }
+    case "mn-ficha": { const d = ui.menu.des; fecharMenu(); ui.gm = d.gm; ui.mes = mesDe(ui.dia); ui.view = "ficha"; ui.drawer = null; location.hash = "ficha"; render(); window.scrollTo(0, 0); return; }
+    case "mn-req": { const r = el.dataset.req; fecharMenu(); ui.filtroLanc.req = r; ui.view = "lancamentos"; location.hash = "lancamentos"; render(); return; }
+    case "mn-posto": { const alvo = ui.menu.alvo, posto = ui.menu.posto; fecharMenu(); abrirPop("posto", alvo, { posto, aba: el.dataset.aba }); return; }
+    case "mn-fechar": { const p = postoPorId(ui.menu.posto), tipo = el.dataset.tipo; fecharMenu(); mudar(`${p.nome} ${tipo === "FA" ? "em manutenção" : "fechado"} neste dia. Quem estava lá foi para À disposição.`, () => data.ocorrencias.push({ id: novoId(), tipo, posto: p.id, de: ui.dia, ate: ui.dia })); return; }
+    case "mn-reabrir": { const p = postoPorId(ui.menu.posto), oc = data.ocorrencias.find((o) => o.id === el.dataset.oc); fecharMenu(); mudar(`${p.nome} volta a funcionar a partir de ${ddmm(ui.dia)}`, () => encerrarEm(oc, ui.dia)); return; }
+    case "mn-mover": {
+      const p = postoPorId(ui.menu.posto), d = Number(el.dataset.d), irmaos = data.postos.filter((x) => x.secao === p.secao), viz = irmaos[irmaos.indexOf(p) + d];
+      fecharMenu();
+      if (viz) mudar(`${p.nome} ${d < 0 ? "subiu" : "desceu"} na escala`, () => { const a = data.postos.indexOf(p), b = data.postos.indexOf(viz); [data.postos[a], data.postos[b]] = [data.postos[b], data.postos[a]]; });
+      return;
+    }
+    case "mn-add": { const alvo = ui.menu.alvo, t = TURNOS.find((x) => x.id === el.dataset.turno); fecharMenu(); abrirPop("add", alvo, { posto: el.dataset.posto, turno: t.id, ini: fmtHm(t.ini), fim: fmtHm(t.fim) }); return; }
+    case "mn-secao": { const alvo = ui.menu.alvo; fecharMenu(); abrirPop("secao", alvo, { secao: el.dataset.secao }); return; }
     case "card": { const d = ui.desMap.get(el.dataset.des); if (d) abrirPop("card", el, { des: d }); return; }
     case "card-trocar": ui.pop.modo = "gm"; desenharPop(); return;
     case "card-tirar": {
@@ -2551,6 +2701,7 @@ document.addEventListener("keydown", (e) => {
   if (e.target.id === "cmd" && e.key === "Escape") { e.target.blur(); return; }
   if (e.key === "/" && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName || "")) { e.preventDefault(); $("#cmd").focus(); return; }
   if (e.key === "Escape" && ui.pop) { fecharPop(); return; }
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z" && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName || "")) { e.preventDefault(); $("#btn-desfazer").click(); return; }
   if (e.key === "Enter" && ui.pop?.modo === "card" && /p-ini|p-fim|c-req|c-obs/.test(e.target.id)) { $("[data-act=card-salvar]").click(); return; }
   if (e.key === "Enter" && ui.pop?.modo === "insp" && e.target.id === "in-nome") { $("[data-act=insp-salvar]").click(); return; }
   if (e.key === "Escape" && ui.drawer) { ui.drawer = null; render(); }
