@@ -192,3 +192,22 @@ test("ajustes do dia no posto: fechado, vagas e viatura substituta", () => {
   data.postos.find((p) => p.id === "hosp").ativo = false; data._versao++;
   assert.ok(!calcularDia(data, d).furos.some((f) => f.posto === "hosp"));
 });
+
+test("saída antecipada com REQ de banco de horas desconta do banco; observação acompanha", () => {
+  const data = base();
+  data.requerimentos = { "12345": { tipo: "BH" } };
+  const d = diaDe(data, "D1");
+  data.ocorrencias.push({ id: "h", tipo: "HORARIO", gm: "a", de: d, alvo: "420-1140", ini: "07:00", fim: "17:00", req: "12345", obs: "consulta médica" }); data._versao++;
+  const x = calcularDia(data, d).designacoes.find((y) => y.gm === "a");
+  assert.deepEqual([x.fim, x.req, x.obs, x.bhDebito], [1020, "12345", "consulta médica", 120]);
+  assert.equal(saldoBH(data, "a", "2026-11"), -120);
+  data.requerimentos["12345"].tipo = "OUTRO"; data._versao++;
+  assert.equal(saldoBH(data, "a", "2026-11"), 0);
+});
+
+test("inspetor do dia pode ser trocado só naquele dia", () => {
+  const data = base();
+  const d = diaDe(data, "D1");
+  data.ocorrencias.push({ id: "i", tipo: "INSPETOR", equipe: "D1", de: d, ate: d, nome: "INSP. X" }); data._versao++;
+  assert.equal(calcularDia(data, d).inspetores.get("D1"), "INSP. X");
+});

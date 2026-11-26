@@ -23,6 +23,8 @@ export const AFASTAMENTOS = {
 };
 // Afastamentos de um dia só (valem apenas se o GM estaria de serviço)
 export const DE_UM_DIA = ["FOLGA", "FALTA", "BH_COMP"];
+// O que cada requerimento significa (cadastro de REQ)
+export const TIPOS_REQ = { BH: "Banco de horas", TROCA: "Troca de serviço", HE: "Hora extra", FOLGA: "Folga", AFAST: "Atestado / licença", FERIAS: "Férias", OUTRO: "Outro" };
 
 export const TIPOS = {
   ...AFASTAMENTOS,
@@ -34,6 +36,7 @@ export const TIPOS = {
   FECHADO: "Posto fechado",
   PREFIXO: "Viatura substituta",
   VAGAS: "Vagas alteradas no dia",
+  INSPETOR: "Inspetor do dia",
   HORARIO: "Horário alterado",
 };
 
@@ -145,10 +148,12 @@ export function calcularDia(data, dia) {
     if (idx < 0) continue;
     const d = base[idx];
     const [a, b] = intervalo(oc.ini, oc.fim);
-    const marca = { alvo: oc.alvo, ajuste: oc.id };
+    const marca = { alvo: oc.alvo, ajuste: oc.id, obs: oc.obs || "", alterado: a !== d.ini || b !== d.fim };
     const partes = [];
+    const falta = d.fim - d.ini - Math.max(0, Math.min(b, d.fim) - Math.max(a, d.ini));
+    const ehBH = oc.req && data.requerimentos?.[oc.req]?.tipo === "BH";
     if (a < d.ini) partes.push({ ...d, ...marca, id: d.id + "a", ini: a, fim: Math.min(b, d.ini), nat: "he", fixa: false, req: oc.req || "", extensao: true });
-    if (Math.min(b, d.fim) > Math.max(a, d.ini)) partes.push({ ...d, ...marca, ini: Math.max(a, d.ini), fim: Math.min(b, d.fim) });
+    if (Math.min(b, d.fim) > Math.max(a, d.ini)) partes.push({ ...d, ...marca, ini: Math.max(a, d.ini), fim: Math.min(b, d.fim), req: oc.req || d.req, bhDebito: ehBH && d.nat === "normal" ? falta : 0 });
     if (b > d.fim) partes.push({ ...d, ...marca, id: d.id + "z", ini: Math.max(a, d.fim), fim: b, nat: "he", fixa: false, req: oc.req || "", extensao: true });
     base.splice(idx, 1, ...partes);
   }
@@ -227,7 +232,9 @@ export function calcularDia(data, dia) {
     }
   }
 
-  const res = { dia, designacoes: des, afastados, furos, alertas, fa: [...fa.values()].filter((o) => o.tipo !== "INATIVO"), ajustesPosto,
+  const inspetores = new Map();
+  for (const oc of ocs.filter((o) => o.tipo === "INSPETOR")) inspetores.set(oc.equipe, oc.nome);
+  const res = { dia, inspetores, designacoes: des, afastados, furos, alertas, fa: [...fa.values()].filter((o) => o.tipo !== "INATIVO"), ajustesPosto,
     disposicao: des.filter((d) => d.posto === null), equipes: equipesDoDia(data, dia) };
   void postoPorId;
   cacheDia.set(chave, res);
@@ -298,7 +305,7 @@ export function resumoMes(data, mes) {
       const marca = x.dias[dia] || (x.dias[dia] = []);
       if (d.nat === "he") { x.he += min; x.heNoturna += minutosNoturnos(d.ini, d.fim); if (d.fixa) x.heFixa += min; marca.push("HE"); }
       else if (d.nat === "bh") { x.bhMais += min; marca.push("BH+"); }
-      else { x.normal += min; trabalhouNormal.add(d.gm); if (d.nat === "troca") marca.push("TR"); else marca.push("S"); }
+      else { x.normal += min; x.bhMenos += d.bhDebito || 0; trabalhouNormal.add(d.gm); if (d.nat === "troca") marca.push("TR"); else marca.push("S"); }
     }
     for (const id of trabalhouNormal) get(id).servicos++;
     for (const a of cd.afastados) {
