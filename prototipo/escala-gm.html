@@ -690,6 +690,7 @@ table.quadro tr.secao.operacao th { background: linear-gradient(90deg, var(--op-
 #ed-lista li[data-i] .mot { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; } #ed-lista .he-pill { flex: none; }
 .pacoes .btn .nm-l { display: flex; align-items: center; gap: .2rem; } .pacoes .btn .nm-l .he-pill { margin-left: auto; }
 .ed-rodape { display: flex; justify-content: space-between; gap: .5rem; } .ed-sem, .sem-gm { color: var(--muted); }
+.disposicao button.chip { cursor: grab; } .disposicao button.chip:active { cursor: grabbing; }
 /* finalizar escala e controle de HE */
 .btn.fin { border-color: var(--accent); color: var(--accent); font-weight: 600; padding: .2rem .6rem; }
 .fin-ok { color: var(--ok, #2e7d32); font-weight: 600; } .fin-ok .link { font-weight: 400; margin-left: .3rem; }
@@ -2058,7 +2059,7 @@ function vQuadro() {
       <span class="meta">${equipe(gmPorId(a.gm)?.equipe)?.id || ""}${a.oc.ate && a.oc.ate !== a.oc.de ? ` · volta ${ddmm(somaDias(a.oc.ate, 1))}` : ""}${a.tipo === "TROCA" ? ` · coberto por ${esc(nomeGm(a.oc.substituto))}` : ""}${a.oc.req ? ` · REQ ${esc(a.oc.req)}` : ""}</span></li>`).join("")}</ul></section>`).join("");
   const disp = cd.disposicao.length ? `<section class="disposicao"><h3>À disposição <span class="n">${new Set(cd.disposicao.map((d) => d.gm)).size}</span></h3>
     <p class="dica">Sem posto neste dia (viatura parada ou posto fechado). Use "Cobrir" para mandá-los a um furo.</p><div class="chips">
-    ${[...new Set(cd.disposicao.map((d) => d.gm))].map((id) => { const d = cd.disposicao.find((x) => x.gm === id); return `<button class="chip" data-act="card" data-des="${d.id}"><span class="nm">${esc(nomeGm(id))}</span><span class="hr">${fmtHm(d.ini)}/${fmtHm(d.fim)}</span><span class="req">de ${esc(postoPorId(d.postoOriginal)?.nome)}</span></button>`; }).join("")}
+    ${[...new Set(cd.disposicao.map((d) => d.gm))].map((id) => { const d = cd.disposicao.find((x) => x.gm === id); return `<button class="chip" data-act="disp-mandar" data-des="${d.id}" title="Clique para mandar a uma vaga · ou arraste até o posto"><span class="nm">${esc(nomeGm(id))}</span><span class="hr">${fmtHm(d.ini)}/${fmtHm(d.fim)}</span><span class="req">de ${esc(postoPorId(d.postoOriginal)?.nome)}</span></button>`; }).join("")}
     </div></section>` : "";
 
   return `
@@ -3649,7 +3650,7 @@ function encerrarArrasto() {
 }
 document.addEventListener("pointerdown", (e) => {
   if (e.pointerType !== "mouse" || e.button !== 0 || ui.colando) return; // no toque, use o toque longo (menu) para mover
-  const el = e.target.closest("table.quadro button.chip[data-des]");
+  const el = e.target.closest("table.quadro button.chip[data-des], .disposicao button.chip[data-des]");
   if (!el) return;
   const d = ui.desMap.get(el.dataset.des);
   if (!d) return;
@@ -4343,7 +4344,7 @@ function abrirFuro(posto, turno) {
 }
 document.addEventListener("click", (e) => {
   if (ui.colando && e.target.closest("table.quadro td[data-posto]") && !e.target.closest("#menu, #pop, #inline")) { e.preventDefault(); colar(e.target.closest("td[data-posto]")); return; }
-  if (ui.ignorarClique) { const recente = Date.now() - ui.ignorarClique < 400; ui.ignorarClique = 0; if (recente && e.target.closest("table.quadro")) return; } // o clique que encerra um arrasto não abre o cartão
+  if (ui.ignorarClique) { const recente = Date.now() - ui.ignorarClique < 400; ui.ignorarClique = 0; if (recente && !e.target.closest("#menu")) return; } // o clique que encerra um arrasto não abre o cartão
   const noMenu = e.target.closest("#menu");
   if (!noMenu) fecharMenu();
   else {
@@ -4743,6 +4744,19 @@ document.addEventListener("click", (e) => {
       });
       return;
     }
+    case "disp-mandar": {
+      // GM à disposição: as vagas abertas no horário dele, para mandar com um clique
+      const d = ui.desMap.get(el.dataset.des), cd = calcularDia(data, ui.dia), r = el.getBoundingClientRect();
+      const vagas = cd.furos.filter((f) => { const t = TURNOS.find((x) => x.id === f.turno); return sobrepoe(d.ini, d.fim, t.ini, t.fim) >= 60; });
+      const porPosto = new Map(); for (const f of vagas) { if (!porPosto.has(f.posto)) porPosto.set(f.posto, []); porPosto.get(f.posto).push(f.turno); }
+      const itens = [...porPosto].sort((a, b) => (a[0] === d.postoOriginal ? -1 : 0) - (b[0] === d.postoOriginal ? -1 : 0)).slice(0, 12)
+        .map(([posto, ts]) => ({ t: `Mandar para ${postoPorId(posto).nome} (${ts.map((t) => TURNOS.find((x) => x.id === t).nome.split(" ")[0]).join(" e ")} turno)`, act: "disp-ir", d: { posto } }));
+      abrirMenu([{ t: `${nomeGm(d.gm)} · à disposição ${fmtHm(d.ini)}–${fmtHm(d.fim)}`, act: "ed-nada", desab: true }, { sep: true },
+        ...(itens.length ? itens : [{ t: "Nenhuma vaga aberta no horário dele", act: "ed-nada", desab: true }]),
+        { sep: true }, { t: "Também dá para arrastar até qualquer posto", act: "ed-nada", desab: true }], r.left, r.bottom + 2, el, { des: d });
+      return;
+    }
+    case "disp-ir": { const d = ui.menu.des, p = postoPorId(el.dataset.posto); fecharMenu(); mudar(`${nomeGm(d.gm)} saiu de À disposição para ${p.nome}`, () => data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: d.gm, de: ui.dia, ate: ui.dia, posto: p.id })); return; }
     case "rst-abrir": ui.drawer = { tipo: "resetdia", fora: [] }; render(); return;
     case "rst-ok": {
       const fora = new Set(ui.drawer.fora || []), { ocs, extras } = alteracoesDoDia(ui.dia);
