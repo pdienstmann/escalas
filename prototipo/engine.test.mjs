@@ -387,3 +387,16 @@ test("operador do videomonitoramento só faz HE lá; guarda pode cobrir o videom
   assert.ok(v.includes("op") && v.includes("c"));
   assert.ok(!planejarCobertura(data, [d]).some((x) => x.gm === "op" && x.posto !== "video"));
 });
+
+test("quem se ofereceu para HE no sistema de folgas vem antes no mesmo grupo", () => {
+  const data = base();
+  data.equipes.push({ id: "N2", tipo: "alternado", paridade: 1, periodo: "noite" });
+  data.gms.push({ id: "o1", nome: "AAA", equipe: "N2", lotacao: { posto: "hosp", segmentos: [{ ini: "19:00", fim: "07:00" }] } },
+    { id: "o2", nome: "ZZZ", equipe: "N2", lotacao: { posto: "hosp", segmentos: [{ ini: "19:00", fim: "07:00" }] } });
+  const d = diaDe(data, "D1");
+  data.ocorrencias.push({ id: "f", tipo: "FOLGA", gm: "n", de: d }, { id: "dh", tipo: "DISP_HE", gm: "o2", de: d }); data._versao++;
+  const s = sugerir(data, d, "noite", 1140, 1860).he;
+  const ids = s.map((x) => x.gm.id);
+  assert.ok(ids.indexOf("o2") < ids.indexOf("o1"));
+  assert.match(s.find((x) => x.gm.id === "o2").notas.join(), /se ofereceu/);
+});

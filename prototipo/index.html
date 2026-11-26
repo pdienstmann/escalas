@@ -209,7 +209,10 @@ ul.lista-oc li { display: flex; justify-content: space-between; gap: .5rem; alig
 .painel { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: .9rem 1rem; min-width: 0; display: grid; gap: .6rem; align-content: start; }
 .painel h2 { font-size: 1.05rem; } .painel h3 { font-size: .8rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
 .cols-lanc { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: .9rem; align-items: start; }
-.form-lanc { display: grid; gap: .55rem; }
+.form-lanc { display: grid; grid-template-columns: minmax(0, 1fr); gap: .55rem; min-width: 0; } .form-lanc input, .form-lanc select { box-sizing: border-box; max-width: 100%; }
+.cols-lanc.largo { grid-template-columns: minmax(300px, 440px) minmax(0, 1fr); }
+.prev-imp table.lanc { width: 100%; min-width: 0; font-size: .8rem; table-layout: fixed; } .prev-imp td, .prev-imp th { padding: .25rem .3rem; } .prev-imp select { width: 100%; max-width: none; }
+.form-lanc input[type=file] { width: 100%; }
 .cab-lista { display: flex; justify-content: space-between; gap: .6rem; flex-wrap: wrap; align-items: center; }
 .cab-lista h2 { text-transform: none; }
 table.lanc { font-size: .88rem; min-width: 640px; }
@@ -639,6 +642,19 @@ tr.sit-fap .fr-in { color: var(--furo); font-style: italic; } tr.sit-fa .pref { 
 .ico-fn { width: 1em; height: 1em; vertical-align: -.15em; fill: currentColor; }
 .chip .fn.fn-ico { border: 0; padding: 0; color: var(--accent); font-size: .85rem; }
 .pt .fn-l { display: inline-block; min-width: 9px; padding: 0 1px; margin-right: 3px; border: 1px solid currentColor; border-radius: 2px; font-size: 7px; line-height: 9px; font-weight: 700; text-align: center; vertical-align: 1px; }
+/* lançamentos em seções */
+.sel-gms .chips-gm { display: flex; flex-wrap: wrap; gap: .3rem; margin: .3rem 0 .5rem; }
+.chip-gm { display: inline-flex; align-items: center; gap: .2rem; background: var(--accent-soft); border-radius: 999px; padding: .1rem .2rem .1rem .55rem; font-size: .8rem; font-weight: 600; margin: .1rem .2rem .1rem 0; }
+.chip-gm .ic { padding: 0 .3rem; min-width: 0; height: auto; border: 0; background: none; }
+.faixa-mes { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(3px, 1fr); gap: 1px; min-width: 150px; height: 14px; }
+.faixa-mes i { background: var(--line); border-radius: 1px; } .faixa-mes i.fds { background: var(--line-strong); }
+.faixa-mes i.fe { background: #1f5fbf; } .faixa-mes i.cu { background: #7a3db8; } .faixa-mes i.at { background: #c27c0e; }
+table.lanc-per input[type=date] { font: inherit; font-size: .8rem; border: 1px solid transparent; background: transparent; padding: .1rem; border-radius: 3px; color: inherit; }
+table.lanc-per input[type=date]:hover, table.lanc-per input[type=date]:focus { border-color: var(--line-strong); background: var(--surface); }
+.curso-card { border: 1px solid var(--line); border-radius: 8px; margin-bottom: .7rem; overflow: hidden; }
+.curso-card header { display: flex; gap: .4rem; align-items: baseline; padding: .45rem .6rem; background: var(--accent-soft); } .curso-card header .link { margin-left: auto; }
+.prev-imp { margin: .6rem 0; } .prev-imp tr.sem-par td { background: var(--furo-bg); } .prev-imp select { max-width: 11rem; }
+h2 .n { font-size: .8rem; color: var(--muted); font-weight: 600; margin-left: .3rem; }
 /* finalizar escala e controle de HE */
 .btn.fin { border-color: var(--accent); color: var(--accent); font-weight: 600; padding: .2rem .6rem; }
 .fin-ok { color: var(--ok, #2e7d32); font-weight: 600; } .fin-ok .link { font-weight: 400; margin-left: .3rem; }

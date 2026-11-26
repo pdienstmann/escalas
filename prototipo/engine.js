@@ -40,6 +40,8 @@ export const TIPOS = {
   VAGAS: "Vagas alteradas no dia",
   INSPETOR: "Inspetor do dia",
   FUNCAO: "Função no dia",
+  DISP_HE: "Disponível para HE",
+  DISP_FERIAS: "Declarou férias (folgas)",
   SEM_HE_REC: "HE recorrente suspensa no dia",
   HORARIO: "Horário alterado",
 };
@@ -302,7 +304,7 @@ export function afastamentoNoDia(data, gmId, dia) {
 // · 2 outros GMs do mesmo turno · 3 mesmo posto, turno oposto · 4 o resto. Dentro de cada grupo: abaixo do teto e menos horas.
 export function prioridadeHE(x, teto) {
   const grupo = x.eja ? -1 : x.noPostoHoje ? 1 : x.mesmoPosto && x.mesmoPeriodo ? 0 : x.mesmoPeriodo ? 2 : x.mesmoPosto ? 3 : 4;
-  return [x.bloqueado ? 1 : 0, grupo, x.heMes + x.transporte >= teto ? 1 : 0, x.heMes + x.transporte];
+  return [x.bloqueado ? 1 : 0, grupo, x.disponivel ? 0 : 1, x.heMes + x.transporte >= teto ? 1 : 0, x.heMes + x.transporte];
 }
 // dia (07–19) ou noite (19–07) de um horário em minutos
 export const periodoDoHorario = (m) => { const x = ((m % 1440) + 1440) % 1440; return x >= 420 && x < 1140 ? "dia" : "noite"; };
@@ -359,10 +361,11 @@ export function sugerir(data, dia, postoId, ini, fim) {
     if (gm.ativo === false) continue;
     if (afastados.has(gm.id)) continue;
     if (!podeCobrir(data, gm, dia, postoId)) continue;
+    const disponivel = data.ocorrencias.some((o) => o.tipo === "DISP_HE" && o.gm === gm.id && o.de === dia);
     const minhas = cd.designacoes.filter((d) => d.gm === gm.id);
     const l = livro.get(gm.id) || { he: 0, transporte: 0 };
     const lotPosto = vigente(gm, dia).lotacao?.posto;
-    const base = { gm, heMes: l.he, transporte: l.transporte, mesmoPosto: lotPosto === postoId, noPostoHoje: minhas.some((d) => d.posto === postoId && d.nat !== "he"), mesmoPeriodo: !minhas.length && mesmoPeriodo(data, gm, dia, ini) };
+    const base = { gm, heMes: l.he, transporte: l.transporte, mesmoPosto: lotPosto === postoId, noPostoHoje: minhas.some((d) => d.posto === postoId && d.nat !== "he"), mesmoPeriodo: !minhas.length && mesmoPeriodo(data, gm, dia, ini), disponivel };
     const sobre = minhas.filter((d) => sobrepoe(d.ini, d.fim, ini, fim) > 0);
     if (sobre.length) {
       if (sobre.every(livreParaRemanejar)) {
@@ -381,6 +384,7 @@ export function sugerir(data, dia, postoId, ini, fim) {
     else if (base.mesmoPeriodo) notas.push("de folga · mesmo turno");
     if (base.noPostoHoje) notas.push(eb - ea < fim - ini ? `já está neste posto hoje · estende ${fmtHm(ea)}–${fmtHm(eb)}` : "já está neste posto hoje · estende");
     else if (eb - ea < fim - ini) notas.push(`trabalha hoje · estende ${fmtHm(ea)}–${fmtHm(eb)}`);
+    if (disponivel) notas.unshift("se ofereceu para HE");
     if (total >= teto) notas.push("já passou do teto de HE");
     else if (total + (fim - ini) > teto) notas.push("vai passar do teto de HE");
     if (gm.naoFazHE) notas.push("não realiza HE");
@@ -570,7 +574,8 @@ export function planejarCobertura(data, dias) {
         const l = livro.get(gm.id) || { he: 0, transporte: 0 };
         const x = { gm, heMes: l.he + (heExtra.get(gm.id + mes) || 0), transporte: l.transporte, mesmoPosto: vigente(gm, dia).lotacao?.posto === p.posto,
           noPostoHoje: cd.designacoes.some((d) => d.gm === gm.id && d.posto === p.posto && d.nat !== "he"), bloqueado: false,
-          mesmoPeriodo: !cd.designacoes.some((d) => d.gm === gm.id) && mesmoPeriodo(data, gm, dia, p.ini), eja: !!horarioEja(data, dia, gm.id, p.posto, p.ini, p.fim) };
+          mesmoPeriodo: !cd.designacoes.some((d) => d.gm === gm.id) && mesmoPeriodo(data, gm, dia, p.ini), eja: !!horarioEja(data, dia, gm.id, p.posto, p.ini, p.fim),
+          disponivel: data.ocorrencias.some((o) => o.tipo === "DISP_HE" && o.gm === gm.id && o.de === dia) };
         if (!melhor || compararPrioridade(teto)(x, melhor) < 0) melhor = x;
       }
       // reserva técnica / à disposição só se ninguém puder fazer HE

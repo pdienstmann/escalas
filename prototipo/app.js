@@ -1,7 +1,7 @@
 import {
   TURNOS, TIPOS, AFASTAMENTOS, calcularDia, sugerir, livroMes, resumoMes, saldoBH, somaDias, diaSemana, diasDoMes,
   mesDe, mesSeguinte, fmtHm, fmtHoras, intervalo, sobrepoe, trabalhaNoDia, hm, planejarCobertura, vigente, TIPOS_REQ, montarSegmentos, lerFaixas, descreverSegmentos,
-  limitarExtensao, cargoProprio, horarioEja, horarioProposto, pendencias, diaFinalizado, afastamentoNoDia, heDoDia, diasEmAberto, controleMes, previstaMes,
+  limitarExtensao, cargoProprio, parseData, horarioEja, horarioProposto, pendencias, diaFinalizado, afastamentoNoDia, heDoDia, diasEmAberto, controleMes, previstaMes,
 } from "./engine.js";
 import { criarExemplo } from "./seed.js";
 import { interpretar, norm } from "./comando.js";
@@ -452,7 +452,126 @@ function descreveOc(o) {
   if (o.tipo === "FA") return esc(o.obs || "");
   return o.obs ? esc(o.obs) : "";
 }
+// ---------- LANÇAMENTOS em seções ----------
+const ABAS_LANC = [["ferias", "Férias"], ["cursos", "Cursos"], ["folgas", "Folgas"], ["atestados", "Atestados e licenças"], ["todos", "Todos os lançamentos"]];
+const cobreMes = (o, m) => o.de.slice(0, 7) <= m && (o.ate || o.de).slice(0, 7) >= m;
+const diasEntre = (a, b) => Math.round((parseData(b) - parseData(a)) / 864e5) + 1;
 function vLancamentos() {
+  const L = (ui.lanc ||= { aba: "ferias", sel: [] }), m = ui.filtroLanc.mes;
+  if (ui.filtroLanc.req) L.aba = "todos"; // "Ver tudo do REQ" abre a lista completa filtrada
+  const corpo = { ferias: lancFerias, cursos: lancCursos, folgas: lancFolgas, atestados: lancAtestados, todos: vLancTodos }[L.aba]();
+  return `${L.aba === "todos" ? "" : `<div class="barra"><div class="datas"><button class="ic" data-act="lmes" data-n="-1" aria-label="Mês anterior">‹</button><h2 class="titulo-mes">${nomeMes(m)}</h2><button class="ic" data-act="lmes" data-n="1" aria-label="Próximo mês">›</button></div></div>`}
+  <div class="abas-pad" role="tablist">${ABAS_LANC.map(([k, t]) => `<button role="tab" aria-selected="${L.aba === k}" data-act="lanc-aba" data-aba="${k}">${t}</button>`).join("")}</div>
+  ${corpo}`;
+}
+// escolher vários GMs: campo com sugestões + etiquetas
+function seletorGms(id, rotulo) {
+  const L = ui.lanc;
+  return `<div class="sel-gms"><label>${rotulo} <input id="${id}" list="lg-nomes" placeholder="digite o nome e Enter" autocomplete="off"></label>
+    <datalist id="lg-nomes">${data.gms.filter((g) => g.ativo !== false).map((g) => `<option value="${esc(g.nome)}">`).join("")}</datalist>
+    <div class="chips-gm">${chipsSel()}</div></div>`;
+}
+const chipsSel = () => ui.lanc.sel.map((g) => `<span class="chip-gm">${esc(nomeGm(g))}<button class="ic" data-act="lg-tirar" data-gm="${g}" aria-label="Tirar ${esc(nomeGm(g))}">×</button></span>`).join("") || `<span class="meta">nenhum GM escolhido</span>`;
+// atualiza só as etiquetas, sem apagar o resto do formulário
+const redesenharSel = () => { const c = document.querySelector(".chips-gm"); if (c) c.innerHTML = chipsSel(); };
+// faixa do mês: um quadradinho por dia, pintado nos dias do período
+function faixaMes(m, periodos, cls) {
+  return `<div class="faixa-mes">${diasDoMes(m).map((d) => `<i class="${periodos.some(([a, b]) => a <= d && d <= b) ? cls : ""} ${[0, 6].includes(diaSemana(d)) ? "fds" : ""}" title="${ddmm(d)}"></i>`).join("")}</div>`;
+}
+const btnExcluir = (o) => (ui.confirmar === o.id ? `<button class="btn perigo" data-act="apagar" data-id="${o.id}">Confirmar</button>` : `<button class="link" data-act="pre-apagar" data-id="${o.id}">Excluir</button>`);
+function lancFerias() {
+  const m = ui.filtroLanc.mes, fs = data.ocorrencias.filter((o) => o.tipo === "FERIAS" && cobreMes(o, m)).sort((a, b) => a.de.localeCompare(b.de) || nomeGm(a.gm).localeCompare(nomeGm(b.gm)));
+  const declarou = data.ocorrencias.filter((o) => o.tipo === "DISP_FERIAS" && o.de.startsWith(m) && !fs.some((f) => f.gm === o.gm));
+  return `<div class="cols-lanc"><section class="painel form-lanc"><h2>Lançar férias</h2>
+    <p class="dica">Escolha um ou vários GMs com o mesmo período. Nos dias de férias o GM sai da escala sozinho.</p>
+    ${seletorGms("lg-gm", "GMs")}
+    <div class="linha"><label>De <input type="date" id="lg-de" value="${m}-01"></label><label>Até <input type="date" id="lg-ate" value="${somaDias(m + "-01", 29)}"></label></div>
+    <label>REQ <input id="lg-req" placeholder="opcional"></label><label>Observação <input id="lg-obs" placeholder="opcional"></label>
+    <button class="btn pri" data-act="lg-lancar" data-tipo="FERIAS">Lançar férias</button></section>
+  <section class="painel"><h2>Férias em ${nomeMes(m).toLowerCase()} <span class="n">${fs.length}</span></h2>
+    ${declarou.length ? `<p class="aviso-falta">Declararam férias no sistema de folgas, mas ainda não têm férias lançadas: ${declarou.map((o) => `<b>${esc(nomeGm(o.gm))}</b>`).join(", ")}.</p>` : ""}
+    ${fs.length ? `<div class="tabela-wrap"><table class="lanc lanc-per"><thead><tr><th>GM</th><th>Período</th><th>Dias</th><th class="faixa-th">${nomeMes(m)}</th><th>REQ</th><th></th></tr></thead><tbody>
+      ${fs.map((o) => `<tr data-nome="${esc(nomeGm(o.gm).toLowerCase())}"><td><button class="link" data-act="abrir-ficha" data-gm="${o.gm}">${esc(nomeGm(o.gm))}</button></td>
+        <td class="num"><input type="date" class="lg-data" data-oc="${o.id}" data-campo="de" value="${o.de}"> a <input type="date" class="lg-data" data-oc="${o.id}" data-campo="ate" value="${o.ate || o.de}"></td>
+        <td class="num">${diasEntre(o.de, o.ate || o.de)}</td><td>${faixaMes(m, [[o.de, o.ate || o.de]], "fe")}</td><td class="num">${esc(o.req || "")}</td><td>${btnExcluir(o)}</td></tr>`).join("")}
+      </tbody></table></div>` : `<p class="meta">Ninguém de férias neste mês.</p>`}</section></div>`;
+}
+function lancCursos() {
+  const m = ui.filtroLanc.mes, cs = data.ocorrencias.filter((o) => o.tipo === "CURSO" && cobreMes(o, m));
+  const grupos = new Map();
+  for (const o of cs) { const k = o.curso || "Curso sem nome"; if (!grupos.has(k)) grupos.set(k, []); grupos.get(k).push(o); }
+  return `<div class="cols-lanc"><section class="painel form-lanc"><h2>Lançar curso</h2>
+    <p class="dica">Um curso com vários GMs. Nos dias do curso o GM sai da escala. Depois dá para mudar o período de cada um.</p>
+    <label>Nome do curso <input id="lc-nome" list="lc-cursos" placeholder="ex.: Reciclagem de tiro"><datalist id="lc-cursos">${[...new Set(data.ocorrencias.filter((o) => o.curso).map((o) => o.curso))].map((c) => `<option value="${esc(c)}">`).join("")}</datalist></label>
+    <label>Local / detalhes <input id="lc-local" placeholder="opcional"></label>
+    ${seletorGms("lg-gm", "GMs")}
+    <div class="linha"><label>De <input type="date" id="lg-de" value="${m}-01"></label><label>Até <input type="date" id="lg-ate" value="${m}-01"></label></div>
+    <label>REQ <input id="lg-req" placeholder="opcional"></label>
+    <button class="btn pri" data-act="lg-lancar" data-tipo="CURSO">Lançar curso</button></section>
+  <section class="painel"><h2>Cursos em ${nomeMes(m).toLowerCase()} <span class="n">${grupos.size}</span></h2>
+    ${[...grupos].map(([nome, os]) => `<div class="curso-card"><header><b>${esc(nome)}</b>${os[0].local ? ` <span class="meta">· ${esc(os[0].local)}</span>` : ""}<span class="meta"> · ${os.length} GM${os.length === 1 ? "" : "s"}</span>
+        <button class="link" data-act="lc-mais" data-curso="${esc(nome)}">+ GM neste curso</button></header>
+      <table class="lanc lanc-per"><tbody>${os.sort((a, b) => nomeGm(a.gm).localeCompare(nomeGm(b.gm))).map((o) => `<tr><td><button class="link" data-act="abrir-ficha" data-gm="${o.gm}">${esc(nomeGm(o.gm))}</button></td>
+        <td class="num"><input type="date" class="lg-data" data-oc="${o.id}" data-campo="de" value="${o.de}"> a <input type="date" class="lg-data" data-oc="${o.id}" data-campo="ate" value="${o.ate || o.de}"></td>
+        <td>${faixaMes(m, [[o.de, o.ate || o.de]], "cu")}</td><td>${btnExcluir(o)}</td></tr>`).join("")}</tbody></table></div>`).join("") || `<p class="meta">Nenhum curso neste mês.</p>`}</section></div>`;
+}
+function lancAtestados() {
+  const m = ui.filtroLanc.mes, as = data.ocorrencias.filter((o) => ["ATESTADO", "LICENCA"].includes(o.tipo) && cobreMes(o, m)).sort((a, b) => a.de.localeCompare(b.de));
+  return `<div class="cols-lanc"><section class="painel form-lanc"><h2>Lançar atestado ou licença</h2>
+    ${seletorGms("lg-gm", "GM")}
+    <label>Tipo <select id="la-tipo"><option value="ATESTADO">Atestado</option><option value="LICENCA">Licença</option></select></label>
+    <div class="linha"><label>De <input type="date" id="lg-de" value="${ui.dia.startsWith(m) ? ui.dia : m + "-01"}"></label><label>Até <input type="date" id="lg-ate" value="${ui.dia.startsWith(m) ? ui.dia : m + "-01"}"></label></div>
+    <label>REQ <input id="lg-req" placeholder="opcional"></label><label>Observação <input id="lg-obs" placeholder="ex.: licença-saúde"></label>
+    <button class="btn pri" data-act="lg-lancar" data-tipo="ATESTADO">Lançar</button></section>
+  <section class="painel"><h2>Atestados e licenças em ${nomeMes(m).toLowerCase()} <span class="n">${as.length}</span></h2>
+    ${as.length ? `<div class="tabela-wrap"><table class="lanc lanc-per"><thead><tr><th>GM</th><th>Tipo</th><th>Período</th><th>Dias</th><th class="faixa-th">${nomeMes(m)}</th><th>REQ / obs</th><th></th></tr></thead><tbody>
+      ${as.map((o) => `<tr><td><button class="link" data-act="abrir-ficha" data-gm="${o.gm}">${esc(nomeGm(o.gm))}</button></td><td>${esc(TIPOS[o.tipo])}</td>
+        <td class="num"><input type="date" class="lg-data" data-oc="${o.id}" data-campo="de" value="${o.de}"> a <input type="date" class="lg-data" data-oc="${o.id}" data-campo="ate" value="${o.ate || o.de}"></td>
+        <td class="num">${diasEntre(o.de, o.ate || o.de)}</td><td>${faixaMes(m, [[o.de, o.ate || o.de]], "at")}</td><td>${esc([o.req, o.obs].filter(Boolean).join(" · "))}</td><td>${btnExcluir(o)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="meta">Nenhum atestado ou licença neste mês.</p>`}</section></div>`;
+}
+function lancFolgas() {
+  const m = ui.filtroLanc.mes, L = ui.lanc;
+  const fs = data.ocorrencias.filter((o) => o.tipo === "FOLGA" && o.de.startsWith(m));
+  const disp = data.ocorrencias.filter((o) => o.tipo === "DISP_HE" && o.de.startsWith(m));
+  const porGm = new Map();
+  for (const o of fs) { if (!porGm.has(o.gm)) porGm.set(o.gm, []); porGm.get(o.gm).push(o); }
+  const alternados = data.gms.filter((g) => g.ativo !== false && equipe(vigente(g, m + "-15").equipe)?.tipo === "alternado");
+  const faltam = alternados.filter((g) => (porGm.get(g.id) || []).length < 2);
+  const imp = L.import;
+  return `<div class="cols-lanc largo"><section class="painel form-lanc"><h2>Sistema de Folgas</h2>
+    <p class="dica">No Sistema de Folgas, exporte o CSV da competência e escolha o arquivo aqui. As folgas entram na escala, e quem se ofereceu para HE passa a aparecer primeiro nas sugestões daquele dia.</p>
+    <label class="arq">Arquivo CSV <input type="file" id="fg-arq" accept=".csv,text/csv"></label>
+    ${imp ? `<div class="prev-imp"><p><b>${imp.linhas.length}</b> GMs no arquivo · <b>${imp.linhas.filter((x) => x.gm).length}</b> encontrados${imp.linhas.some((x) => !x.gm) ? ` · <b class="ruim">${imp.linhas.filter((x) => !x.gm).length}</b> sem correspondência` : ""}</p>
+      <table class="lanc"><thead><tr><th>No arquivo</th><th>Na escala</th><th>Folgas</th><th>HE</th></tr></thead><tbody>${imp.linhas.map((x, i) => `<tr class="${x.gm ? "" : "sem-par"}"><td>${esc(x.nome)}</td>
+        <td><select data-imp="${i}"><option value="">— ignorar —</option>${data.gms.filter((g) => g.ativo !== false).map((g) => `<option value="${g.id}" ${g.id === x.gm ? "selected" : ""}>${esc(g.nome)}</option>`).join("")}</select></td>
+        <td class="num">${x.folgas.map(ddmm).join(", ")}${x.ferias ? " · férias" : ""}</td><td class="num">${x.he.length || ""}</td></tr>`).join("")}</tbody></table>
+      <button class="btn pri" data-act="fg-aplicar">Aplicar na escala</button> <button class="link" data-act="fg-cancelar">Cancelar</button>
+      <p class="dica">Aplicar de novo substitui o que veio do sistema de folgas nesses dias (folgas lançadas à mão ficam).</p></div>` : ""}
+    <h3>Folga lançada à mão</h3>${seletorGms("lg-gm", "GM")}<label>Dia <input type="date" id="lg-de" value="${ui.dia.startsWith(m) ? ui.dia : m + "-01"}"></label>
+    <button class="btn" data-act="lg-lancar" data-tipo="FOLGA">Lançar folga</button></section>
+  <section class="painel"><h2>Folgas em ${nomeMes(m).toLowerCase()} <span class="n">${fs.length}</span></h2>
+    ${faltam.length ? `<p class="aviso-falta">${faltam.length} GM${faltam.length === 1 ? "" : "s"} 12x36 com menos de 2 folgas: ${faltam.slice(0, 12).map((g) => esc(g.nome)).join(", ")}${faltam.length > 12 ? "…" : ""}</p>` : ""}
+    ${porGm.size ? `<div class="tabela-wrap"><table class="lanc"><thead><tr><th>GM</th><th>Folgas</th><th>Origem</th><th>Disponível p/ HE</th></tr></thead><tbody>
+      ${[...porGm].sort((a, b) => nomeGm(a[0]).localeCompare(nomeGm(b[0]))).map(([g, os]) => `<tr data-nome="${esc(nomeGm(g).toLowerCase())}"><td><button class="link" data-act="abrir-ficha" data-gm="${g}">${esc(nomeGm(g))}</button></td>
+        <td>${os.sort((a, b) => a.de.localeCompare(b.de)).map((o) => `<span class="chip-gm">${ddmm(o.de)}<button class="ic" data-act="pre-apagar" data-id="${o.id}" aria-label="Excluir folga">×</button></span>`).join("")}${os.some((o) => ui.confirmar === o.id) ? `<button class="btn perigo" data-act="apagar" data-id="${ui.confirmar}">Confirmar exclusão</button>` : ""}</td>
+        <td class="meta">${os.some((o) => o.origem === "folgas-gmnh") ? `Sistema de Folgas${os[0].req ? ` · ${esc(os[0].req)}` : ""}` : "à mão"}</td>
+        <td class="num meta">${disp.filter((o) => o.gm === g).map((o) => ddmm(o.de)).join(", ")}</td></tr>`).join("")}</tbody></table></div>` : `<p class="meta">Nenhuma folga lançada neste mês.</p>`}</section></div>`;
+}
+// lê o CSV do Sistema de Folgas: "NOME DO GM";"FOLGA 1";"FOLGA 2";"FÉRIAS NO MÊS";"DISPONIBILIDADE HORA EXTRA";"PROTOCOLO";"VERSÃO"
+function lerCsvFolgas(txt) {
+  const linhas = txt.replace(/^\uFEFF/, "").split(/\r?\n/).filter((l) => l.trim());
+  const cel = (l) => (l.match(/("([^"]|"")*"|[^;]*)(;|$)/g) || []).map((c) => c.replace(/;$/, "").replace(/^"|"$/g, "").replace(/""/g, '"').replace(/^'/, "").trim()).slice(0, -1).concat([]);
+  const cab = cel(linhas[0]).map((c) => norm(c));
+  const col = (nome) => cab.findIndex((c) => c.includes(norm(nome)));
+  const iN = col("nome"), iF = cab.map((c, i) => (c.startsWith("folga") ? i : -1)).filter((i) => i >= 0), iFe = col("ferias"), iHe = col("hora extra"), iP = col("protocolo");
+  if (iN < 0) return null;
+  const achar = (nome) => { const n = norm(nome), ativos = data.gms.filter((g) => g.ativo !== false);
+    return ativos.find((g) => norm(g.nome) === n) || (() => { const c = ativos.filter((g) => n.split(" ").includes(norm(g.nome)) || norm(g.nome).split(" ").includes(n)); return c.length === 1 ? c[0] : null; })(); };
+  const iso = (v) => { const t = String(v || "").trim(); if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t; const b = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/); return b ? `${b[3]}-${b[2].padStart(2, "0")}-${b[1].padStart(2, "0")}` : ""; };
+  return { linhas: linhas.slice(1).map((l) => { const c = cel(l), g = achar(c[iN] || "");
+    return { nome: c[iN] || "", gm: g?.id || "", folgas: iF.map((i) => iso(c[i])).filter(Boolean), ferias: iFe >= 0 && /^sim$/i.test(c[iFe] || ""), he: iHe >= 0 ? (c[iHe] || "").split(/[,\s]+/).map(iso).filter(Boolean) : [], protocolo: iP >= 0 ? c[iP] || "" : "" }; }).filter((x) => x.nome) };
+}
+function vLancTodos() {
   const fl = ui.filtroLanc;
   const lista = data.ocorrencias.filter((o) => fl.req ? o.req === fl.req : (!fl.tipo || o.tipo === fl.tipo) && (o.de.startsWith(fl.mes) || (o.ate || o.de).startsWith(fl.mes) || (o.de < fl.mes && (o.ate || o.de) > fl.mes)))
     .sort((a, b) => b.de.localeCompare(a.de) || (a.id < b.id ? 1 : -1));
@@ -2382,6 +2501,40 @@ document.addEventListener("click", (e) => {
     case "fr-novo": { const m = $("#fr-nm").value.trim().toUpperCase(), pf = $("#fr-np").value.trim(); if (!m) { toast("Escreva o modelo."); return; } mudar(`Modelo ${m} adicionado`, () => (data.frota ||= []).push({ id: novoId(), prefixo: pf, modelo: m, situacao: "QAP", finalidade: "", guarnicao: "" })); return; }
     case "fr-renomear": { const m = el.dataset.modelo, novo = prompt("Nome do modelo", m)?.trim().toUpperCase(); if (!novo || novo === m) return; mudar(`Modelo ${m} → ${novo}`, () => { for (const v of data.frota) if ((v.modelo || "SEM MODELO") === m) v.modelo = novo; }); return; }
     case "pad-novo": abrirPop("novo", el, { secao: el.dataset.secao }); $("#np-nome")?.focus(); return;
+    case "lanc-aba": ui.lanc.aba = el.dataset.aba; ui.lanc.sel = []; render(); return;
+    case "lg-tirar": ui.lanc.sel = ui.lanc.sel.filter((g) => g !== el.dataset.gm); redesenharSel(); return;
+    case "lg-lancar": {
+      const tipo = el.dataset.tipo === "ATESTADO" ? $("#la-tipo").value : el.dataset.tipo, L = ui.lanc;
+      const pend = $("#lg-gm")?.value.trim(); if (pend) { const g = data.gms.find((x) => norm(x.nome) === norm(pend)); if (g && !L.sel.includes(g.id)) L.sel.push(g.id); }
+      const de = $("#lg-de").value, ate = tipo === "FOLGA" ? de : $("#lg-ate")?.value || de, req = $("#lg-req")?.value.trim() || "", obs = $("#lg-obs")?.value.trim() || "";
+      const curso = $("#lc-nome")?.value.trim().toUpperCase() || "", local = $("#lc-local")?.value.trim() || "";
+      if (!L.sel.length) { toast("Escolha pelo menos um GM."); $("#lg-gm")?.focus(); return; }
+      if (!de || ate < de) { toast("Confira o período."); return; }
+      if (tipo === "CURSO" && !curso) { toast("Escreva o nome do curso."); $("#lc-nome").focus(); return; }
+      const gms = [...L.sel];
+      mudar(`${TIPOS[tipo]}${curso ? ` ${curso}` : ""}: ${gms.length === 1 ? nomeGm(gms[0]) : `${gms.length} GMs`} · ${ddmm(de)}${ate !== de ? ` a ${ddmm(ate)}` : ""}`, () => {
+        for (const g of gms) data.ocorrencias.push({ id: novoId(), tipo, gm: g, de, ...(tipo === "FOLGA" ? {} : { ate }), ...(req ? { req } : {}), ...(obs ? { obs } : {}), ...(curso ? { curso } : {}), ...(local ? { local } : {}) });
+        L.sel = [];
+      });
+      return;
+    }
+    case "lc-mais": { const c = el.dataset.curso, o = data.ocorrencias.find((x) => x.tipo === "CURSO" && x.curso === c); ui.lanc.sel = []; redesenharSel(); $("#lc-nome").value = c; if (o) { $("#lc-local").value = o.local || ""; $("#lg-de").value = o.de; $("#lg-ate").value = o.ate || o.de; } $("#lg-gm").focus(); return; }
+    case "fg-cancelar": ui.lanc.import = null; render(); return;
+    case "fg-aplicar": {
+      const imp = ui.lanc.import, ok = imp.linhas.filter((x) => x.gm);
+      const dias = new Set(ok.flatMap((x) => [...x.folgas, ...x.he])), meses = new Set([...dias].map((d) => d.slice(0, 7)));
+      const nF = ok.reduce((t, x) => t + x.folgas.length, 0), nH = ok.reduce((t, x) => t + x.he.length, 0);
+      mudar(`Sistema de Folgas: ${nF} folgas de ${ok.length} GMs${nH ? ` e ${nH} disponibilidades para HE` : ""}`, () => {
+        data.ocorrencias = data.ocorrencias.filter((o) => !(o.origem === "folgas-gmnh" && meses.has(o.de.slice(0, 7))));
+        for (const x of ok) {
+          for (const d of x.folgas) data.ocorrencias.push({ id: novoId(), tipo: "FOLGA", gm: x.gm, de: d, origem: "folgas-gmnh", ...(x.protocolo ? { req: x.protocolo } : {}) });
+          for (const d of x.he) data.ocorrencias.push({ id: novoId(), tipo: "DISP_HE", gm: x.gm, de: d, origem: "folgas-gmnh" });
+          if (x.ferias && x.folgas[0]) data.ocorrencias.push({ id: novoId(), tipo: "DISP_FERIAS", gm: x.gm, de: x.folgas[0].slice(0, 7) + "-01", origem: "folgas-gmnh" });
+        }
+        ui.lanc.import = null;
+      });
+      return;
+    }
     case "pad-posto": abrirPop("posto", el, { posto: el.dataset.posto, aba: "sempre" }); return;
     case "pad-semvaga": mudarVagasPeriodo(postoPorId(el.dataset.posto), el.dataset.per, 0); return;
     case "pad-vagas": { const p = postoPorId(ui.menu.posto); fecharMenu(); mudarVagasPeriodo(p, el.dataset.per, Number(el.dataset.n)); return; }
@@ -2677,6 +2830,21 @@ document.addEventListener("change", (e) => {
   if (id === "pad-desde" && v) { ui.padrao.desde = v; ui.padrao.mes = mesDe(v); render(); return; }
   if (e.target.closest?.(".form-hf")) { previaHorarioFixo(); return; }
   if (e.target.dataset?.cgm) { salvarCelHoras(e.target); return; }
+  if (e.target.classList?.contains("lg-data")) {
+    const o = data.ocorrencias.find((x) => x.id === e.target.dataset.oc), campo = e.target.dataset.campo;
+    if (!o || !v) return;
+    const de = campo === "de" ? v : o.de, ate = campo === "ate" ? v : o.ate || o.de;
+    if (ate < de) { toast("A data final não pode ser antes da inicial."); render(); return; }
+    mudar(`${TIPOS[o.tipo]} de ${nomeGm(o.gm)}: ${ddmm(de)} a ${ddmm(ate)}`, () => { o.de = de; o.ate = ate; });
+    return;
+  }
+  if (e.target.id === "fg-arq") {
+    const f = e.target.files?.[0]; if (!f) return;
+    f.text().then((txt) => { const r = lerCsvFolgas(txt); if (!r || !r.linhas.length) { toast("Não reconheci o arquivo. Use o CSV exportado pelo Sistema de Folgas."); return; } ui.lanc.import = r; render(); });
+    return;
+  }
+  if (e.target.dataset?.imp) { ui.lanc.import.linhas[Number(e.target.dataset.imp)].gm = v; render(); return; }
+  if (e.target.id === "lg-gm" && v.trim()) { const g = data.gms.find((x) => norm(x.nome) === norm(v.trim())); if (g && !ui.lanc.sel.includes(g.id)) ui.lanc.sel.push(g.id); if (g) { e.target.value = ""; redesenharSel(); e.target.focus(); } return; }
   if (e.target.dataset?.fr && e.target.dataset.campo) {
     const x = data.frota.find((y) => y.id === e.target.dataset.fr), campo = e.target.dataset.campo, val = campo === "prefixo" ? v.trim() : v.trim();
     if (!x || (x[campo] || "") === val) return;
