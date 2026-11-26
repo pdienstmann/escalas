@@ -31,6 +31,9 @@ export const TIPOS = {
   TROCA: "Troca de serviço",
   REMANEJ: "Remanejamento",
   FA: "Viatura fora de atividade",
+  FECHADO: "Posto fechado",
+  PREFIXO: "Viatura substituta",
+  VAGAS: "Vagas alteradas no dia",
   HORARIO: "Horário alterado",
 };
 
@@ -75,7 +78,15 @@ export function minutosNoturnos(a, b) {
 }
 
 // ---------- regime ----------
-export function trabalhaNoDia(data, gm, dia) {
+// Lotação com vigência: gm.historico guarda as lotações anteriores com a data em que terminaram,
+// assim mudar alguém de posto hoje não reescreve os meses passados.
+export function vigente(gm, dia) {
+  if (!gm.historico?.length) return gm;
+  for (const h of [...gm.historico].sort((a, b) => a.ate.localeCompare(b.ate))) if (dia <= h.ate) return { ...gm, equipe: h.equipe, lotacao: h.lotacao, dias: h.dias };
+  return gm;
+}
+export function trabalhaNoDia(data, gmAtual, dia) {
+  const gm = vigente(gmAtual, dia);
   const eq = data.equipes.find((e) => e.id === gm.equipe);
   if (!eq || gm.ativo === false) return false;
   if (eq.tipo === "alternado") return trabalhaAlternado(data, eq, dia);
@@ -118,10 +129,12 @@ export function calcularDia(data, dia) {
   // 1. Base: lotação de quem trabalha no dia
   const base = [];
   for (const gm of data.gms) {
-    if (!trabalhaNoDia(data, gm, dia) || !gm.lotacao) continue;
-    for (const s of gm.lotacao.segmentos) {
+    if (!trabalhaNoDia(data, gm, dia)) continue;
+    const lot = vigente(gm, dia).lotacao;
+    if (!lot) continue;
+    for (const s of lot.segmentos) {
       const [ini, fim] = intervalo(s.ini, s.fim);
-      base.push({ id: `b${seq++}`, gm: gm.id, posto: gm.lotacao.posto, funcao: gm.lotacao.funcao || "", ini, fim,
+      base.push({ id: `b${seq++}`, gm: gm.id, posto: lot.posto, funcao: lot.funcao || "", ini, fim,
         nat: s.tipo === "he" ? "he" : "normal", fixa: s.tipo === "he", req: s.tipo === "he" ? "HE fixa" : "", origem: "base" });
     }
   }
@@ -179,7 +192,15 @@ export function calcularDia(data, dia) {
 
   // 6. Viatura fora de atividade: guarnição vai para "à disposição"
   const fa = new Map();
-  for (const oc of ocs.filter((o) => o.tipo === "FA")) fa.set(oc.posto, oc);
+  for (const oc of ocs.filter((o) => o.tipo === "FA" || o.tipo === "FECHADO")) fa.set(oc.posto, oc);
+  for (const p of data.postos) if (p.ativo === false) fa.set(p.id, { tipo: "INATIVO", posto: p.id, de: dia });
+  // ajustes do dia em postos: viatura substituta e vagas diferentes
+  const ajustesPosto = new Map();
+  for (const oc of ocs.filter((o) => o.tipo === "PREFIXO" || o.tipo === "VAGAS")) {
+    const a = ajustesPosto.get(oc.posto) || {};
+    if (oc.tipo === "PREFIXO") a.prefixo = oc; else a.vagas = oc;
+    ajustesPosto.set(oc.posto, a);
+  }
   for (const d of des) if (d.posto && fa.has(d.posto)) { d.postoOriginal = d.posto; d.posto = null; }
 
   // 7. Conflitos de horário do mesmo GM
@@ -196,17 +217,17 @@ export function calcularDia(data, dia) {
   // 8. Furos: vagas por turno não preenchidas
   const furos = [];
   for (const p of data.postos) {
-    if (fa.has(p.id) || !p.vagas) continue;
+    if (fa.has(p.id) || !(ajustesPosto.get(p.id)?.vagas || p.vagas)) continue;
     if (p.dias && !p.dias.includes(diaSemana(dia))) continue;
     for (const t of TURNOS) {
-      const vagas = p.vagas[t.id] || 0;
+      const vagas = (ajustesPosto.get(p.id)?.vagas?.vagas || p.vagas)[t.id] || 0;
       if (!vagas) continue;
       const ocupantes = new Set(des.filter((d) => d.posto === p.id && sobrepoe(d.ini, d.fim, t.ini, t.fim) >= 60).map((d) => d.gm));
       if (ocupantes.size < vagas) furos.push({ posto: p.id, turno: t.id, faltam: vagas - ocupantes.size });
     }
   }
 
-  const res = { dia, designacoes: des, afastados, furos, alertas, fa: [...fa.values()],
+  const res = { dia, designacoes: des, afastados, furos, alertas, fa: [...fa.values()].filter((o) => o.tipo !== "INATIVO"), ajustesPosto,
     disposicao: des.filter((d) => d.posto === null), equipes: equipesDoDia(data, dia) };
   void postoPorId;
   cacheDia.set(chave, res);

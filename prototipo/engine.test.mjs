@@ -164,3 +164,31 @@ test("falta retira o GM e o planejador cobre a semana sem repetir pessoas", () =
   assert.equal(plano[0].tipo, "REMANEJ"); assert.equal(plano[0].gm, "r");
   assert.equal(plano[1].tipo, "HE"); assert.equal(plano[1].gm, "c");
 });
+
+test("lotação com vigência: mudar de posto não reescreve o passado", () => {
+  const data = base();
+  const d = diaDe(data, "D1");
+  const depois = d.slice(0, 8) + String(Number(d.slice(8)) + 2).padStart(2, "0");
+  const a = data.gms.find((g) => g.id === "a");
+  a.historico = [{ ate: d, equipe: "D1", lotacao: a.lotacao }];
+  a.lotacao = { posto: "hosp", funcao: "", segmentos: [{ ini: "07:00", fim: "19:00" }] };
+  data._versao++;
+  assert.equal(calcularDia(data, d).designacoes.find((x) => x.gm === "a").posto, "vtr");
+  assert.equal(calcularDia(data, depois).designacoes.find((x) => x.gm === "a").posto, "hosp");
+});
+
+test("ajustes do dia no posto: fechado, vagas e viatura substituta", () => {
+  const data = base();
+  const d = diaDe(data, "D1");
+  data.ocorrencias.push({ id: "v", tipo: "VAGAS", posto: "vtr", de: d, ate: d, vagas: { t2: 3, t3: 2 } },
+    { id: "p", tipo: "PREFIXO", posto: "vtr", de: d, ate: d, nome: "VTR 1290" }); data._versao++;
+  let cd = calcularDia(data, d);
+  assert.deepEqual(cd.furos.filter((f) => f.posto === "vtr").map((f) => [f.turno, f.faltam]), [["t2", 1]]);
+  assert.equal(cd.ajustesPosto.get("vtr").prefixo.nome, "VTR 1290");
+  data.ocorrencias.push({ id: "f", tipo: "FECHADO", posto: "vtr", de: d, ate: d }); data._versao++;
+  cd = calcularDia(data, d);
+  assert.equal(cd.disposicao.length, 2);
+  assert.ok(!cd.furos.some((f) => f.posto === "vtr"));
+  data.postos.find((p) => p.id === "hosp").ativo = false; data._versao++;
+  assert.ok(!calcularDia(data, d).furos.some((f) => f.posto === "hosp"));
+});

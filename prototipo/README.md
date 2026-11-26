@@ -9,7 +9,7 @@ Nada é copiado para os dias; a escala de cada data, os furos e o livro de horas
 - `seed.js`: dados de exemplo com nomes fictícios.
 - `app.js` + `index.html`: telas (semana com cobertura e pendências, quadro do dia, lançamentos, mês e horas, ficha do GM, folha em ofício, ajustes).
 
-Edição direta no quadro, como planilha: clicar no nome troca o GM (pergunta o motivo: troca, folga, falta, atestado, compensação), clicar no horário muda a hora (o que passa do horário normal vira HE sozinho), "+ pôr GM" coloca alguém (reserva primeiro, depois HE). "Preencher sozinho" propõe a cobertura do dia ou da semana para conferir e confirmar.
+Edição direta no quadro, como planilha: clicar no nome troca o GM (pergunta o motivo: troca, folga, falta, atestado, compensação), clicar no horário muda a hora (o que passa do horário normal vira HE sozinho), "+ pôr GM" coloca alguém (reserva primeiro, depois HE). Clicar no posto/viatura abre "Só neste dia" (manutenção/FA, posto fechado, viatura substituta, vagas do dia) e "Sempre" (nome, zona, tipo, vagas, ordem, seção, desativar); clicar na seção renomeia, reordena e cria postos/seções. Lotação do GM muda "a partir de" uma data, sem reescrever o passado. "Preencher sozinho" propõe a cobertura do dia ou da semana para conferir e confirmar.
 
 Regras: reserva técnica é um posto que não gera furo e é a primeira opção para cobrir faltas (remanejar, sem HE); a alternância 12x36 vem de um único dia de referência configurável em Ajustes.
 
