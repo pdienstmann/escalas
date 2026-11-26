@@ -37,6 +37,7 @@ export const TIPOS = {
   PREFIXO: "Viatura substituta",
   VAGAS: "Vagas alteradas no dia",
   INSPETOR: "Inspetor do dia",
+  SEM_HE_REC: "HE recorrente suspensa no dia",
   HORARIO: "Horário alterado",
 };
 
@@ -131,11 +132,23 @@ export function calcularDia(data, dia) {
 
   // 1. Base: lotação de quem trabalha no dia
   const base = [];
+  const equipesHoje = equipesDoDia(data, dia);
+  const semRec = new Set(ocs.filter((o) => o.tipo === "SEM_HE_REC" && o.de === dia).map((o) => o.gm));
   for (const gm of data.gms) {
+    // HE recorrente: hora extra fixa em dias da semana, independente do regime (ex.: entrada e saída de escola)
+    for (const r of gm.heRecorrente || []) {
+      if (gm.ativo === false || semRec.has(gm.id) || !(r.dias || [1, 2, 3, 4, 5]).includes(diaSemana(dia))) continue;
+      for (const s of r.segmentos) {
+        const [ini, fim] = intervalo(s.ini, s.fim);
+        base.push({ id: `b${seq++}`, gm: gm.id, posto: r.posto, funcao: "", ini, fim, nat: "he", fixa: true, recorrente: true, req: "HE recorrente", origem: "base" });
+      }
+    }
     if (!trabalhaNoDia(data, gm, dia)) continue;
     const lot = vigente(gm, dia).lotacao;
     if (!lot) continue;
-    for (const s of lot.segmentos) {
+    // horário que alterna: em dias de certas equipes (ex.: padrão par) o semanal cumpre outro horário
+    const segs = lot.alternativa && lot.alternativa.quando.some((e) => equipesHoje.includes(e)) ? lot.alternativa.segmentos : lot.segmentos;
+    for (const s of segs) {
       const [ini, fim] = intervalo(s.ini, s.fim);
       base.push({ id: `b${seq++}`, gm: gm.id, posto: lot.posto, funcao: lot.funcao || "", ini, fim,
         nat: s.tipo === "he" ? "he" : "normal", fixa: s.tipo === "he", req: s.tipo === "he" ? "HE fixa" : "", origem: "base" });
@@ -152,6 +165,7 @@ export function calcularDia(data, dia) {
     const partes = [];
     const falta = d.fim - d.ini - Math.max(0, Math.min(b, d.fim) - Math.max(a, d.ini));
     const ehBH = oc.req && data.requerimentos?.[oc.req]?.tipo === "BH";
+    if (oc.semHE) { base.splice(idx, 1, { ...d, ...marca, ini: a, fim: b, req: oc.req || d.req, deslocado: true }); continue; } // só mudou o horário: tudo continua normal
     if (a < d.ini) partes.push({ ...d, ...marca, id: d.id + "a", ini: a, fim: Math.min(b, d.ini), nat: "he", fixa: false, req: oc.req || "", extensao: true });
     if (Math.min(b, d.fim) > Math.max(a, d.ini)) partes.push({ ...d, ...marca, ini: Math.max(a, d.ini), fim: Math.min(b, d.fim), req: oc.req || d.req, bhDebito: ehBH && d.nat === "normal" ? falta : 0 });
     if (b > d.fim) partes.push({ ...d, ...marca, id: d.id + "z", ini: Math.max(a, d.fim), fim: b, nat: "he", fixa: false, req: oc.req || "", extensao: true });
@@ -382,7 +396,9 @@ export function pendencias(data, dia) {
     const fs = cd.furos.filter((f) => f.posto === p.id && ts.includes(f.turno));
     if (!fs.length) continue;
     const t0 = TURNOS.find((x) => x.id === fs[0].turno), t1 = TURNOS.find((x) => x.id === fs[fs.length - 1].turno);
-    out.push({ dia, posto: p.id, per, turnos: fs.map((f) => f.turno), faltam: Math.max(...fs.map((f) => f.faltam)), ini: t0.ini, fim: t1.fim });
+    // posto de reforço (ex.: EJA 19–23) cobre só o horário do reforço
+    const [ri, rf] = p.reforco ? intervalo(p.reforco.ini, p.reforco.fim) : [t0.ini, t1.fim];
+    out.push({ dia, posto: p.id, per, turnos: fs.map((f) => f.turno), faltam: Math.max(...fs.map((f) => f.faltam)), ini: ri, fim: rf });
   }
   return out;
 }

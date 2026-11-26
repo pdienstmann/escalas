@@ -38,6 +38,23 @@ def minutos(h, m):
     return int(h) * 60 + int(m)
 
 
+def ler_cabecalho(caminho):
+    """Linhas do cabeçalho, inspetor chefe e as duas imagens (brasões) do topo da primeira página."""
+    import base64, io
+    with pdfplumber.open(caminho) as pdf:
+        pg = pdf.pages[0]
+        t = max(pg.extract_tables(), key=len)
+        linhas = [r[1].strip() for r in t[:6] if r[1] and not r[1].upper().startswith("INSP")]
+        chefe = next((re.sub(r"(?i)^INSP\.?\s*CHEFE:?\s*", "", r[0]).strip() for r in t[:8] if r[0] and "CHEFE" in r[0].upper()), "")
+        brasoes = {}
+        imgs = sorted([im for im in pg.images if im["top"] < 120], key=lambda im: im["x0"])
+        for lado, im in zip(("esq", "dir"), [imgs[0], imgs[-1]] if len(imgs) >= 2 else imgs):
+            png = io.BytesIO()
+            pg.crop((im["x0"], im["top"], im["x1"], im["bottom"])).to_image(resolution=200).original.save(png, "PNG")
+            brasoes[lado] = "data:image/png;base64," + base64.b64encode(png.getvalue()).decode()
+    return linhas, chefe, brasoes
+
+
 def ler_padrao(caminho, avisos):
     """Retorna lista de linhas: {secao, rotulo, sub, celulas:[(turno, nome, funcao, ini, fim, he_horas, he_mais)], rondas}."""
     linhas, secao, posto, sub = [], None, None, None
@@ -118,6 +135,7 @@ def converter(impar, par, mes_ref):
     padroes = {"impar": ler_padrao(impar, avisos), "par": ler_padrao(par, avisos)}
     secoes, postos = [], {}
     gms = {}  # chave nome -> {nome, por_padrao: {padrao: [(posto, funcao, ini, fim, he, he_mais)]}}
+    recorrentes = {}  # HE+ com nome: hora extra recorrente
 
     def achar_posto(secao, rotulo):
         k = chave_posto(rotulo)
@@ -139,7 +157,7 @@ def converter(impar, par, mes_ref):
                 nome = re.sub(r"\s*\((SEG ?A? ?SEX|SEG SEX|SEGASEX|12X36)\)", "", rot, flags=re.I).strip()
                 nome = re.sub(r"VTR\s*(\d)", r"VTR \1", nome, flags=re.I)
                 tipo = "reserva" if norm(ln["secao"]).startswith("RESERVA") else "moto" if re.search(r"\bMT\b", nome) else "vtr" if re.match(r"^(NOITE )?VTR", nome, re.I) else None
-                p = {"id": f"p{len(postos) + 1}", "secao": ln["secao"], "nome": nome.upper(), "tipo": tipo, "sub": None, "seg": seg,
+                p = {"id": f"p{len(postos) + 1}", "secao": ln["secao"], "nome": nome.upper(), "tipo": tipo, "sub": None, "seg": seg, "reforco": None,
                      "rondas": False, "contagem": {"impar": {t: set() for t in TURNOS}, "par": {t: set() for t in TURNOS}}, "obs": set()}
                 postos[chave_posto(rot)] = p
             if ln["sub"] and not p["sub"]:
@@ -158,13 +176,17 @@ def converter(impar, par, mes_ref):
                     grupos.append([cel])
             for g in grupos:
                 nome = g[0][1]
-                if not nome:  # vaga de HE+ sem nome (reforço só de HE)
+                hm = lambda m: f"{m // 60:02d}:{m % 60:02d}"
+                if not nome:  # vaga de reforço só de HE (ex.: 19–23 nos dias úteis): vira vaga a cobrir
                     for cel in g:
-                        p["obs"].add(f"reforço HE {cel[3] // 60:02d}:{cel[3] % 60:02d}–{cel[4] // 60:02d}:{cel[4] % 60:02d}")
+                        p["reforco"] = {"ini": hm(cel[3]), "fim": hm(cel[4]), "turno": cel[0]}
                     continue
-                if any(cel[6] for cel in g):  # HE+ recorrente: não é lotação
-                    p["obs"].add("HE+ " + " e ".join(f"{cel[3] // 60:02d}:{cel[3] % 60:02d}–{cel[4] // 60:02d}:{cel[4] % 60:02d}" for cel in g) + f" ({nome})")
-                    avisos.append(f"HE+ recorrente não importada como lotação: {nome} em {p['nome']}")
+                if any(cel[6] for cel in g):  # HE+ com nome: hora extra recorrente do GM, todo dia útil
+                    rec = recorrentes.setdefault(norm(nome), {"nome": nome, "posto": p["id"], "segmentos": []})
+                    for cel in g:
+                        seg = {"ini": hm(cel[3]), "fim": hm(cel[4])}
+                        if seg not in rec["segmentos"]:
+                            rec["segmentos"].append(seg)
                     continue
                 k = norm(nome)
                 # entre linhas diferentes só junta nomes idênticos (ex.: um nome e o mesmo nome com uma letra a mais são pessoas diferentes); na mesma linha, grafias parecidas
@@ -208,10 +230,12 @@ def converter(impar, par, mes_ref):
     for k, g in gms.items():
         n += 1
         pp = g["por_padrao"]
+        alternativa = None
         if "impar" in pp and "par" in pp:
             equipe, base = "SEM", pp["impar"]
             if segmentos(pp["impar"]) != segmentos(pp["par"]):
-                avisos.append(f"{g['nome']}: horário diferente nos padrões (usei o ímpar)")
+                alternativa = {"quando": ["PD", "PN"], "segmentos": segmentos(pp["par"])}
+                avisos.append(f"{g['nome']}: horário que alterna (um nos dias do padrão ímpar, outro nos do par)")
         else:
             padrao = "impar" if "impar" in pp else "par"
             base = pp[padrao]
@@ -224,8 +248,16 @@ def converter(impar, par, mes_ref):
         posto_id = base[0][0]
         cel = [c for c in base if c[0] == posto_id]
         segs = segmentos(cel) if any(c[2] is not None for c in cel) else [{"ini": "07:00", "fim": "19:00", "tipo": "normal"}]
-        lista_gms.append({"id": f"g{n}", "nome": g["nome"], "matricula": "", "equipe": equipe,
-                          "lotacao": {"posto": posto_id, "funcao": cel[0][1], "segmentos": segs}})
+        lot = {"posto": posto_id, "funcao": cel[0][1], "segmentos": segs}
+        if alternativa:
+            lot["alternativa"] = alternativa
+        lista_gms.append({"id": f"g{n}", "nome": g["nome"], "matricula": "", "equipe": equipe, "lotacao": lot})
+    for k, rec in recorrentes.items():
+        dono = next((gm for gm in lista_gms if norm(gm["nome"]) == k), None)
+        if dono:
+            dono["heRecorrente"] = [{"posto": rec["posto"], "dias": [1, 2, 3, 4, 5], "segmentos": rec["segmentos"]}]
+        else:
+            avisos.append(f"HE recorrente sem GM lotado com esse nome: {rec['nome']}")
 
     semanal = {gm["id"] for gm in lista_gms if gm["equipe"] == "SEM"}
     por_nome = {norm(gm["nome"]): gm for gm in lista_gms}
@@ -251,21 +283,30 @@ def converter(impar, par, mes_ref):
         if p["seg"] or so_semanal:
             item["dias"] = [1, 2, 3, 4, 5]
             item["obs"] = "SEG A SEX"
+        if p["reforco"]:
+            r = p["reforco"]
+            item["reforco"] = {"ini": r["ini"], "fim": r["fim"]}
+            item["vagas"] = {**item.get("vagas", {t: 0 for t in TURNOS}), r["turno"]: 1}
+            item["dias"] = [1, 2, 3, 4, 5]
+            item["obs"] = f"SEG A SEX · reforço {r['ini']}–{r['fim']}"
         if p["obs"]:
             item["obs"] = " · ".join(filter(None, [item.get("obs"), *sorted(p["obs"])]))
         saida_postos.append(item)
 
+    linhas_cab, chefe, brasoes = ler_cabecalho(impar)
     estado = {
-        "config": {"tetoHE": 60, "mesInicial": mes_ref[:7], "cabecalho": "PREFEITURA MUNICIPAL DE NOVO HAMBURGO · GUARDA MUNICIPAL · SEÇÃO DE ESCALA",
+        "config": {"tetoHE": 60, "mesInicial": mes_ref[:7], "cabecalho": " · ".join(linhas_cab), "cabecalhoLinhas": linhas_cab,
+                   "inspetorChefe": chefe, "brasoes": brasoes,
                    "transporteInicial": {}, "ancora": {"data": mes_ref, "equipes": ["ID", "IN"]}},
         "equipes": [
-            {"id": "ID", "nome": "Ímpar · dia", "tipo": "alternado", "paridade": 1, "periodo": "dia", "inspetor": ""},
-            {"id": "IN", "nome": "Ímpar · noite", "tipo": "alternado", "paridade": 1, "periodo": "noite", "inspetor": ""},
-            {"id": "PD", "nome": "Par · dia", "tipo": "alternado", "paridade": 0, "periodo": "dia", "inspetor": ""},
-            {"id": "PN", "nome": "Par · noite", "tipo": "alternado", "paridade": 0, "periodo": "noite", "inspetor": ""},
+            # nomes fixos de equipe; o rótulo "padrão ímpar/par" é calculado mês a mês pelo sistema
+            {"id": "ID", "nome": f"Equipe A · dia (ímpar em {mes_ref[5:7]}/{mes_ref[2:4]})", "tipo": "alternado", "paridade": 1, "periodo": "dia", "inspetor": ""},
+            {"id": "IN", "nome": f"Equipe A · noite (ímpar em {mes_ref[5:7]}/{mes_ref[2:4]})", "tipo": "alternado", "paridade": 1, "periodo": "noite", "inspetor": ""},
+            {"id": "PD", "nome": f"Equipe B · dia (par em {mes_ref[5:7]}/{mes_ref[2:4]})", "tipo": "alternado", "paridade": 0, "periodo": "dia", "inspetor": ""},
+            {"id": "PN", "nome": f"Equipe B · noite (par em {mes_ref[5:7]}/{mes_ref[2:4]})", "tipo": "alternado", "paridade": 0, "periodo": "noite", "inspetor": ""},
             {"id": "SEM", "nome": "Semanal (seg a sex)", "tipo": "semanal", "periodo": "dia"},
         ],
-        "secoes": [{"id": f"s{i + 1}", "nome": s.upper()} for i, s in enumerate(secoes)],
+        "secoes": [{"id": f"s{i + 1}", "nome": s.upper(), **({"grupamento": True} if norm(s).startswith("EQUIPE") else {})} for i, s in enumerate(secoes)],
         "postos": saida_postos, "gms": lista_gms, "ocorrencias": [], "requerimentos": {},
     }
     return estado, avisos

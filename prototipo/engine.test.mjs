@@ -220,3 +220,45 @@ test("remanejamento parcial: só o trecho escolhido muda de posto", () => {
   assert.deepEqual(x, [["vtr", 420, 780], ["hosp", 780, 1140]]);
   assert.equal(livroMes(data, "2026-11").get("a").he, 0);
 });
+
+test("horário que alterna conforme o padrão do dia", () => {
+  const data = base();
+  const h = data.gms.find((g) => g.id === "h");
+  h.lotacao.alternativa = { quando: ["D2"], segmentos: [{ ini: "11:00", fim: "12:00" }, { ini: "13:00", fim: "20:00" }, { ini: "20:00", fim: "23:00", tipo: "he" }] };
+  data._versao++;
+  const dias = ["2026-11-02", "2026-11-03"]; // seg e ter: um é dia da D1, o outro da D2
+  const r = dias.map((d) => calcularDia(data, d).designacoes.filter((x) => x.gm === "h").map((x) => `${x.ini}-${x.fim}`).join(","));
+  assert.notEqual(r[0], r[1]);
+  assert.ok(r.some((x) => x.startsWith("660-720")));
+});
+
+test("HE recorrente em dias úteis, mesmo para quem é 12x36; pode ser suspensa num dia", () => {
+  const data = base();
+  const n = data.gms.find((g) => g.id === "n");
+  n.heRecorrente = [{ posto: "hosp", dias: [1, 2, 3, 4, 5], segmentos: [{ ini: "07:00", fim: "08:00" }, { ini: "11:00", fim: "13:00" }] }];
+  data._versao++;
+  const seg = calcularDia(data, "2026-11-02").designacoes.filter((x) => x.gm === "n" && x.recorrente);
+  assert.equal(seg.length, 2);
+  assert.equal(calcularDia(data, "2026-11-01").designacoes.filter((x) => x.recorrente).length, 0); // domingo
+  assert.equal(resumoMes(data, "2026-11").get("n").heFixa, 21 * 180);
+  data.ocorrencias.push({ id: "s", tipo: "SEM_HE_REC", gm: "n", de: "2026-11-02" }); data._versao++;
+  assert.equal(calcularDia(data, "2026-11-02").designacoes.filter((x) => x.recorrente).length, 0);
+});
+
+test("mudar só o horário (sem HE): 07–19 vira 13–01 normal", () => {
+  const data = base();
+  const d = diaDe(data, "D1");
+  data.ocorrencias.push({ id: "h1", tipo: "HORARIO", gm: "a", de: d, alvo: "420-1140", ini: "13:00", fim: "01:00", semHE: true }); data._versao++;
+  const x = calcularDia(data, d).designacoes.filter((y) => y.gm === "a");
+  assert.deepEqual(x.map((y) => [y.ini, y.fim, y.nat]), [[780, 1500, "normal"]]);
+  assert.equal(livroMes(data, "2026-11").get("a").he, 0);
+});
+
+test("vaga de reforço (EJA) é coberta só no horário do reforço", () => {
+  const data = base();
+  data.postos.push({ id: "eja", nome: "EMEF EJA", vagas: { t4: 1 }, dias: [1, 2, 3, 4, 5], reforco: { ini: "19:00", fim: "23:00" } });
+  data._versao++;
+  const p = planejarCobertura(data, ["2026-11-02"]).find((x) => x.posto === "eja");
+  assert.deepEqual([p.ini, p.fim], [1140, 1380]);
+  assert.equal(planejarCobertura(data, ["2026-11-01"]).filter((x) => x.posto === "eja").length, 0); // domingo não
+});
