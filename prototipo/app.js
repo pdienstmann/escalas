@@ -1839,7 +1839,7 @@ document.addEventListener("click", (e) => {
     case "dr-rem": case "dr-rem-parcial": {
       const { des: d, drop } = ui.menu, p = postoPorId(drop.posto), t = TURNOS.find((x) => x.id === drop.turno), parcial = el.dataset.act === "dr-rem-parcial";
       fecharMenu();
-      const oc = { id: novoId(), tipo: "REMANEJ", gm: d.gm, de: ui.dia, ate: ui.dia, posto: p.id, obs: "Arrastado no quadro" };
+      const oc = { id: novoId(), tipo: "REMANEJ", gm: d.gm, de: ui.dia, ate: ui.dia, posto: p.id };
       if (parcial) { oc.ini = fmtHm(Math.max(d.ini, t.ini)); oc.fim = fmtHm(Math.min(d.fim, t.fim)); }
       mudar(`${nomeGm(d.gm)} remanejado para ${p.nome}${parcial ? ` (${oc.ini}–${oc.fim})` : ""}`, () => data.ocorrencias.push(oc));
       return;
@@ -1872,7 +1872,7 @@ document.addEventListener("click", (e) => {
       const atual = data.ocorrencias.find((o) => o.tipo === "HORARIO" && o.gm === quem && o.de === ui.dia && o.alvo === alvo);
       mudar(`${nomeGm(d.gm)} trabalha ${ini}–${fim}${d.posto !== p.id ? ` em ${p.nome}` : ""}, sem hora extra`, () => {
         if (atual) Object.assign(atual, { ini, fim, semHE: true }); else data.ocorrencias.push({ id: novoId(), tipo: "HORARIO", gm: quem, de: ui.dia, alvo, ini, fim, semHE: true });
-        if (d.posto !== p.id) data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: d.gm, de: ui.dia, ate: ui.dia, posto: p.id, obs: "Arrastado no quadro" });
+        if (d.posto !== p.id) data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: d.gm, de: ui.dia, ate: ui.dia, posto: p.id });
       });
       return;
     }

@@ -24,7 +24,7 @@ export const AFASTAMENTOS = {
 // Afastamentos de um dia só (valem apenas se o GM estaria de serviço)
 export const DE_UM_DIA = ["FOLGA", "FALTA", "BH_COMP"];
 // textos que versões antigas gravavam sozinhas no remanejamento (não são observação do escalante)
-export const OBS_AUTO_REMANEJ = new Set(["Remanejado", "Da reserva técnica"]);
+export const OBS_AUTO_REMANEJ = new Set(["Remanejado", "Da reserva técnica", "Arrastado no quadro"]);
 // O que cada requerimento significa (cadastro de REQ)
 export const TIPOS_REQ = { BH: "Banco de horas", TROCA: "Troca de serviço", HE: "Hora extra", FOLGA: "Folga", AFAST: "Atestado / licença", FERIAS: "Férias", OUTRO: "Outro" };
 
