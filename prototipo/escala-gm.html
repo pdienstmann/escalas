@@ -458,7 +458,7 @@ table.quadro button.chip[data-des]:focus-visible { outline: 2px solid var(--acce
 .ed-lista-box { position: absolute; left: 0; top: calc(100% + 3px); width: max(100%, 300px); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.22); padding: 4px; }
 .ed-lista-box.cima { top: auto; bottom: calc(100% + 3px); }
 .ed-titulo { margin: 0; padding: .2rem .5rem .3rem; font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
-#ed-lista { list-style: none; margin: 0; padding: 0; max-height: 300px; overflow-y: auto; }
+#ed-lista { list-style: none; margin: 0; padding: 0; max-height: 360px; overflow-y: auto; overscroll-behavior: contain; }
 #ed-lista li[data-i] { display: flex; justify-content: space-between; gap: 1rem; padding: .32rem .5rem; border-radius: 4px; cursor: default; font-size: .88rem; }
 #ed-lista li[data-i] b { font-family: var(--f-grid); }
 #ed-lista li[data-i] span { color: var(--muted); font-size: .78rem; white-space: nowrap; }
@@ -2265,10 +2265,12 @@ function lancFolgas() {
   return `<div class="cols-lanc largo"><section class="painel form-lanc"><h2>Sistema de Folgas</h2>
     <p class="dica">No Sistema de Folgas, exporte o CSV da competência e escolha o arquivo aqui. As folgas entram na escala, e quem se ofereceu para HE passa a aparecer primeiro nas sugestões daquele dia.</p>
     ${SERVIDOR ? `<button class="btn pri" data-act="fg-buscar">Buscar do Sistema de Folgas (${MESES[Number(m.slice(5)) - 1]})</button><p class="dica">Consulta direto o Sistema de Folgas, só para leitura. Depois de aplicar uma vez, a escala avisa (selo no topo) quando algo mudar lá.</p>
+    ${syncFolgas.comp[m]?.situacao === "OPEN" ? `<p class="meta">Escolha de folgas aberta no sistema${syncFolgas.comp[m].fecha ? ` até ${ddmm(syncFolgas.comp[m].fecha.slice(0, 10))}` : ""}: o ideal é trazer depois que fechar.</p>` : ""}
     ${data.folgasSync?.[m] ? `<p class="meta">Sincronizado com o Sistema de Folgas · ${Object.keys(data.folgasSync[m].linhas).length} pedidos. <button class="link" data-act="fm-conferir">Conferir alterações agora</button></p>` : ""}
     <details><summary class="meta">ou importar o arquivo CSV</summary>` : ""}
     <label class="arq">Arquivo CSV <input type="file" id="fg-arq" accept=".csv,text/csv"></label>${SERVIDOR ? "</details>" : ""}
-    ${imp ? `<div class="prev-imp">${imp.competencia ? `<p class="meta">Competência <b>${esc(imp.competencia.rotulo || imp.competencia.mes)}</b> · ${esc({ OPEN: "aberta (ainda recebendo pedidos)", CLOSED: "encerrada", CONSOLIDATED: "consolidada", SCHEDULED: "agendada", DRAFT: "rascunho" }[imp.competencia.situacao] || imp.competencia.situacao)}</p>` : ""}<p><b>${imp.linhas.length}</b> GMs ${imp.competencia ? "no Sistema de Folgas" : "no arquivo"} · <b>${imp.linhas.filter((x) => x.gm).length}</b> encontrados${imp.linhas.some((x) => !x.gm) ? ` · <b class="ruim">${imp.linhas.filter((x) => !x.gm).length}</b> sem correspondência` : ""}</p>
+    ${imp ? `<div class="prev-imp">${imp.competencia ? `<p class="meta">Competência <b>${esc(imp.competencia.rotulo || imp.competencia.mes)}</b> · ${esc({ OPEN: "escolha aberta", CLOSED: "escolha encerrada", CONSOLIDATED: "consolidada", SCHEDULED: "escolha ainda não abriu", DRAFT: "rascunho" }[imp.competencia.situacao] || imp.competencia.situacao)}</p>
+      ${imp.competencia.situacao === "OPEN" ? `<p class="aviso-falta">A escolha de folgas ainda está aberta${imp.competencia.fecha ? ` até ${ddmm(imp.competencia.fecha.slice(0, 10))}` : ""}: os GMs ainda podem mudar. Dá para aplicar agora, mas a escala só vai avisar as mudanças depois que a escolha fechar.</p>` : ""}` : ""}<p><b>${imp.linhas.length}</b> GMs ${imp.competencia ? "no Sistema de Folgas" : "no arquivo"} · <b>${imp.linhas.filter((x) => x.gm).length}</b> encontrados${imp.linhas.some((x) => !x.gm) ? ` · <b class="ruim">${imp.linhas.filter((x) => !x.gm).length}</b> sem correspondência` : ""}</p>
       <table class="lanc"><thead><tr><th>No arquivo</th><th>Na escala</th><th>Folgas</th><th>HE</th></tr></thead><tbody>${imp.linhas.map((x, i) => `<tr class="${x.gm ? "" : "sem-par"}"><td>${esc(x.nome)}</td>
         <td><select data-imp="${i}"><option value="">— ignorar —</option>${data.gms.filter((g) => g.ativo !== false).map((g) => `<option value="${g.id}" ${g.id === x.gm ? "selected" : ""}>${esc(g.nome)}</option>`).join("")}</select></td>
         <td class="num">${x.folgas.map(ddmm).join(", ")}${x.ferias ? " · férias" : ""}</td><td class="num">${x.he.length || ""}</td></tr>`).join("")}</tbody></table>
@@ -2287,7 +2289,9 @@ function lancFolgas() {
 // ---------- SINCRONIA COM O SISTEMA DE FOLGAS ----------
 // O Sistema de Folgas é a fonte das folgas. data.folgasSync[mes] guarda o que já foi aplicado (ou ignorado) de cada pedido:
 // { em, linhas: { idNoSistema: { versao, nome, gm, folgas, he, ferias, protocolo } } }. A escala só avisa o que mudou desde então.
-const syncFolgas = { mudancas: [], buscando: false, em: 0 };
+// Escolha de folgas: no mês anterior (mais ou menos de 15 a 25) os GMs mudam à vontade; depois, só por solicitação.
+// Enquanto a escolha está aberta a escala não avisa cada mudança; quando fecha, avisa que dá para trazer.
+const syncFolgas = { mudancas: [], buscando: false, em: 0, comp: {}, prontos: [] };
 const igualLista = (a, b) => JSON.stringify([...(a || [])].sort()) === JSON.stringify([...(b || [])].sort());
 const folgasDoSistemaNaEscala = (gm, mes) => data.ocorrencias.filter((o) => o.tipo === "FOLGA" && o.gm === gm && o.origem === "folgas-gmnh" && o.de.startsWith(mes)).map((o) => o.de).sort();
 function diffFolgas(mes, linhas) {
@@ -2309,20 +2313,24 @@ function diffFolgas(mes, linhas) {
 // confere ao abrir a escala, no máximo uma vez por hora (o resultado fica guardado neste navegador)
 async function conferirFolgas(forcar) {
   if (!SERVIDOR || syncFolgas.buscando) return;
-  const meses = Object.keys(data.folgasSync || {}).filter((m) => m >= mesDe(hojeBase())).sort().slice(0, 2);
-  if (!meses.length) { syncFolgas.mudancas = []; mostrarSeloFolgas(); return; }
+  const atual = mesDe(hojeBase());
+  const meses = [...new Set([...Object.keys(data.folgasSync || {}).filter((m) => m >= atual), atual, mesSeguinte(atual)])].sort().slice(0, 3);
+  const usar = (res) => {
+    syncFolgas.comp = Object.fromEntries(Object.entries(res).map(([m, r]) => [m, r.competencia]));
+    // durante a escolha aberta não avisa cada mudança
+    syncFolgas.mudancas = Object.entries(res).filter(([, r]) => r.competencia?.situacao !== "OPEN").flatMap(([m, r]) => diffFolgas(m, r.linhas));
+    syncFolgas.prontos = Object.entries(res).filter(([m, r]) => !data.folgasSync?.[m] && ["CLOSED", "CONSOLIDATED"].includes(r.competencia?.situacao)).map(([m]) => m);
+  };
   let cache = null;
-  try { cache = JSON.parse(localStorage.getItem("folgas-cache") || "null"); } catch { /* sem armazenamento */ }
-  if (!forcar && cache && Date.now() - cache.em < 3600e3 && meses.every((m) => cache.meses[m])) {
-    syncFolgas.mudancas = meses.flatMap((m) => diffFolgas(m, cache.meses[m])); syncFolgas.em = cache.em; mostrarSeloFolgas(); return;
-  }
+  try { cache = JSON.parse(localStorage.getItem("folgas-cache2") || "null"); } catch { /* sem armazenamento */ }
+  if (!forcar && cache && Date.now() - cache.em < 3600e3 && meses.every((m) => m in cache.meses)) { usar(Object.fromEntries(Object.entries(cache.meses).filter(([, r]) => r))); syncFolgas.em = cache.em; mostrarSeloFolgas(); return; }
   syncFolgas.buscando = true;
   try {
     const res = {};
-    for (const m of meses) { const { status, corpo } = await api(`/api/folgas?mes=${m}`); if (status === 200) res[m] = corpo.linhas; }
+    for (const m of meses) { const { status, corpo } = await api(`/api/folgas?mes=${m}`); res[m] = status === 200 ? { linhas: corpo.linhas, competencia: corpo.competencia } : null; }
     syncFolgas.em = Date.now();
-    try { localStorage.setItem("folgas-cache", JSON.stringify({ em: syncFolgas.em, meses: res })); } catch { /* ignora */ }
-    syncFolgas.mudancas = Object.entries(res).flatMap(([m, l]) => diffFolgas(m, l));
+    try { localStorage.setItem("folgas-cache2", JSON.stringify({ em: syncFolgas.em, meses: res })); } catch { /* ignora */ }
+    usar(Object.fromEntries(Object.entries(res).filter(([, r]) => r)));
   } catch { /* sem conexão: tenta na próxima vez */ }
   syncFolgas.buscando = false;
   mostrarSeloFolgas();
@@ -2333,8 +2341,9 @@ if (typeof location !== "undefined" && location.protocol === "file:") window.__t
 function mostrarSeloFolgas() {
   const el = $("#selo-folgas"); if (!el) return;
   // recalcula com o que está guardado (o escalante pode ter aplicado algo em outra aba)
-  const n = syncFolgas.mudancas.length;
-  el.hidden = !n; el.textContent = `Folgas: ${n} alteraç${n === 1 ? "ão" : "ões"}`;
+  const n = syncFolgas.mudancas.length, pr = syncFolgas.prontos;
+  el.hidden = !n && !pr.length;
+  el.textContent = n ? `Folgas: ${n} alteraç${n === 1 ? "ão" : "ões"}` : `Folgas de ${MESES[Number(pr[0]?.slice(5)) - 1]} prontas para trazer`;
 }
 // o que a mudança causa na escala
 function efeitoMudanca(x) {
@@ -3607,13 +3616,22 @@ function atualizarLista() {
   const q = norm($("#ed-in").value.trim());
   const todos = candidatosEditor().filter((x) => !q || norm(x.gm.nome).includes(q));
   todos.sort((a, b) => (q ? (norm(b.gm.nome).startsWith(q) - norm(a.gm.nome).startsWith(q)) : 0));
-  ed.lista = todos.slice(0, 8);
+  ed.lista = todos.slice(0, 25); // mais opções, com rolagem (as mesmas informações de cada uma)
   if (ed.sel >= ed.lista.length) ed.sel = 0;
   $("#ed-lista").innerHTML = ed.lista.length ? ed.lista.map((x, i) => `<li role="option" id="ed-op-${i}" aria-selected="${i === ed.sel}" aria-disabled="${!!x.bloqueado}" data-i="${i}" class="${x.bloqueado ? "bloq" : ""}">
     <b>${esc(x.gm.nome)}</b><span>${x.via === "pad" ? esc(x.notas[0]) : x.via === "rem" ? `${esc(x.origem.toLowerCase())} · remanejar` : `${x.notas?.length ? esc(x.notas[0]) + " · " : ""}${fmtHoras(x.heMes + x.transporte)} HE no mês`}</span></li>`).join("")
-    + (todos.length > 8 ? `<li class="ed-resto" aria-hidden="true">+ ${todos.length - 8} — continue digitando</li>` : "")
+    + (todos.length > 25 ? `<li class="ed-resto" aria-hidden="true">+ ${todos.length - 25} — continue digitando</li>` : "")
     : `<li class="ed-resto">Ninguém livre com esse nome nesse horário</li>`;
   $("#ed-in").setAttribute("aria-activedescendant", ed.lista.length ? `ed-op-${ed.sel}` : "");
+  // a lista nunca passa da borda da tela: encolhe para caber
+  const lst = $("#ed-lista"), box = lst?.closest(".ed-lista-box");
+  if (lst && box) {
+    lst.style.maxHeight = "";
+    const r = box.getBoundingClientRect(), extra = r.height - lst.getBoundingClientRect().height;
+    const cabe = box.classList.contains("cima") ? r.bottom - 8 : innerHeight - r.top - 8;
+    if (r.height > cabe) lst.style.maxHeight = Math.max(140, cabe - extra) + "px";
+  }
+  document.getElementById(`ed-op-${ed.sel}`)?.scrollIntoView({ block: "nearest" });
 }
 function escolherEditor(i) {
   const x = ed.lista[i];
@@ -4345,7 +4363,10 @@ document.addEventListener("click", (e) => {
     }
     case "lc-mais": { const c = el.dataset.curso, o = data.ocorrencias.find((x) => x.tipo === "CURSO" && x.curso === c); ui.lanc.sel = []; redesenharSel(); $("#lc-nome").value = c; if (o) { $("#lc-local").value = o.local || ""; $("#lg-de").value = o.de; $("#lg-ate").value = o.ate || o.de; } $("#lg-gm").focus(); return; }
     case "fg-cancelar": ui.lanc.import = null; render(); return;
-    case "folgas-mud": ui.drawer = { tipo: "folgasmud" }; render(); return;
+    case "folgas-mud": {
+      if (!syncFolgas.mudancas.length && syncFolgas.prontos.length) { ui.view = "lancamentos"; location.hash = "lancamentos"; (ui.lanc ||= { aba: "folgas", sel: [] }).aba = "folgas"; ui.filtroLanc.mes = syncFolgas.prontos[0]; render(); return; }
+      ui.drawer = { tipo: "folgasmud" }; render(); return;
+    }
     case "fm-conferir": conferirFolgas(true).then(() => { render(); toast(`${syncFolgas.mudancas.length} alteraç${syncFolgas.mudancas.length === 1 ? "ão" : "ões"} no Sistema de Folgas`); }); return;
     case "fm-aplicar": case "fm-ignorar": {
       const x = syncFolgas.mudancas[Number(el.dataset.i)], aplicar = el.dataset.act === "fm-aplicar";
@@ -4385,7 +4406,7 @@ document.addEventListener("click", (e) => {
         }
         ui.lanc.import = null;
       });
-      if (imp.competencia) { syncFolgas.mudancas = syncFolgas.mudancas.filter((x) => x.mes !== imp.competencia.mes); try { localStorage.removeItem("folgas-cache"); } catch { /* ignora */ } mostrarSeloFolgas(); }
+      if (imp.competencia) { syncFolgas.mudancas = syncFolgas.mudancas.filter((x) => x.mes !== imp.competencia.mes); syncFolgas.prontos = syncFolgas.prontos.filter((m) => m !== imp.competencia.mes); try { localStorage.removeItem("folgas-cache2"); } catch { /* ignora */ } mostrarSeloFolgas(); }
       return;
     }
     case "pad-posto": abrirPop("posto", el, { posto: el.dataset.posto, aba: "sempre" }); return;
