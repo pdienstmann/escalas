@@ -747,7 +747,8 @@ const ICO_FUNCAO = {
 const icoFuncao = (f) => ICO_FUNCAO[f] || "";
 // motorista / patrulheiro só faz sentido em viatura
 const emVtr = (postoId) => postoPorId(postoId)?.tipo === "vtr";
-const funcaoFolha = (d) => (emVtr(d.posto) && ICO_FUNCAO[d.funcao] ? `${ICO_FUNCAO[d.funcao]} ` : "");
+// na folha, a letra num quadradinho (M = motorista, P = patrulheiro), mais fácil de ler impresso
+const funcaoFolha = (d) => (emVtr(d.posto) && ICO_FUNCAO[d.funcao] ? `<span class="fn-l" title="${d.funcao}">${d.funcao[0]}</span>` : "");
 function vAjustes() {
   const c = data.config;
   const anc = c.ancora || { data: ui.dia, equipes: [] };

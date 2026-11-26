@@ -642,7 +642,7 @@ tr.sit-fap .fr-in { color: var(--furo); font-style: italic; } tr.sit-fa .pref { 
 .add-sec { margin-left: .8rem; font-size: .75rem; font-weight: 400; letter-spacing: 0; text-transform: none; }
 .ico-fn { width: 1em; height: 1em; vertical-align: -.15em; fill: currentColor; }
 .chip .fn.fn-ico { border: 0; padding: 0; color: var(--accent); font-size: .85rem; }
-.pt .ico-fn { width: 9px; height: 9px; vertical-align: -1px; }
+.pt .fn-l { display: inline-block; min-width: 9px; padding: 0 1px; margin-right: 3px; border: 1px solid currentColor; border-radius: 2px; font-size: 7px; line-height: 9px; font-weight: 700; text-align: center; vertical-align: 1px; }
 /* finalizar escala e controle de HE */
 .btn.fin { border-color: var(--accent); color: var(--accent); font-weight: 600; padding: .2rem .6rem; }
 .fin-ok { color: var(--ok, #2e7d32); font-weight: 600; } .fin-ok .link { font-weight: 400; margin-left: .3rem; }
@@ -2431,7 +2431,8 @@ const ICO_FUNCAO = {
 const icoFuncao = (f) => ICO_FUNCAO[f] || "";
 // motorista / patrulheiro só faz sentido em viatura
 const emVtr = (postoId) => postoPorId(postoId)?.tipo === "vtr";
-const funcaoFolha = (d) => (emVtr(d.posto) && ICO_FUNCAO[d.funcao] ? `${ICO_FUNCAO[d.funcao]} ` : "");
+// na folha, a letra num quadradinho (M = motorista, P = patrulheiro), mais fácil de ler impresso
+const funcaoFolha = (d) => (emVtr(d.posto) && ICO_FUNCAO[d.funcao] ? `<span class="fn-l" title="${d.funcao}">${d.funcao[0]}</span>` : "");
 function vAjustes() {
   const c = data.config;
   const anc = c.ancora || { data: ui.dia, equipes: [] };
