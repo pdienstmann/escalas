@@ -183,8 +183,18 @@ export function calcularDia(data, dia) {
   }
 
   // 4. Remanejamentos
+  // Com ini/fim, só o trecho do serviço dentro desse horário muda de posto (remanejamento parcial).
   for (const oc of ocs.filter((o) => o.tipo === "REMANEJ")) {
-    for (const d of des.filter((x) => x.gm === oc.gm && x.nat !== "he")) { d.posto = oc.posto; if (oc.funcao) d.funcao = oc.funcao; d.remanejado = true; d.req = d.req || oc.req || ""; }
+    const [ra, rb] = oc.ini ? intervalo(oc.ini, oc.fim) : [-Infinity, Infinity];
+    const novos = [];
+    for (const d of des) {
+      if (d.gm !== oc.gm || d.nat === "he" || sobrepoe(d.ini, d.fim, ra, rb) <= 0) { novos.push(d); continue; }
+      const mover = (x) => { x.posto = oc.posto; if (oc.funcao) x.funcao = oc.funcao; x.remanejado = true; x.req = x.req || oc.req || ""; return x; };
+      if (d.ini < ra) novos.push({ ...d, id: d.id + "r0", fim: ra });
+      novos.push(mover({ ...d, id: d.ini < ra || d.fim > rb ? d.id + "r1" : d.id, ini: Math.max(d.ini, ra), fim: Math.min(d.fim, rb), bhDebito: d.fim <= rb ? d.bhDebito : 0 }));
+      if (d.fim > rb) novos.push({ ...d, id: d.id + "r2", ini: rb });
+    }
+    des = novos;
   }
 
   // 5. Acréscimos: HE e BH+

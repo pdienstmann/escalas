@@ -211,3 +211,12 @@ test("inspetor do dia pode ser trocado só naquele dia", () => {
   data.ocorrencias.push({ id: "i", tipo: "INSPETOR", equipe: "D1", de: d, ate: d, nome: "INSP. X" }); data._versao++;
   assert.equal(calcularDia(data, d).inspetores.get("D1"), "INSP. X");
 });
+
+test("remanejamento parcial: só o trecho escolhido muda de posto", () => {
+  const data = base();
+  const d = diaDe(data, "D1");
+  data.ocorrencias.push({ id: "r", tipo: "REMANEJ", gm: "a", de: d, ate: d, posto: "hosp", ini: "13:00", fim: "19:00" }); data._versao++;
+  const x = calcularDia(data, d).designacoes.filter((y) => y.gm === "a").map((y) => [y.posto, y.ini, y.fim]);
+  assert.deepEqual(x, [["vtr", 420, 780], ["hosp", 780, 1140]]);
+  assert.equal(livroMes(data, "2026-11").get("a").he, 0);
+});

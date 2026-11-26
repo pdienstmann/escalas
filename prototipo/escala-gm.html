@@ -364,6 +364,14 @@ button.eq:hover { border-color: var(--accent); }
 @media (hover: hover) { .mn-sub:hover > .mn-fly { display: block; } }
 .mn-sub.aberto > .mn-fly, .mn-sub:focus-within > .mn-fly { display: block; }
 
+/* arrastar */
+@media (hover: hover) and (pointer: fine) { table.quadro button.chip[data-des] { cursor: grab; } }
+body.arrastando, body.arrastando * { cursor: grabbing !important; user-select: none; }
+.origem-drag { opacity: .4; outline: 2px dashed var(--accent); }
+td.alvo-drop { box-shadow: inset 0 0 0 3px var(--accent); background: var(--accent-soft) !important; }
+.fantasma { position: fixed; left: 0; top: 0; z-index: 80; pointer-events: none; background: var(--surface); border: 2px solid var(--accent); border-radius: 6px; padding: .25rem .55rem; box-shadow: 0 8px 20px rgba(0,0,0,.25); font: 600 .88rem var(--f-grid); white-space: nowrap; }
+.fantasma span { font: 400 .78rem var(--f-num); color: var(--muted); }
+
 /* modo servidor */
 .sync { align-self: center; font-size: .8rem; font-weight: 600; padding: .2rem .5rem; border-radius: 999px; white-space: nowrap; }
 .sync.ok { color: var(--ok); } .sync.salvando { color: var(--muted); } .sync.erro { color: var(--furo); background: var(--furo-bg); }
@@ -705,8 +713,18 @@ function calcularDia(data, dia) {
   }
 
   // 4. Remanejamentos
+  // Com ini/fim, só o trecho do serviço dentro desse horário muda de posto (remanejamento parcial).
   for (const oc of ocs.filter((o) => o.tipo === "REMANEJ")) {
-    for (const d of des.filter((x) => x.gm === oc.gm && x.nat !== "he")) { d.posto = oc.posto; if (oc.funcao) d.funcao = oc.funcao; d.remanejado = true; d.req = d.req || oc.req || ""; }
+    const [ra, rb] = oc.ini ? intervalo(oc.ini, oc.fim) : [-Infinity, Infinity];
+    const novos = [];
+    for (const d of des) {
+      if (d.gm !== oc.gm || d.nat === "he" || sobrepoe(d.ini, d.fim, ra, rb) <= 0) { novos.push(d); continue; }
+      const mover = (x) => { x.posto = oc.posto; if (oc.funcao) x.funcao = oc.funcao; x.remanejado = true; x.req = x.req || oc.req || ""; return x; };
+      if (d.ini < ra) novos.push({ ...d, id: d.id + "r0", fim: ra });
+      novos.push(mover({ ...d, id: d.ini < ra || d.fim > rb ? d.id + "r1" : d.id, ini: Math.max(d.ini, ra), fim: Math.min(d.fim, rb), bhDebito: d.fim <= rb ? d.bhDebito : 0 }));
+      if (d.fim > rb) novos.push({ ...d, id: d.id + "r2", ini: rb });
+    }
+    des = novos;
   }
 
   // 5. Acréscimos: HE e BH+
@@ -1459,7 +1477,7 @@ function vQuadro() {
     <label class="toggle"><input type="checkbox" id="q-sofuros" ${ui.soFuros ? "checked" : ""}> Só furos</label>
     ${furosTotal ? `<button class="btn pri" data-act="auto" data-dias="1">Preencher furos sozinho</button>` : ""}
   </div>
-  <p class="dica como">Clique em qualquer nome, posto, viatura ou seção para mudar. <b>Botão direito</b> mostra todas as opções.</p>
+  <p class="dica como">Clique em qualquer nome, posto, viatura ou seção para mudar. <b>Botão direito</b> mostra todas as opções. <b>Arraste</b> o GM para outro posto ou turno.</p>
   ${painelPlano()}
   ${cd.alertas.length ? `<div class="alertas">${cd.alertas.map((a) => `<p class="${a.nivel}">${esc(a.texto)}</p>`).join("")}</div>` : ""}
   ${disp}
@@ -2341,6 +2359,108 @@ document.addEventListener("keydown", (e) => {
 window.addEventListener("resize", fecharMenu);
 window.addEventListener("scroll", () => { if (ui.menu && Date.now() - ui.menu.aberto > 400) fecharMenu(); }, { passive: true });
 
+// ---------- ARRASTAR O GM (mouse) ----------
+// Segure o quadradinho do GM e solte em outro posto ou turno. Ao soltar, um menu pequeno mostra o que pode ser
+// feito ali (remanejar, só um turno, mudar horário, hora extra, trocar de lugar) já com a consequência escrita.
+const arr = { ativo: false, d: null, el: null, x0: 0, y0: 0, fantasma: null, alvo: null, rolar: 0, raf: 0 };
+function ocupadoEm(gm, a, b, ignorar) {
+  return calcularDia(data, ui.dia).designacoes.some((x) => x.gm === gm && x !== ignorar && sobrepoe(x.ini, x.fim, a, b) > 0);
+}
+function alvoEm(x, y) {
+  const el = document.elementFromPoint(x, y);
+  if (!el) return null;
+  const chipEl = el.closest("table.quadro button.chip[data-des]");
+  const td = el.closest("table.quadro td[data-posto]");
+  if (!td) return null;
+  return { td, posto: td.dataset.posto, turno: td.dataset.turno, des: chipEl ? ui.desMap.get(chipEl.dataset.des) : null };
+}
+function marcarAlvo(a) {
+  document.querySelectorAll(".alvo-drop").forEach((e) => e.classList.remove("alvo-drop"));
+  if (a) a.td.classList.add("alvo-drop");
+}
+function iniciarArrasto() {
+  arr.ativo = true;
+  document.body.classList.add("arrastando");
+  arr.el.classList.add("origem-drag");
+  const f = document.createElement("div");
+  f.className = "fantasma";
+  f.innerHTML = `<b>${esc(nomeGm(arr.d.gm))}</b> <span>${fmtHm(arr.d.ini)}–${fmtHm(arr.d.fim)}</span>`;
+  document.body.appendChild(f);
+  arr.fantasma = f;
+  const passo = () => { if (!arr.ativo) return; if (arr.rolar) window.scrollBy(0, arr.rolar); arr.raf = requestAnimationFrame(passo); };
+  arr.raf = requestAnimationFrame(passo);
+}
+function encerrarArrasto() {
+  arr.ativo = false;
+  cancelAnimationFrame(arr.raf);
+  arr.fantasma?.remove(); arr.fantasma = null;
+  arr.el?.classList.remove("origem-drag");
+  document.body.classList.remove("arrastando");
+  marcarAlvo(null);
+}
+document.addEventListener("pointerdown", (e) => {
+  if (e.pointerType !== "mouse" || e.button !== 0) return; // no toque, use o toque longo (menu) para mover
+  const el = e.target.closest("table.quadro button.chip[data-des]");
+  if (!el) return;
+  const d = ui.desMap.get(el.dataset.des);
+  if (!d) return;
+  Object.assign(arr, { d, el, x0: e.clientX, y0: e.clientY, ativo: false, alvo: null, rolar: 0 });
+});
+document.addEventListener("pointermove", (e) => {
+  if (!arr.d) return;
+  if (!arr.ativo) {
+    if (Math.hypot(e.clientX - arr.x0, e.clientY - arr.y0) < 7) return;
+    fecharPop(); fecharMenu(); iniciarArrasto();
+  }
+  e.preventDefault();
+  arr.fantasma.style.transform = `translate(${e.clientX + 14}px, ${e.clientY + 10}px)`;
+  arr.rolar = e.clientY < 70 ? -14 : e.clientY > innerHeight - 70 ? 14 : 0;
+  arr.alvo = alvoEm(e.clientX, e.clientY);
+  marcarAlvo(arr.alvo);
+});
+document.addEventListener("pointerup", (e) => {
+  if (!arr.d) return;
+  const era = arr.ativo, d = arr.d, alvo = arr.alvo, origem = arr.el;
+  encerrarArrasto();
+  arr.d = null;
+  if (!era) return; // foi só um clique: o cartão abre normalmente
+  ui.ignorarClique = Date.now();
+  if (!alvo) return;
+  const itens = opcoesSoltar(d, alvo);
+  if (itens.length) abrirMenu(itens, e.clientX, e.clientY, origem, { des: d, drop: alvo });
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && arr.ativo) { encerrarArrasto(); arr.d = null; ui.ignorarClique = Date.now(); } });
+
+function opcoesSoltar(d, alvo) {
+  const t = TURNOS.find((x) => x.id === alvo.turno), p = postoPorId(alvo.posto), pn = p.nome;
+  const he = ehHeLancada(d), quem = nomeGm(d.gm);
+  const noTurno = sobrepoe(d.ini, d.fim, t.ini, t.fim) > 0;
+  const mesmoPosto = d.posto === alvo.posto;
+  const it = [];
+  const outro = alvo.des && alvo.des.gm !== d.gm ? alvo.des : null;
+  if (he) {
+    // hora extra lançada: só muda de lugar/horário
+    const [a, b] = noTurno ? [d.ini, d.fim] : [t.ini, t.fim];
+    const ocupado = ocupadoEm(d.gm, a, b, d);
+    if (!(mesmoPosto && noTurno)) it.push({ t: `Mover esta hora extra para ${pn} ${fmtHm(a)}–${fmtHm(b)}${ocupado ? " (já está trabalhando nesse horário)" : ""}`, act: "dr-mover-he", d: { ini: fmtHm(a), fim: fmtHm(b) }, padrao: true, desab: ocupado });
+  } else {
+    if (outro && noTurno && !mesmoPosto && !ehHeLancada(outro)) it.push({ t: `Trocar de lugar com ${nomeGm(outro.gm)}`, act: "dr-trocar-lugar", padrao: true });
+    if (!mesmoPosto && noTurno) {
+      it.push({ t: `Remanejar ${quem} para ${pn} (serviço inteiro, ${fmtHm(d.ini)}–${fmtHm(d.fim)})`, act: "dr-rem", padrao: !it.length });
+      if (d.fim - d.ini > t.fim - t.ini) it.push({ t: `Remanejar só o ${t.nome.toLowerCase()} (${fmtHm(Math.max(d.ini, t.ini))}–${fmtHm(Math.min(d.fim, t.fim))})`, act: "dr-rem-parcial" });
+    }
+    if (!noTurno) {
+      const [a0, b0] = (d.alvo || `${d.ini}-${d.fim}`).split("-").map(Number);
+      const extra = t.fim - t.ini - sobrepoe(t.ini, t.fim, a0, b0);
+      const ocupado = ocupadoEm(d.gm, t.ini, t.fim, d);
+      it.push({ t: `Hora extra em ${pn} ${fmtHm(t.ini)}–${fmtHm(t.fim)} (${fmtHoras(t.fim - t.ini)}, mantém o serviço normal)${ocupado ? " · já está trabalhando nesse horário" : ""}`, act: "dr-he", padrao: true, desab: ocupado });
+      if (mesmoPosto) it.push({ t: `Mudar o horário para ${fmtHm(t.ini)}–${fmtHm(t.fim)}${extra ? ` (${fmtHoras(extra)} viram hora extra)` : ""}`, act: "dr-hora" });
+    }
+  }
+  if (!it.length) return [];
+  return [...it, { sep: true }, { t: "Cancelar", act: "dr-cancelar" }];
+}
+
 // ---------- eventos ----------
 function abrirFuro(posto, turno) {
   const t = TURNOS.find((x) => x.id === turno);
@@ -2348,6 +2468,7 @@ function abrirFuro(posto, turno) {
   render();
 }
 document.addEventListener("click", (e) => {
+  if (ui.ignorarClique) { const recente = Date.now() - ui.ignorarClique < 400; ui.ignorarClique = 0; if (recente && e.target.closest("table.quadro")) return; } // o clique que encerra um arrasto não abre o cartão
   const noMenu = e.target.closest("#menu");
   if (!noMenu) fecharMenu();
   else {
@@ -2372,6 +2493,44 @@ document.addEventListener("click", (e) => {
     case "pop-gm": abrirPop("gm", el, { des: ui.desMap.get(el.dataset.des) }); return;
     case "pop-add": { const t = TURNOS.find((x) => x.id === el.dataset.turno); abrirPop("add", el, { posto: el.dataset.posto, turno: t.id, ini: fmtHm(t.ini), fim: fmtHm(t.fim) }); return; }
     case "pop-fechar": fecharPop(); return;
+    case "dr-cancelar": fecharMenu(); return;
+    case "dr-rem": case "dr-rem-parcial": {
+      const { des: d, drop } = ui.menu, p = postoPorId(drop.posto), t = TURNOS.find((x) => x.id === drop.turno), parcial = el.dataset.act === "dr-rem-parcial";
+      fecharMenu();
+      const oc = { id: novoId(), tipo: "REMANEJ", gm: d.gm, de: ui.dia, ate: ui.dia, posto: p.id, obs: "Arrastado no quadro" };
+      if (parcial) { oc.ini = fmtHm(Math.max(d.ini, t.ini)); oc.fim = fmtHm(Math.min(d.fim, t.fim)); }
+      mudar(`${nomeGm(d.gm)} remanejado para ${p.nome}${parcial ? ` (${oc.ini}–${oc.fim})` : ""}`, () => data.ocorrencias.push(oc));
+      return;
+    }
+    case "dr-trocar-lugar": {
+      const { des: d, drop } = ui.menu, o = drop.des;
+      fecharMenu();
+      mudar(`${nomeGm(d.gm)} e ${nomeGm(o.gm)} trocaram de lugar`, () => {
+        data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: d.gm, de: ui.dia, ate: ui.dia, posto: o.posto, funcao: o.funcao || "", obs: "Troca de lugar no quadro" });
+        data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: o.gm, de: ui.dia, ate: ui.dia, posto: d.posto, funcao: d.funcao || "", obs: "Troca de lugar no quadro" });
+      });
+      return;
+    }
+    case "dr-mover-he": {
+      const { des: d, drop } = ui.menu, p = postoPorId(drop.posto);
+      fecharMenu();
+      mudar(`Hora extra de ${nomeGm(d.gm)} movida para ${p.nome} ${el.dataset.ini}–${el.dataset.fim}`, () => Object.assign(data.ocorrencias.find((o) => o.id === d.origem), { posto: p.id, ini: el.dataset.ini, fim: el.dataset.fim }));
+      return;
+    }
+    case "dr-he": {
+      const { des: d, drop } = ui.menu, p = postoPorId(drop.posto), t = TURNOS.find((x) => x.id === drop.turno);
+      fecharMenu();
+      mudar(`${nomeGm(d.gm)} com hora extra em ${p.nome} ${fmtHm(t.ini)}–${fmtHm(t.fim)}`, () => data.ocorrencias.push({ id: novoId(), tipo: "HE", gm: d.gm, de: ui.dia, ini: fmtHm(t.ini), fim: fmtHm(t.fim), posto: p.id, req: "" }));
+      return;
+    }
+    case "dr-hora": {
+      const { des: d, drop } = ui.menu, t = TURNOS.find((x) => x.id === drop.turno);
+      fecharMenu();
+      const alvo = d.alvo || `${d.ini}-${d.fim}`, quem = d.titular || d.gm, ini = fmtHm(t.ini), fim = fmtHm(t.fim);
+      const atual = data.ocorrencias.find((o) => o.tipo === "HORARIO" && o.gm === quem && o.de === ui.dia && o.alvo === alvo);
+      mudar(`${nomeGm(d.gm)}: horário ${ini}–${fim}`, () => { if (atual) Object.assign(atual, { ini, fim }); else data.ocorrencias.push({ id: novoId(), tipo: "HORARIO", gm: quem, de: ui.dia, alvo, ini, fim }); });
+      return;
+    }
     case "mn-card": abrirPop("card", ui.menu.alvo, { des: ui.menu.des }); fecharMenu(); return;
     case "mn-trocar": abrirPop("gm", ui.menu.alvo, { des: ui.menu.des }); fecharMenu(); return;
     case "mn-tirar": { const d = ui.menu.des; fecharMenu(); tirarDoDia(d, el.dataset.m); return; }
