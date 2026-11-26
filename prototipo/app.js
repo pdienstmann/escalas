@@ -149,6 +149,19 @@ function chip(d, t, junto) {
     <span class="nm">${esc(g?.nome)}</span>${d.funcao && (emVtr(d.posto) || !ICO_FUNCAO[d.funcao]) ? `<span class="fn${ICO_FUNCAO[d.funcao] ? " fn-ico" : ""}" title="${esc(d.funcao)} · botão direito › Função para mudar">${ICO_FUNCAO[d.funcao] || esc(d.funcao.slice(0, 3).toUpperCase())}</span>` : ""}
     <span class="hr" ${junto ? `data-junto="${junto.he.id}"` : ""}>${junto ? `${textoCelula(d, t).split("/")[0]}/${fmtHm(junto.he.fim)}` : textoCelula(d, t)}</span>${junto ? `<span class="he-num" title="${fmtHoras(junto.total)} de hora extra fixa">${fmtHE(junto.total)}</span>` : ""}${extras.join("")}${d.obs && ultimo ? `<span class="obs" title="${esc(d.obs)}">${esc(d.obs.length > 34 ? d.obs.slice(0, 33) + "…" : d.obs)}</span>` : ""}</button>`;
 }
+// Faixa "Atenção hoje": tudo o que pede ação no dia, com a cor da gravidade (vermelho = resolver, laranja = conferir)
+function faixaAtencao(cd, furosTotal) {
+  const it = [];
+  if (furosTotal) it.push(["grave", `${furosTotal} ${furosTotal === 1 ? "vaga descoberta" : "vagas descobertas"}`, `<button class="link" data-act="so-furos">ver só os furos</button>`]);
+  for (const a of cd.alertas) it.push([a.nivel === "erro" ? "grave" : "aviso", a.texto, ""]);
+  const semInsp = ["dia", "noite"].filter((per) => cd.equipes.map(equipe).some((e) => e.periodo === per) && cd.equipes.map(equipe).filter((e) => e.periodo === per).every((e) => !(cd.inspetores.has(e.id) ? cd.inspetores.get(e.id) : e.inspetor)));
+  if (semInsp.length) it.push(["grave", `Sem inspetor de serviço ${semInsp.map((p) => (p === "dia" ? "de dia" : "à noite")).join(" e ")}`, `<button class="link" data-act="ir-insp">escolher</button>`]);
+  const faLog = data.postos.filter((p) => p.ativo !== false && !cd.fa.some((o) => o.posto === p.id) && cd.designacoes.some((d) => d.posto === p.id)).map((p) => viaturaNaFrota(numeroDe(nomeNoDia(p, cd)))).filter((v) => v && v.situacao !== "QAP");
+  if (faLog.length) it.push(["aviso", `Viatura em FA pela logística com guarnição escalada: ${[...new Set(faLog.map((v) => v.prefixo))].join(", ")}`, `<button class="link" data-act="ir-frota">ver viaturas</button>`]);
+  if (ui.dia < hojeBase() && !diaFinalizado(data, ui.dia)) it.push(["info", "Este dia já passou e a escala ainda não foi finalizada (as HEs não estão no controle)", `<button class="link" data-act="fin-abrir">finalizar</button>`]);
+  if (!it.length) return `<div class="atencao-ok">✓ Nada pendente neste dia</div>`;
+  return `<section class="atencao" aria-label="Atenção hoje"><h3>Atenção</h3><ul>${it.map(([n, t, a]) => `<li class="${n}"><span class="pt-cor" aria-hidden="true"></span><span>${esc(t)}</span>${a}</li>`).join("")}</ul></section>`;
+}
 function vQuadro() {
   const cd = calcularDia(data, ui.dia);
   ui.desMap = new Map(cd.designacoes.map((d) => [d.id, d]));
@@ -227,7 +240,7 @@ function vQuadro() {
   </div>
   <p class="dica como">Clique no <b>nome</b> ou no <b>horário</b> para editar ali mesmo · <b>botão direito</b> mostra todas as opções · <b>arraste</b> para remanejar · setas, Enter, Delete, Ctrl+C e Ctrl+V também funcionam.</p>
   ${painelPlano()}
-  ${cd.alertas.length ? `<div class="alertas">${cd.alertas.map((a) => `<p class="${a.nivel}">${esc(a.texto)}</p>`).join("")}</div>` : ""}
+  ${faixaAtencao(cd, furosTotal)}
   ${disp}
   <div class="tabela-wrap"><table class="quadro">
     <colgroup><col class="c-posto"><col><col><col><col></colgroup>
@@ -2888,6 +2901,7 @@ document.addEventListener("click", (e) => {
       return;
     }
     case "ir-mes-fin": ui.view = "mes"; ui.mes = mesDe(ui.dia); location.hash = "mes"; render(); $("[data-act=fin-pendentes]")?.click(); return;
+    case "so-furos": ui.soFuros = true; render(); return;
     case "ir-frota": ui.view = "frota"; location.hash = "frota"; render(); return;
     case "ir-insp": ui.view = "padroes"; (ui.padrao ||= { aba: "impar", mes: mesDe(ui.dia), desde: ui.dia }).aba = "inspetores"; location.hash = "padroes"; render(); return;
     case "pend-abrir": fecharMenu(); ui.dia = el.dataset.dia; ui.mes = mesDe(ui.dia); ui.view = "quadro"; location.hash = "quadro"; abrirFuro(el.dataset.posto, el.dataset.turno); break;

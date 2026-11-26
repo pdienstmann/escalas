@@ -6,10 +6,10 @@
 /* Layout: barra fixa com abas; superfície de trabalho é a grade do serviço (posto × 4 turnos), painel lateral ancorado à direita. */
 :root {
   --bg: #eef1f5; --surface: #ffffff; --ink: #17212d; --muted: #5a6778; --line: #d6dce4; --line-strong: #b9c3cf;
-  --accent: #1d4f91; --accent-ink: #ffffff; --accent-soft: #e2ebf7;
+  --accent: #1a56b8; --accent-ink: #ffffff; --accent-soft: #e1ebfb; --gold: #c9a227;
   --day: #fbf8f0; --night: #edf0f7; --day-head: #f3e9cf; --night-head: #d9e0ef;
   --he: #9a5a07; --he-bg: #fcefd9; --bh: #6438a8; --bh-bg: #eee5fb; --troca: #0c6b63; --troca-bg: #d9f1ed;
-  --furo: #b8232a; --furo-bg: #fde9e9; --ok: #2d7a33; --warn: #9a5a07; --warn-bg: #fff4de;
+  --furo: #d0121f; --furo-bg: #ffe4e6; --furo-forte: #e0242f; --ok: #1d8a3a; --ok-bg: #e3f6e8; --warn: #c25400; --warn-bg: #fff0dc; --info: #1a56b8; --info-bg: #e1ebfb;
   /* cores da escala em PDF */
   --he-bg: #93c47d; --he-txt: #10260a; --he: #274e13;
   --bh-bg: #f1c232; --bh-txt: #2b2000; --bh: #6b5000;
@@ -29,7 +29,7 @@
   --he: #b9e29f; --he-bg: #3f6a30; --he-txt: #eef8e8; --bh: #ffe08a; --bh-bg: #7a5f0c; --bh-txt: #fff6d6;
   --res-bg: #6d1fc0; --res-txt: #ffffff; --rondas-bg: #5c5c00; --rondas-txt: #ffffb0; --turno-head: #22405e; --pdf-red: #ff7a7a;
   --c-folga: #ff6b6b; --c-ferias: #7aa7f0; --c-atest: #a0a0a0; --c-bhc: #a98be0; --troca: #63d3c4; --troca-bg: #11302c;
-  --furo: #ff8086; --furo-bg: #3a1618; --ok: #7fd086; --warn: #f1b566; --warn-bg: #33270f; color-scheme: dark; } }
+  --furo: #ff7078; --furo-bg: #3d1418; --furo-forte: #c42630; --ok: #7fd086; --ok-bg: #12301b; --warn: #ffab5c; --warn-bg: #3a2610; --info: #82b2f2; --info-bg: #17263b; --gold: #d9b84a; color-scheme: dark; } }
 :root[data-theme="dark"] {
   --bg: #0e131a; --surface: #161d27; --ink: #e5eaf1; --muted: #95a2b4; --line: #283241; --line-strong: #3a4657;
   --accent: #82b2f2; --accent-ink: #0e131a; --accent-soft: #1b2a3f;
@@ -684,6 +684,47 @@ table.ctl { width: 100%; } table.ctl input.ctl-o { display: block; margin-top: .
 table.ctl input.ctl-h { width: 4.5rem; text-align: right; font-family: var(--f-num); }
 table.ctl tr.editado td:first-child::after { content: " ✎"; color: var(--pdf-red); }
 .linha-ctl { margin-top: 1rem; }
+
+/* ===== revitalização visual: cores por situação ===== */
+header.app { border-top: 4px solid var(--gold); }
+nav a[aria-current="page"], nav a[aria-current=page] { box-shadow: inset 0 -3px 0 var(--gold); }
+/* furo: vermelho forte e chamativo */
+button.furo { background: var(--furo-forte); color: #fff; border: 0; font-weight: 700; box-shadow: 0 1px 0 rgba(0,0,0,.15); position: relative; padding-left: 1.5rem; }
+button.furo::before { content: "!"; position: absolute; left: .45rem; top: 50%; transform: translateY(-50%); width: .85rem; height: .85rem; border-radius: 50%; background: #fff; color: var(--furo-forte); font: 800 .65rem/0.85rem var(--f-ui); text-align: center; }
+button.furo:hover { filter: brightness(1.08); }
+table.quadro td:has(> button.furo) { background: var(--furo-bg); }
+/* conflito de horário: laranja */
+.chip.conflito { outline: 2px solid var(--warn); background: var(--warn-bg); }
+.chip.conflito::after { content: "⚠ conflito"; font: 700 .6rem var(--f-ui); color: var(--warn); }
+/* faixa de atenção */
+.atencao { background: var(--surface); border: 1px solid var(--line); border-left: 6px solid var(--furo); border-radius: 8px; padding: .5rem .8rem; margin: .6rem 0; }
+.atencao h3 { margin: 0 0 .3rem; font-size: .75rem; letter-spacing: .08em; text-transform: uppercase; color: var(--furo); }
+.atencao ul { list-style: none; margin: 0; padding: 0; display: grid; gap: .25rem; }
+.atencao li { display: flex; align-items: center; gap: .55rem; font-size: .9rem; padding: .3rem .5rem; border-radius: 6px; }
+.atencao li .link { margin-left: auto; white-space: nowrap; }
+.atencao .pt-cor { width: .65rem; height: .65rem; border-radius: 50%; flex: none; }
+.atencao li.grave { background: var(--furo-bg); color: var(--furo); font-weight: 600; } .atencao li.grave .pt-cor { background: var(--furo); }
+.atencao li.aviso { background: var(--warn-bg); color: var(--warn); font-weight: 600; } .atencao li.aviso .pt-cor { background: var(--warn); }
+.atencao li.info { background: var(--info-bg); color: var(--info); } .atencao li.info .pt-cor { background: var(--info); }
+.atencao-ok { margin: .6rem 0; padding: .4rem .8rem; border-radius: 8px; background: var(--ok-bg); color: var(--ok); font-weight: 600; font-size: .85rem; border-left: 6px solid var(--ok); }
+/* indicadores coloridos */
+.kpi { border-left: 5px solid var(--line-strong); }
+.kpi.ruim { border-left-color: var(--furo); } .kpi.atencao { border-left-color: var(--warn); } .kpi.bom { border-left-color: var(--ok); background: var(--ok-bg); } .kpi.bom .v { color: var(--ok); }
+.faixa .ruim b { color: var(--furo); font-size: 1.25rem; }
+/* seções e cabeçalhos mais marcados */
+table.quadro tr.secao th { background: linear-gradient(90deg, var(--accent-soft), transparent 70%); border-left: 4px solid var(--accent); }
+table.quadro tr.secao.grupo th { border-left-color: var(--gold); }
+/* tags de alerta */
+.tag.fa-log { background: var(--furo-forte); }
+.tag.vazio { border-color: var(--warn); color: var(--warn); }
+.sem-insp { background: var(--furo-forte); color: #fff; padding: 0 .35rem; border-radius: 3px; }
+/* Mês e horas: quem passa do teto */
+table.mes td.alerta { color: var(--furo); font-weight: 700; background: var(--furo-bg); }
+/* mapa da semana */
+.mapa td.m-furo button { background: var(--furo-forte); color: #fff; font-weight: 800; }
+/* botões primários um pouco mais vivos */
+.btn.pri { background: var(--accent); border-color: var(--accent); }
+.btn.pri:hover { filter: brightness(1.1); }
 </style>
 
 <header class="app">
