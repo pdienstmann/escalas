@@ -1,0 +1,1362 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+</head>
+<body>
+<title>Escala GM</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: barra fixa com abas; superfície de trabalho é a grade do serviço (posto × 4 turnos), painel lateral ancorado à direita. */
+:root {
+  --bg: #eef1f5; --surface: #ffffff; --ink: #17212d; --muted: #5a6778; --line: #d6dce4; --line-strong: #b9c3cf;
+  --accent: #1d4f91; --accent-ink: #ffffff; --accent-soft: #e2ebf7;
+  --day: #fbf8f0; --night: #edf0f7; --day-head: #f3e9cf; --night-head: #d9e0ef;
+  --he: #9a5a07; --he-bg: #fcefd9; --bh: #6438a8; --bh-bg: #eee5fb; --troca: #0c6b63; --troca-bg: #d9f1ed;
+  --furo: #b8232a; --furo-bg: #fde9e9; --ok: #2d7a33; --warn: #9a5a07; --warn-bg: #fff4de;
+  --paper: #ffffff; --paper-ink: #111111; --paper-line: #8c8c8c; --paper-head: #bcd6f3; --paper-red: #c00000;
+  --f-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-grid: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --f-num: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0e131a; --surface: #161d27; --ink: #e5eaf1; --muted: #95a2b4; --line: #283241; --line-strong: #3a4657;
+  --accent: #82b2f2; --accent-ink: #0e131a; --accent-soft: #1b2a3f;
+  --day: #1a1a17; --night: #141a25; --day-head: #2c2716; --night-head: #1d2638;
+  --he: #f1b566; --he-bg: #3a2a11; --bh: #c6a8f6; --bh-bg: #2a2040; --troca: #63d3c4; --troca-bg: #11302c;
+  --furo: #ff8086; --furo-bg: #3a1618; --ok: #7fd086; --warn: #f1b566; --warn-bg: #33270f; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0e131a; --surface: #161d27; --ink: #e5eaf1; --muted: #95a2b4; --line: #283241; --line-strong: #3a4657;
+  --accent: #82b2f2; --accent-ink: #0e131a; --accent-soft: #1b2a3f;
+  --day: #1a1a17; --night: #141a25; --day-head: #2c2716; --night-head: #1d2638;
+  --he: #f1b566; --he-bg: #3a2a11; --bh: #c6a8f6; --bh-bg: #2a2040; --troca: #63d3c4; --troca-bg: #11302c;
+  --furo: #ff8086; --furo-bg: #3a1618; --ok: #7fd086; --warn: #f1b566; --warn-bg: #33270f; color-scheme: dark; }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.45 var(--f-ui); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 30; background: var(--surface); }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+h2, h3, h4 { margin: 0; text-wrap: balance; }
+small { font-size: .78em; }
+.num, .hr, .req { font-family: var(--f-num); font-variant-numeric: tabular-nums; }
+.meta { color: var(--muted); font-size: .86em; }
+.dica { color: var(--muted); font-size: .86em; margin: .25rem 0; }
+.eyebrow { margin: 0; font-size: .74rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+
+header.app { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; background: var(--surface); border-bottom: 1px solid var(--line);
+  padding-block: .55rem; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1.25rem; }
+.marca { display: flex; align-items: baseline; gap: .5rem; font-family: var(--f-grid); font-weight: 700; letter-spacing: .02em; font-size: 1.05rem; }
+.marca span { font: 500 .72rem var(--f-ui); color: var(--muted); letter-spacing: .06em; text-transform: uppercase; }
+nav.abas { display: flex; gap: .25rem; flex-wrap: wrap; flex: 1; }
+nav.abas a { text-decoration: none; color: var(--muted); padding: .35rem .7rem; border-radius: 6px; font-weight: 500; }
+nav.abas a:hover { background: var(--accent-soft); color: var(--ink); }
+nav.abas a[aria-current="page"] { background: var(--accent); color: var(--accent-ink); }
+.exemplo { font-size: .8rem; color: var(--muted); display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+
+main { padding-block: 1rem 4rem; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: .9rem; min-width: 0; }
+
+.barra { display: flex; flex-wrap: wrap; gap: .6rem 1.2rem; align-items: center; justify-content: space-between; }
+.datas { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
+.datas input[type=date] { padding: .35rem .5rem; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); }
+.periodo { margin-left: .4rem; color: var(--muted); }
+.periodo b { color: var(--ink); font-family: var(--f-grid); letter-spacing: .02em; }
+.titulo-mes { font-family: var(--f-grid); font-size: 1.25rem; min-width: 11ch; text-align: center; }
+.equipes { display: flex; gap: .5rem; flex-wrap: wrap; font-size: .85rem; }
+.eq { padding: .25rem .6rem; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.eq b { color: var(--ink); margin-right: .25rem; }
+.eq.dia { background: var(--day); } .eq.noite { background: var(--night); }
+.ic { width: 2rem; height: 2rem; border-radius: 6px; border: 1px solid var(--line-strong); background: var(--surface); cursor: pointer; font-size: 1.15rem; line-height: 1; display: inline-grid; place-items: center; }
+.ic:hover { background: var(--accent-soft); }
+.btn { border: 1px solid var(--line-strong); background: var(--surface); border-radius: 6px; padding: .4rem .75rem; cursor: pointer; font-weight: 500; }
+.btn:hover:not(:disabled) { border-color: var(--accent); }
+.btn.pri { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn.on { background: var(--accent-soft); border-color: var(--accent); }
+.btn.perigo { background: var(--furo); color: var(--surface); border-color: var(--furo); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; text-align: left; font-weight: 500; }
+.link:hover { text-decoration: underline; }
+.toggle { display: inline-flex; align-items: center; gap: .4rem; font-size: .88rem; color: var(--muted); cursor: pointer; }
+.filtros { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; }
+.filtros select, .filtros input, .form select, .form input, .form-lanc select, .form-lanc input, .dw-body input, .dw-body select, .sel-gm select {
+  padding: .38rem .5rem; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); min-width: 0; max-width: 100%; }
+
+.resumo { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: .6rem; align-items: stretch; }
+.kpi { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: .55rem .8rem; display: grid; }
+.kpi .v { font: 600 1.35rem/1.2 var(--f-num); font-variant-numeric: tabular-nums; }
+.kpi .v small { color: var(--muted); font-weight: 400; }
+.kpi .l { color: var(--muted); font-size: .82rem; }
+.kpi.ruim { border-color: var(--furo); background: var(--furo-bg); } .kpi.ruim .v { color: var(--furo); }
+.kpi.bom .v { color: var(--ok); }
+.kpi.atencao { border-color: var(--warn); background: var(--warn-bg); } .kpi.atencao .v { color: var(--warn); }
+.resumo .toggle { align-self: center; }
+
+.alertas { display: grid; gap: .3rem; }
+.alertas p { margin: 0; padding: .45rem .7rem; border-radius: 6px; background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn); }
+.alertas p.erro { background: var(--furo-bg); color: var(--furo); border-color: var(--furo); }
+
+.tabela-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; max-width: 100%; }
+table { border-collapse: collapse; width: 100%; }
+table.quadro { min-width: 860px; table-layout: fixed; font-family: var(--f-grid); }
+table.quadro col.c-posto { width: 210px; }
+table.quadro thead th { position: sticky; top: 0; z-index: 2; font-size: .8rem; letter-spacing: .06em; padding: .45rem .5rem; text-align: left; border-bottom: 1px solid var(--line-strong); background: var(--surface); }
+table.quadro thead th.dia { background: var(--day-head); } table.quadro thead th.noite { background: var(--night-head); }
+table.quadro thead th small { display: block; font: 400 .72rem var(--f-num); color: var(--muted); letter-spacing: 0; }
+table.quadro tr.secao th { text-align: left; font-size: .76rem; letter-spacing: .1em; color: var(--accent); padding: .7rem .6rem .3rem; background: var(--surface); border-bottom: 1px solid var(--line-strong); }
+table.quadro td, table.quadro th.posto { border-bottom: 1px solid var(--line); vertical-align: top; padding: .3rem .35rem; }
+table.quadro td { border-left: 1px solid var(--line); }
+table.quadro td.dia { background: var(--day); } table.quadro td.noite { background: var(--night); }
+th.posto { text-align: left; font-weight: 600; font-size: .88rem; }
+th.posto .pn { display: block; } th.posto .ps { display: block; font-weight: 500; font-size: .74rem; color: var(--furo); letter-spacing: .02em; }
+th.posto .po { display: block; font-weight: 500; font-size: .72rem; color: var(--muted); }
+td.fa-cel { background: repeating-linear-gradient(135deg, var(--surface) 0 8px, var(--bg) 8px 16px); color: var(--muted); font-size: .85rem; padding: .55rem .7rem !important; }
+.rondas { display: block; font-size: .7rem; letter-spacing: .04em; color: var(--warn); padding: .25rem .2rem; }
+.vazio { color: var(--line-strong); padding: .25rem .2rem; display: block; font-size: .8rem; }
+.vazio-geral { padding: 1.5rem; text-align: center; color: var(--muted); }
+
+.chip { display: flex; flex-wrap: wrap; align-items: baseline; gap: .1rem .35rem; width: 100%; text-align: left; border: 1px solid transparent; background: none; border-radius: 5px; padding: .15rem .3rem; cursor: pointer; font-family: var(--f-grid); }
+.chip:hover { border-color: var(--line-strong); background: var(--surface); }
+.chip .nm { font-weight: 600; font-size: .9rem; }
+.chip .fn { font: 600 .62rem var(--f-ui); color: var(--muted); border: 1px solid var(--line-strong); border-radius: 3px; padding: 0 .22rem; }
+.chip .hr { font-size: .74rem; color: var(--muted); margin-left: auto; }
+.chip.he { background: var(--he-bg); } .chip.bh { background: var(--bh-bg); } .chip.troca { background: var(--troca-bg); }
+.chip.conflito { outline: 2px solid var(--furo); }
+.tag { font: 600 .62rem var(--f-ui); letter-spacing: .04em; padding: .05rem .3rem; border-radius: 3px; white-space: nowrap; }
+.tag.he { color: var(--he); border: 1px solid var(--he); } .tag.bh { color: var(--bh); border: 1px solid var(--bh); }
+.tag.troca { color: var(--troca); border: 1px solid var(--troca); } .tag.rem { color: var(--accent); border: 1px solid var(--accent); }
+.tag.furo { color: var(--furo); border: 1px solid var(--furo); }
+.req { font-size: .66rem; color: var(--muted); }
+.furo { display: block; width: 100%; margin-top: .15rem; border: 1px dashed var(--furo); color: var(--furo); background: var(--furo-bg); border-radius: 5px; padding: .3rem .35rem; text-align: left; font: 600 .8rem var(--f-grid); cursor: pointer; }
+.furo:hover { border-style: solid; }
+
+.disposicao { background: var(--warn-bg); border: 1px solid var(--warn); border-radius: 8px; padding: .6rem .8rem; }
+.disposicao h3 { font-size: .95rem; }
+.chips { display: flex; flex-wrap: wrap; gap: .4rem; } .chips .chip { width: auto; background: var(--surface); border-color: var(--line); }
+h3.sub { font-size: .8rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-top: .5rem; }
+.n { font: 500 .78rem var(--f-num); color: var(--muted); background: var(--bg); border-radius: 999px; padding: 0 .45rem; margin-left: .25rem; }
+.fora { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: .6rem; }
+.fora-g { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: .55rem .75rem; min-width: 0; }
+.fora-g h4 { font-size: .85rem; margin-bottom: .3rem; }
+.fora-g ul { list-style: none; margin: 0; padding: 0; display: grid; gap: .15rem; font-size: .88rem; }
+.fora-g li { display: flex; gap: .4rem; flex-wrap: wrap; align-items: baseline; }
+
+/* painel lateral */
+#veu { position: fixed; inset: 0; background: rgba(10, 16, 24, .28); z-index: 40; }
+#drawer { position: fixed; z-index: 50; top: 0; right: 0; bottom: 0; width: min(460px, 100%); background: var(--surface); border-left: 1px solid var(--line-strong);
+  display: flex; flex-direction: column; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); padding-right: env(safe-area-inset-right, 0px); box-shadow: -12px 0 32px rgba(0,0,0,.12); }
+.dw-head { display: flex; justify-content: space-between; gap: 1rem; padding: 1rem 1.1rem .7rem; border-bottom: 1px solid var(--line); }
+.dw-head h2 { font-family: var(--f-grid); font-size: 1.3rem; }
+.dw-body { padding: .8rem 1.1rem 1.5rem; overflow-y: auto; display: grid; gap: .7rem; align-content: start; }
+.dw-body h3 { font-size: .78rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-top: .3rem; }
+fieldset.horario { border: 1px solid var(--line); border-radius: 8px; padding: .5rem .7rem .6rem; margin: 0; display: grid; gap: .5rem; }
+fieldset legend { font-size: .78rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); padding: 0 .3rem; }
+.opts { display: flex; gap: .4rem; flex-wrap: wrap; }
+.opt { border: 1px solid var(--line-strong); background: var(--surface); border-radius: 6px; padding: .3rem .6rem; cursor: pointer; display: grid; text-align: left; font-weight: 500; }
+.opt small { font-family: var(--f-num); color: var(--muted); }
+.opt.on { border-color: var(--accent); background: var(--accent-soft); }
+.linha { display: flex; gap: .5rem; flex-wrap: wrap; }
+.linha label, .form label, .form-lanc label { display: grid; gap: .15rem; font-size: .8rem; color: var(--muted); }
+.busca input { width: 100%; padding: .45rem .6rem; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); }
+ul.sug { list-style: none; margin: 0; padding: 0; display: grid; }
+ul.sug li { display: grid; grid-template-columns: 1fr auto auto; gap: .6rem; align-items: center; padding: .5rem 0; border-bottom: 1px solid var(--line); }
+ul.sug li[hidden] { display: none; }
+.sg { min-width: 0; } .sg b { font-family: var(--f-grid); font-size: .98rem; }
+.sh { display: grid; text-align: right; } .sh .num { font-weight: 600; }
+.notas { display: flex; gap: .25rem; flex-wrap: wrap; margin-top: .15rem; }
+.nota { font-size: .7rem; background: var(--bg); border-radius: 3px; padding: 0 .3rem; color: var(--muted); }
+.nota.atencao { background: var(--warn-bg); color: var(--warn); }
+.mini { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; }
+.mini div { display: grid; background: var(--bg); border-radius: 6px; padding: .4rem .55rem; }
+.mini .num { font-weight: 600; font-size: 1.05rem; }
+.acoes { display: flex; flex-wrap: wrap; gap: .4rem; }
+.form { display: grid; gap: .5rem; background: var(--bg); border-radius: 8px; padding: .7rem; }
+.estado { margin: 0; padding: .35rem .6rem; border-radius: 6px; background: var(--furo-bg); color: var(--furo); font-weight: 500; display: inline-block; }
+ul.lista-des, ul.lista-oc { list-style: none; padding: 0; margin: 0; display: grid; gap: .3rem; }
+ul.lista-oc li { display: flex; justify-content: space-between; gap: .5rem; align-items: center; flex-wrap: wrap; font-size: .88rem; }
+.tag-linha { margin: .3rem 0 0; }
+
+#toast { position: fixed; z-index: 60; left: 50%; transform: translateX(-50%); bottom: calc(1rem + env(safe-area-inset-bottom, 0px)); background: var(--ink); color: var(--bg);
+  padding: .55rem .8rem; border-radius: 8px; display: flex; gap: .8rem; align-items: center; width: max-content; max-width: calc(100% - 32px); box-shadow: 0 8px 24px rgba(0,0,0,.2); }
+#toast button { background: none; border: 0; color: var(--accent-soft); font-weight: 600; cursor: pointer; text-decoration: underline; }
+
+/* lançamentos */
+.painel { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: .9rem 1rem; min-width: 0; display: grid; gap: .6rem; align-content: start; }
+.painel h2 { font-size: 1.05rem; } .painel h3 { font-size: .8rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.cols-lanc { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: .9rem; align-items: start; }
+.form-lanc { display: grid; gap: .55rem; }
+.cab-lista { display: flex; justify-content: space-between; gap: .6rem; flex-wrap: wrap; align-items: center; }
+.cab-lista h2 { text-transform: none; }
+table.lanc { font-size: .88rem; min-width: 640px; }
+table.lanc th, table.lanc td { padding: .35rem .5rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+table.lanc thead th { font-size: .74rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.tipo { font-size: .76rem; font-weight: 600; padding: .05rem .4rem; border-radius: 4px; background: var(--bg); white-space: nowrap; }
+.t-HE { background: var(--he-bg); color: var(--he); } .t-BH_MAIS, .t-BH_COMP { background: var(--bh-bg); color: var(--bh); }
+.t-TROCA { background: var(--troca-bg); color: var(--troca); } .t-FOLGA, .t-FA { background: var(--furo-bg); color: var(--furo); }
+.t-FERIAS { background: var(--accent-soft); color: var(--accent); }
+
+/* mês */
+table.mes { font-size: .82rem; font-family: var(--f-grid); }
+table.mes th, table.mes td { border-bottom: 1px solid var(--line); padding: .22rem .35rem; white-space: nowrap; text-align: left; }
+table.mes thead th { position: sticky; top: 0; background: var(--surface); font-size: .72rem; letter-spacing: .04em; color: var(--muted); z-index: 2; }
+table.mes .gmcol { position: sticky; left: 0; background: var(--surface); z-index: 1; min-width: 130px; }
+table.mes thead .gmcol { z-index: 3; }
+table.mes td.num { text-align: right; } table.mes td.num small { color: var(--muted); }
+table.mes td.forte { font-weight: 600; } table.mes td.alerta { color: var(--warn); font-weight: 600; }
+table.mes th.d { text-align: center; width: 1.7rem; padding: .2rem 0; } table.mes th.d small { display: block; font-size: .6rem; }
+table.mes th.d.fds { color: var(--ink); }
+table.mes td.d { position: relative; width: 1.7rem; min-width: 1.7rem; text-align: center; padding: 0; font-size: .64rem; font-weight: 700; border-left: 1px solid var(--line); height: 1.55rem; }
+td.d.s { background: var(--accent-soft); color: var(--accent); } td.d.tr { background: var(--troca-bg); color: var(--troca); }
+td.d.f { background: var(--furo-bg); color: var(--furo); } td.d.fe { background: var(--accent); color: var(--accent-ink); }
+td.d.l { background: var(--line); color: var(--muted); } td.d.bhc { background: var(--bh-bg); color: var(--bh); }
+.dot { position: absolute; width: 6px; height: 6px; border-radius: 50%; right: 2px; top: 2px; }
+.dot.he { background: var(--he); } .dot.bh { background: var(--bh); right: 9px; }
+.legenda { display: flex; flex-wrap: wrap; gap: .4rem 1rem; font-size: .8rem; color: var(--muted); }
+.legenda span { display: inline-flex; align-items: center; gap: .35rem; }
+.legenda .dot { position: static; display: inline-block; }
+.lg { display: inline-block; width: .9rem; height: .9rem; border-radius: 3px; }
+.lg.s { background: var(--accent-soft); border: 1px solid var(--accent); } .lg.tr { background: var(--troca-bg); border: 1px solid var(--troca); }
+.lg.f { background: var(--furo-bg); border: 1px solid var(--furo); } .lg.fe { background: var(--accent); } .lg.l { background: var(--line); } .lg.bhc { background: var(--bh-bg); border: 1px solid var(--bh); }
+
+/* ficha */
+.ficha-cab { display: flex; justify-content: space-between; align-items: start; gap: 1rem; flex-wrap: wrap; }
+.ficha-cab h2 { font-family: var(--f-grid); font-size: 1.5rem; }
+.sel-gm { display: inline-flex; gap: .4rem; align-items: center; color: var(--muted); margin-right: .6rem; }
+.cols-ficha { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: .9rem; align-items: start; }
+ul.diaadia { list-style: none; margin: 0; padding: 0; display: grid; }
+ul.diaadia li { display: grid; grid-template-columns: 5.5rem 1fr; gap: .6rem; padding: .35rem 0; border-bottom: 1px solid var(--line); }
+ul.diaadia li.hoje { background: var(--accent-soft); }
+ul.diaadia p { margin: 0; } ul.diaadia .data { font-family: var(--f-num); font-size: .82rem; }
+table.hist th, table.hist td { padding: .3rem .4rem; border-bottom: 1px solid var(--line); text-align: right; font-size: .88rem; }
+table.hist th:first-child, table.hist td:first-child { text-align: left; }
+table.hist thead th { font-size: .72rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+table.hist tr.atual td { font-weight: 600; background: var(--accent-soft); }
+
+/* folha (papel) */
+.papel-wrap { overflow-x: auto; max-width: 100%; }
+.papel { background: var(--paper); color: var(--paper-ink); width: 1000px; margin: 0 auto; padding: 18px; box-shadow: 0 2px 14px rgba(0,0,0,.12); font: 10.5px/1.25 Arial, Helvetica, sans-serif; }
+.pcab { display: flex; justify-content: space-between; gap: 1rem; border: 1px solid var(--paper-ink); padding: 6px 8px; margin-bottom: 6px; }
+.pcab div { display: grid; gap: 2px; } .pcab b { font-size: 12px; }
+.pdata { text-align: right; font-weight: 700; }
+.pt { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.pt th, .pt td { border: 1px solid var(--paper-line); padding: 1px 4px; font-weight: 700; vertical-align: middle; }
+.pt tr.sec th { background: var(--paper-head); text-align: center; font-size: 10px; }
+.pt tr.sec th:first-child { width: 170px; }
+.pt th.p { text-align: center; font-size: 10px; } .pt .sub { color: var(--paper-red); font-size: 9px; }
+.pt td.gn { text-align: center; } .pt td.gh { text-align: center; font-weight: 400; white-space: nowrap; }
+.pt td.gn .r { font-size: 8px; font-weight: 400; }
+.pt td.gn > div, .pt td.gh > div { min-height: 13px; }
+.pt td.c { text-align: center; } .pt td.r, .pt .r { color: var(--paper-red); }
+.pt .he { background: #c9e3b8; } .pt .bh { background: #f2c66d; } .pt .troca { background: #d2ecea; }
+.pt .rondas-p { background: #ffff00; font-size: 9px; } .pt .furo-p { color: var(--paper-red); }
+.quebra { height: 14px; }
+.nao-imprimir code { font-family: var(--f-num); font-size: .85em; }
+
+@media (max-width: 860px) {
+  .cols-lanc, .cols-ficha { grid-template-columns: minmax(0, 1fr); }
+  #drawer { top: auto; height: 82%; width: 100%; border-left: 0; border-top: 1px solid var(--line-strong); border-radius: 14px 14px 0 0; padding-left: env(safe-area-inset-left, 0px); }
+  .mini { grid-template-columns: 1fr 1fr; }
+  nav.abas { flex: 1 1 100%; order: 3; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  nav.abas a { white-space: nowrap; }
+  .exemplo { margin-left: auto; }
+}
+@media (prefers-reduced-motion: no-preference) { .chip, .furo, .btn { transition: background-color .12s, border-color .12s; } }
+@media print {
+  @page { size: A4 portrait; margin: 8mm; }
+  body { background: #fff; }
+  body::before, header.app, .nao-imprimir, #drawer, #veu, #toast { display: none !important; }
+  main { padding: 0; }
+  .papel { width: auto; box-shadow: none; padding: 0; }
+  .quebra { break-after: page; height: 0; }
+  .pt tr { break-inside: avoid; }
+  .pt .he, .pt .bh, .pt .troca, .pt .rondas-p, .pt tr.sec th { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+</style>
+
+<header class="app">
+  <div class="marca">Escala GM <span>protótipo</span></div>
+  <nav class="abas" aria-label="Seções">
+    <a href="#quadro" data-nav="quadro">Quadro do dia</a>
+    <a href="#lancamentos" data-nav="lancamentos">Lançamentos</a>
+    <a href="#mes" data-nav="mes">Mês e horas</a>
+    <a href="#ficha" data-nav="ficha">Ficha do GM</a>
+    <a href="#folha" data-nav="folha">Folha</a>
+  </nav>
+  <div class="exemplo">Nomes e dados fictícios · <button id="restaurar" class="link" data-act="restaurar">Restaurar exemplo</button></div>
+</header>
+<main id="main"><p class="dica">Carregando a escala…</p></main>
+<div id="veu" hidden></div>
+<aside id="drawer" hidden aria-label="Detalhes"></aside>
+<div id="toast" role="status" hidden></div>
+<script>
+(() => {
+// ---- engine.js ----
+// Motor da escala — protótipo.
+// Princípio: escala do dia = escala ideal (lotação + regime) + ocorrências datadas.
+// Nada é copiado para os dias: tudo é calculado. As horas saem do mesmo cálculo.
+//
+// Tempo: cada "dia de serviço" D vai de D 07:00 até D+1 07:00.
+// Horários são minutos a partir de D 00:00 (podem passar de 1440: 01:00 do dia seguinte = 1500).
+
+const TURNOS = [
+  { id: "t2", nome: "2º TURNO", ini: 420, fim: 780 },   // 07–13
+  { id: "t3", nome: "3º TURNO", ini: 780, fim: 1140 },  // 13–19
+  { id: "t4", nome: "4º TURNO", ini: 1140, fim: 1500 }, // 19–01
+  { id: "t1", nome: "1º TURNO", ini: 1500, fim: 1860 }, // 01–07
+];
+
+const AFASTAMENTOS = {
+  FOLGA: "Folga",
+  FERIAS: "Férias",
+  LICENCA: "Licença",
+  ATESTADO: "Atestado",
+  CURSO: "Curso",
+  BH_COMP: "Banco de horas (compensação)",
+};
+
+const TIPOS = {
+  ...AFASTAMENTOS,
+  HE: "Hora extra",
+  BH_MAIS: "Banco de horas (crédito)",
+  TROCA: "Troca de serviço",
+  REMANEJ: "Remanejamento",
+  FA: "Viatura fora de atividade",
+};
+
+// ---------- datas ----------
+const DAY = 86400000;
+function parseData(s) { const [y, m, d] = s.split("-").map(Number); return Date.UTC(y, m - 1, d); }
+function fmtData(ms) { return new Date(ms).toISOString().slice(0, 10); }
+function somaDias(s, n) { return fmtData(parseData(s) + n * DAY); }
+function diaSemana(s) { return new Date(parseData(s)).getUTCDay(); } // 0 = domingo
+function indiceDia(s) { return Math.round(parseData(s) / DAY); }
+function mesDe(s) { return s.slice(0, 7); }
+function diasDoMes(mes) {
+  const [y, m] = mes.split("-").map(Number);
+  const n = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return Array.from({ length: n }, (_, i) => `${mes}-${String(i + 1).padStart(2, "0")}`);
+}
+function mesSeguinte(mes) { const [y, m] = mes.split("-").map(Number); return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`; }
+
+// ---------- horários ----------
+function hm(str) { const [h, m] = str.split(":").map(Number); return h * 60 + (m || 0); }
+function fmtHm(min) { const m = ((min % 1440) + 1440) % 1440; return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`; }
+// Converte "19:00"–"01:00" em intervalo contínuo; horários antes das 07:00 contam como madrugada do dia seguinte
+// quando o início é à noite (fim <= início).
+function intervalo(ini, fim) {
+  let a = typeof ini === "number" ? ini : hm(ini);
+  let b = typeof fim === "number" ? fim : hm(fim);
+  if (a < 420 && b <= 420 && typeof ini === "string" && a < 360) { a += 1440; b += 1440; } // 01:00–07:00 isolado = madrugada
+  if (b <= a) b += 1440;
+  return [a, b];
+}
+function sobrepoe(a1, b1, a2, b2) { return Math.max(0, Math.min(b1, b2) - Math.max(a1, a2)); }
+function fmtHoras(min) {
+  const neg = min < 0; min = Math.abs(Math.round(min));
+  const h = Math.floor(min / 60), m = min % 60;
+  return (neg ? "−" : "") + (m ? `${h}h${String(m).padStart(2, "0")}` : `${h}h`);
+}
+// Minutos dentro da janela noturna 22:00–05:00 (informativo para o RH).
+function minutosNoturnos(a, b) {
+  let t = 0;
+  for (let base = -1440; base <= 2880; base += 1440) t += sobrepoe(a, b, base + 1320, base + 1740);
+  return t;
+}
+
+// ---------- regime ----------
+function trabalhaNoDia(data, gm, dia) {
+  const eq = data.equipes.find((e) => e.id === gm.equipe);
+  if (!eq || gm.ativo === false) return false;
+  if (eq.tipo === "alternado") return ((indiceDia(dia) % 2) + 2) % 2 === eq.paridade;
+  if (eq.tipo === "semanal") return (gm.dias || [1, 2, 3, 4, 5]).includes(diaSemana(dia));
+  return false;
+}
+function equipesDoDia(data, dia) {
+  return data.equipes.filter((e) => e.tipo === "alternado" && ((indiceDia(dia) % 2) + 2) % 2 === e.paridade).map((e) => e.id);
+}
+
+function ocorrenciaCobre(oc, dia) { return oc.de <= dia && dia <= (oc.ate || oc.de); }
+
+// ---------- escala do dia ----------
+const cacheDia = new Map();
+const cacheMes = new Map();
+let versaoCache = null, dataCache = null;
+function limparCache() { cacheDia.clear(); cacheMes.clear(); }
+function conferirVersao(data) { if (dataCache !== data || versaoCache !== (data._versao || 0)) { limparCache(); dataCache = data; versaoCache = data._versao || 0; } }
+
+function calcularDia(data, dia) {
+  conferirVersao(data);
+  const chave = dia;
+  if (cacheDia.has(chave)) return cacheDia.get(chave);
+  const gmPorId = new Map(data.gms.map((g) => [g.id, g]));
+  const postoPorId = new Map(data.postos.map((p) => [p.id, p]));
+  const ocs = data.ocorrencias.filter((o) => ocorrenciaCobre(o, dia));
+  const alertas = [];
+  let seq = 0;
+
+  // 1. Base: lotação de quem trabalha no dia
+  const base = [];
+  for (const gm of data.gms) {
+    if (!trabalhaNoDia(data, gm, dia) || !gm.lotacao) continue;
+    for (const s of gm.lotacao.segmentos) {
+      const [ini, fim] = intervalo(s.ini, s.fim);
+      base.push({ id: `b${seq++}`, gm: gm.id, posto: gm.lotacao.posto, funcao: gm.lotacao.funcao || "", ini, fim,
+        nat: s.tipo === "he" ? "he" : "normal", fixa: s.tipo === "he", req: s.tipo === "he" ? "HE fixa" : "", origem: "base" });
+    }
+  }
+
+  // 2. Afastamentos retiram o GM do dia
+  const afastados = [];
+  const afastadoHoje = new Map();
+  for (const oc of ocs) {
+    if (!AFASTAMENTOS[oc.tipo]) continue;
+    const gm = gmPorId.get(oc.gm);
+    if (!gm) continue;
+    // Folga e compensação só fazem sentido em dia de serviço; afastamentos longos aparecem sempre.
+    const escalado = trabalhaNoDia(data, gm, dia);
+    if ((oc.tipo === "FOLGA" || oc.tipo === "BH_COMP") && !escalado) continue;
+    if (!escalado && !["FERIAS", "LICENCA", "ATESTADO", "CURSO"].includes(oc.tipo)) continue;
+    afastadoHoje.set(gm.id, oc);
+    if (escalado) afastados.push({ gm: gm.id, tipo: oc.tipo, oc, minutos: base.filter((d) => d.gm === gm.id && d.nat === "normal").reduce((t, d) => t + d.fim - d.ini, 0) });
+  }
+  let des = base.filter((d) => !afastadoHoje.has(d.gm));
+
+  // 3. Trocas: o substituto assume o serviço do titular
+  for (const oc of ocs.filter((o) => o.tipo === "TROCA")) {
+    const doTitular = des.filter((d) => d.gm === oc.gm);
+    if (!doTitular.length) { alertas.push({ nivel: "aviso", texto: `Troca: ${nomeDoMapa(gmPorId, oc.gm)} não está escalado neste dia.` }); continue; }
+    for (const d of doTitular) { d.gm = oc.substituto; d.nat = d.nat === "he" ? "he" : "troca"; d.req = oc.req || ""; d.origem = oc.id; d.titular = oc.gm; }
+    afastados.push({ gm: oc.gm, tipo: "TROCA", oc, minutos: 0 });
+  }
+
+  // 4. Remanejamentos
+  for (const oc of ocs.filter((o) => o.tipo === "REMANEJ")) {
+    for (const d of des.filter((x) => x.gm === oc.gm && x.nat !== "he")) { d.posto = oc.posto; if (oc.funcao) d.funcao = oc.funcao; d.remanejado = true; d.req = d.req || oc.req || ""; }
+  }
+
+  // 5. Acréscimos: HE e BH+
+  for (const oc of ocs.filter((o) => o.tipo === "HE" || o.tipo === "BH_MAIS")) {
+    if (oc.de !== dia) continue;
+    const [ini, fim] = intervalo(oc.ini, oc.fim);
+    des.push({ id: `o${oc.id}`, gm: oc.gm, posto: oc.posto, funcao: oc.funcao || "", ini, fim, nat: oc.tipo === "HE" ? "he" : "bh", req: oc.req || "", origem: oc.id });
+    if (afastadoHoje.has(oc.gm)) alertas.push({ nivel: "erro", texto: `${nomeDoMapa(gmPorId, oc.gm)} tem ${TIPOS[oc.tipo].toLowerCase()} mas está afastado (${TIPOS[afastadoHoje.get(oc.gm).tipo]}).` });
+  }
+
+  // 6. Viatura fora de atividade: guarnição vai para "à disposição"
+  const fa = new Map();
+  for (const oc of ocs.filter((o) => o.tipo === "FA")) fa.set(oc.posto, oc);
+  for (const d of des) if (d.posto && fa.has(d.posto)) { d.postoOriginal = d.posto; d.posto = null; }
+
+  // 7. Conflitos de horário do mesmo GM
+  const porGm = new Map();
+  for (const d of des) { if (!porGm.has(d.gm)) porGm.set(d.gm, []); porGm.get(d.gm).push(d); }
+  for (const [gid, lista] of porGm) {
+    lista.sort((a, b) => a.ini - b.ini);
+    for (let i = 1; i < lista.length; i++) if (lista[i].ini < lista[i - 1].fim) {
+      alertas.push({ nivel: "erro", texto: `${nomeDoMapa(gmPorId, gid)} está em dois lugares ao mesmo tempo (${fmtHm(lista[i].ini)}).` });
+      lista[i].conflito = lista[i - 1].conflito = true;
+    }
+  }
+
+  // 8. Furos: vagas por turno não preenchidas
+  const furos = [];
+  for (const p of data.postos) {
+    if (fa.has(p.id) || !p.vagas) continue;
+    if (p.dias && !p.dias.includes(diaSemana(dia))) continue;
+    for (const t of TURNOS) {
+      const vagas = p.vagas[t.id] || 0;
+      if (!vagas) continue;
+      const ocupantes = new Set(des.filter((d) => d.posto === p.id && sobrepoe(d.ini, d.fim, t.ini, t.fim) >= 60).map((d) => d.gm));
+      if (ocupantes.size < vagas) furos.push({ posto: p.id, turno: t.id, faltam: vagas - ocupantes.size });
+    }
+  }
+
+  const res = { dia, designacoes: des, afastados, furos, alertas, fa: [...fa.values()],
+    disposicao: des.filter((d) => d.posto === null), equipes: equipesDoDia(data, dia) };
+  void postoPorId;
+  cacheDia.set(chave, res);
+  return res;
+}
+function nomeDoMapa(map, id) { return map.get(id)?.nome || id; }
+
+// Intervalos em que o GM está ocupado no dia D (inclui a noite anterior que avança sobre D).
+function ocupacao(data, gmId, dia) {
+  const hoje = calcularDia(data, dia).designacoes.filter((d) => d.gm === gmId).map((d) => [d.ini, d.fim]);
+  const ontem = calcularDia(data, somaDias(dia, -1)).designacoes.filter((d) => d.gm === gmId && d.fim > 1440).map((d) => [d.ini - 1440, d.fim - 1440]);
+  return [...ontem, ...hoje];
+}
+function afastamentoNoDia(data, gmId, dia) {
+  return data.ocorrencias.find((o) => o.gm === gmId && ["FERIAS", "LICENCA", "ATESTADO", "CURSO"].includes(o.tipo) && ocorrenciaCobre(o, dia))
+    || data.ocorrencias.find((o) => o.gm === gmId && (o.tipo === "FOLGA" || o.tipo === "BH_COMP") && o.de === dia);
+}
+
+// ---------- sugestão para cobrir furo ----------
+function sugerir(data, dia, postoId, ini, fim) {
+  const mes = mesDe(dia);
+  const livro = livroMes(data, mes);
+  const out = [];
+  for (const gm of data.gms) {
+    if (gm.ativo === false) continue;
+    const motivoAfast = afastamentoNoDia(data, gm.id, dia);
+    if (motivoAfast) continue;
+    const ocup = ocupacao(data, gm.id, dia);
+    if (ocup.some(([a, b]) => sobrepoe(a, b, ini, fim) > 0)) continue;
+    // descanso: menor distância até outro serviço
+    let folgaAntes = Infinity, folgaDepois = Infinity;
+    for (const [a, b] of ocup) { if (b <= ini) folgaAntes = Math.min(folgaAntes, ini - b); if (a >= fim) folgaDepois = Math.min(folgaDepois, a - fim); }
+    const l = livro.get(gm.id) || { he: 0, transporte: 0 };
+    const mesmoPosto = gm.lotacao?.posto === postoId;
+    const notas = [];
+    if (mesmoPosto) notas.push("conhece o posto");
+    if (folgaAntes === 0) notas.push("emenda com serviço anterior");
+    else if (folgaAntes < 11 * 60) notas.push(`saiu há ${fmtHoras(folgaAntes)}`);
+    if (folgaDepois === 0) notas.push("emenda com serviço seguinte");
+    else if (folgaDepois < 11 * 60) notas.push(`entra em ${fmtHoras(folgaDepois)}`);
+    if (gm.naoFazHE) notas.push("não realiza HE");
+    out.push({ gm, heMes: l.he, transporte: l.transporte, mesmoPosto, notas, bloqueado: !!gm.naoFazHE,
+      descansoCurto: Math.min(folgaAntes, folgaDepois) < 11 * 60 });
+  }
+  out.sort((a, b) => (a.bloqueado - b.bloqueado) || (b.mesmoPosto - a.mesmoPosto) || (a.descansoCurto - b.descansoCurto) || (a.heMes + a.transporte - b.heMes - b.transporte) || a.gm.nome.localeCompare(b.gm.nome));
+  return out;
+}
+
+// ---------- livro de horas ----------
+function resumoMes(data, mes) {
+  conferirVersao(data);
+  const chave = mes;
+  if (cacheMes.has(chave)) return cacheMes.get(chave);
+  const r = new Map();
+  const get = (id) => { if (!r.has(id)) r.set(id, { servicosBase: 0, servicos: 0, folgas: 0, normal: 0, he: 0, heNoturna: 0, heFixa: 0, bhMais: 0, bhMenos: 0, trocas: 0, afastDias: 0, dias: {} }); return r.get(id); };
+  for (const dia of diasDoMes(mes)) {
+    const cd = calcularDia(data, dia);
+    for (const gm of data.gms) if (trabalhaNoDia(data, gm, dia) && gm.lotacao) get(gm.id).servicosBase++;
+    const trabalhouNormal = new Set();
+    for (const d of cd.designacoes) {
+      const x = get(d.gm), min = d.fim - d.ini;
+      const marca = x.dias[dia] || (x.dias[dia] = []);
+      if (d.nat === "he") { x.he += min; x.heNoturna += minutosNoturnos(d.ini, d.fim); if (d.fixa) x.heFixa += min; marca.push("HE"); }
+      else if (d.nat === "bh") { x.bhMais += min; marca.push("BH+"); }
+      else { x.normal += min; trabalhouNormal.add(d.gm); if (d.nat === "troca") marca.push("TR"); else marca.push("S"); }
+    }
+    for (const id of trabalhouNormal) get(id).servicos++;
+    for (const a of cd.afastados) {
+      const x = get(a.gm);
+      (x.dias[dia] || (x.dias[dia] = [])).push(a.tipo);
+      if (a.tipo === "FOLGA") x.folgas++;
+      else if (a.tipo === "BH_COMP") x.bhMenos += a.minutos;
+      else if (a.tipo === "TROCA") x.trocas++;
+      else x.afastDias++;
+    }
+    // afastamentos longos em dias sem serviço
+    for (const o of data.ocorrencias) if (["FERIAS", "LICENCA", "ATESTADO", "CURSO"].includes(o.tipo) && ocorrenciaCobre(o, dia)) {
+      const x = get(o.gm); const m = x.dias[dia] || (x.dias[dia] = []);
+      if (!m.includes(o.tipo)) m.push(o.tipo);
+    }
+  }
+  cacheMes.set(chave, r);
+  return r;
+}
+
+// Saldo de HE com teto de pagamento: o que passa do teto vai para o mês seguinte.
+function livroMes(data, mes) {
+  const teto = (data.config?.tetoHE ?? 60) * 60;
+  let mesAtual = data.config?.mesInicial || mes;
+  if (mes < mesAtual) mesAtual = mes;
+  const transporte = new Map(Object.entries(data.config?.transporteInicial || {}).map(([k, v]) => [k, v * 60]));
+  let livro;
+  for (let guarda = 0; guarda < 240; guarda++) {
+    const r = resumoMes(data, mesAtual);
+    livro = new Map();
+    for (const gm of data.gms) {
+      const x = r.get(gm.id) || { he: 0, bhMais: 0, bhMenos: 0 };
+      const anterior = transporte.get(gm.id) || 0;
+      const total = anterior + x.he;
+      const paga = Math.min(teto, total);
+      livro.set(gm.id, { ...x, transporte: anterior, total, paga, proximo: total - paga });
+    }
+    if (mesAtual >= mes) break;
+    for (const [id, l] of livro) transporte.set(id, l.proximo);
+    mesAtual = mesSeguinte(mesAtual);
+  }
+  return livro;
+}
+
+// Saldo acumulado de banco de horas até o fim do mês.
+function saldoBH(data, gmId, mes) {
+  let m = data.config?.mesInicial || mes, s = 0;
+  if (mes < m) m = mes;
+  for (let i = 0; i < 240; i++) {
+    const x = resumoMes(data, m).get(gmId);
+    if (x) s += x.bhMais - x.bhMenos;
+    if (m >= mes) break;
+    m = mesSeguinte(m);
+  }
+  return s;
+}
+
+// ---- seed.js ----
+// Dados de exemplo — nomes fictícios, estrutura inspirada nas escalas reais.
+
+function rng(seed) { let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
+
+const NOMES = ["ABREU","ACOSTA","AGUIAR","ALBRECHT","AMORIM","ANSCHAU","ARRUDA","AVILA","BACKES","BAIRROS","BARBOSA","BAUER","BECKER","BERNDT","BEHLING","BOEIRA","BORBA","BRAGA","BRITO","BUENO","CABRAL","CAMPOS","CANDIDO","CAPELLARI","CARNEIRO","CASTRO","CHAVES","COSTA","COUTO","DALMOLIN","DAMASCENO","DIAS","DUARTE","EBERT","ESPINDOLA","FAGUNDES","FARIAS","FELDENS","FIGUEIRO","FISCHER","FOGAÇA","FRANCO","FREITAS","GAMA","GEHLEN","GODOY","GOMES","GRAEFF","HAUBERT","HECK","HOFFMANN","IORA","JARDIM","JUNG","KAEFER","KELLER","KLEIN","KNEBEL","KONZEN","KRAEMER","KUNZ","LACERDA","LANG","LEAL","LOPES","LUZ","MACIEL","MAGALHÃES","MALLMANN","MENDES","MENEGHETTI","MOTA","MULLER","NASCIMENTO","NEUMANN","NOGUEIRA","OSORIO","PACHECO","PAIM","PAZ","PEIXOTO","PERES","PINHEIRO","PORTO","PRESTES","QUADROS","RAMOS","RECH","REIS","RITTER","ROSSI","RUSCHEL","SAMPAIO","SCHAEFER","SCHMITT","SCHNEIDER","SCHUCH","SEIBEL","SOARES","SPOHR","STEIN","STRECK","TAVARES","TEIXEIRA","TOLEDO","TRINDADE","VARGAS","VEIGA","VENTURA","VOGT","WEBER","WEIZENMANN","WERLE","WOLF","XAVIER","ZANATTA","ZIMMER","ZORZO","BRUM","CORREA","FONTANA","GIRARDI","HAAS"];
+
+function criarExemplo() {
+  const r = rng(20261126);
+  const pick = (arr) => arr[Math.floor(r() * arr.length)];
+
+  const equipes = [
+    { id: "D1", nome: "Diurno 1", tipo: "alternado", paridade: 0, periodo: "dia", inspetor: "INSP. TOLEDO" },
+    { id: "D2", nome: "Diurno 2", tipo: "alternado", paridade: 1, periodo: "dia", inspetor: "INSP. RITTER" },
+    { id: "N1", nome: "Noturno 1", tipo: "alternado", paridade: 0, periodo: "noite", inspetor: "INSP. PAIM" },
+    { id: "N2", nome: "Noturno 2", tipo: "alternado", paridade: 1, periodo: "noite", inspetor: "INSP. GODOY" },
+    { id: "SEM", nome: "Semanal / expediente", tipo: "semanal", periodo: "dia" },
+  ];
+
+  const secoes = [
+    { id: "sede", nome: "SEDE DA GM" },
+    { id: "cad", nome: "CENTRO ADMINISTRATIVO" },
+    { id: "pracas", nome: "PRAÇAS E PARQUES" },
+    { id: "diversos", nome: "POSTOS DIVERSOS" },
+    { id: "vtr", nome: "VTR" },
+    { id: "za", nome: "ZA PATRULHAMENTO A PÉ" },
+    { id: "motos", nome: "MOTOS · ÁREA CENTRAL" },
+    { id: "vtrn", nome: "VTR NOITE" },
+    { id: "monit", nome: "MONITORAMENTO" },
+  ];
+
+  const T = (a, b, c, d) => ({ t2: a, t3: b, t4: c, t1: d });
+  const postos = [
+    { id: "sala", secao: "sede", nome: "SALA OPERAÇÕES", vagas: T(3, 3, 2, 2) },
+    { id: "arm", secao: "sede", nome: "RESERVA DE ARMAMENTO", vagas: T(1, 1, 1, 1) },
+    { id: "guarita", secao: "sede", nome: "ACESSO OPERACIONAL (GUARITA)", vagas: T(1, 1, 1, 1) },
+    { id: "acesso", secao: "cad", nome: "ACESSO PRINCIPAL", vagas: T(1, 1, 1, 1) },
+    { id: "portaria", secao: "cad", nome: "PORTARIA 2º PISO", vagas: T(1, 1, 0, 0), dias: [1, 2, 3, 4, 5], obs: "SEG A SEX" },
+    { id: "estac", secao: "cad", nome: "ESTACIONAMENTO", rondas: true },
+    { id: "juventude", secao: "pracas", nome: "PRAÇA DA JUVENTUDE", vagas: T(1, 1, 1, 1) },
+    { id: "ceu", secao: "pracas", nome: "PRAÇA CÉU", vagas: T(1, 1, 1, 1) },
+    { id: "floresta", secao: "pracas", nome: "PARQUE FLORESTA IMPERIAL", rondas: true, obs: "SEG A SEX" },
+    { id: "parcao", secao: "pracas", nome: "PARCÃO HENRIQUE ROESLER", vagas: T(2, 2, 2, 2) },
+    { id: "rodov", secao: "diversos", nome: "RODOVIÁRIA", vagas: T(1, 1, 0, 0) },
+    { id: "cer", secao: "diversos", nome: "CER (R. BAHIA LADO USF)", vagas: T(1, 1, 1, 1) },
+    { id: "lar", secao: "diversos", nome: "LAR DA MENINA", vagas: T(1, 1, 1, 1) },
+    { id: "hosp", secao: "diversos", nome: "HOSPITAL MUNICIPAL", vagas: T(1, 1, 0, 0), dias: [1, 2, 3, 4, 5], obs: "SEG A SEX" },
+    { id: "upac", secao: "diversos", nome: "UPA CENTRO", vagas: T(1, 1, 1, 1) },
+    { id: "upacan", secao: "diversos", nome: "UPA CANUDOS", vagas: T(1, 1, 1, 1) },
+    { id: "centropop", secao: "diversos", nome: "CENTRO POP", rondas: true },
+    { id: "ubs", secao: "diversos", nome: "UBS SANTO AFONSO", rondas: true },
+    { id: "emef1", secao: "diversos", nome: "EMEF BOA SAÚDE · EJA", rondas: true, obs: "SEG A SEX" },
+    { id: "emef2", secao: "diversos", nome: "EMEF ARNALDO GRIN", rondas: true },
+    { id: "bombas", secao: "diversos", nome: "CASA DE BOMBAS", vagas: T(0, 0, 1, 1) },
+    { id: "v1319", secao: "vtr", nome: "VTR 1319", sub: "B3 DIA · INSPETOR DE SERVIÇO", tipo: "vtr", vagas: T(2, 2, 0, 0) },
+    { id: "v1317", secao: "vtr", nome: "VTR 1317", sub: "CANUDOS 1", tipo: "vtr", vagas: T(2, 2, 0, 0) },
+    { id: "v1320", secao: "vtr", nome: "VTR 1320", sub: "CENTRO", tipo: "vtr", vagas: T(2, 2, 0, 0) },
+    { id: "v1321", secao: "vtr", nome: "VTR 1321", sub: "SANTO AFONSO", tipo: "vtr", vagas: T(2, 2, 0, 0) },
+    { id: "v1281", secao: "vtr", nome: "VTR 1281", sub: "CANUDOS 2", tipo: "vtr", vagas: T(2, 2, 0, 0) },
+    { id: "v1301", secao: "vtr", nome: "VTR 1301", sub: "CENTRO 2", tipo: "vtr", vagas: T(2, 2, 0, 0) },
+    { id: "v1272", secao: "vtr", nome: "VTR 1272", sub: "CENTRO 3", tipo: "vtr", vagas: T(2, 2, 0, 0) },
+    { id: "punta", secao: "za", nome: "PRAÇA PUNTA DEL ESTE", sub: "reforço · só HE" },
+    { id: "imigrante", secao: "za", nome: "PRAÇA DO IMIGRANTE", sub: "reforço · só HE" },
+    { id: "mt638", secao: "motos", nome: "MT 638", tipo: "moto", vagas: T(1, 1, 0, 0) },
+    { id: "mt631", secao: "motos", nome: "MT 631", tipo: "moto", vagas: T(1, 1, 0, 0) },
+    { id: "mt639", secao: "motos", nome: "MT 639", tipo: "moto", vagas: T(1, 1, 0, 0) },
+    { id: "mt646", secao: "motos", nome: "MT 646", tipo: "moto", vagas: T(1, 1, 0, 0) },
+    { id: "n1319", secao: "vtrn", nome: "NOITE VTR 1319", sub: "B3 NOITE · INSPETOR DE SERVIÇO", tipo: "vtr", vagas: T(0, 0, 2, 2) },
+    { id: "n1318", secao: "vtrn", nome: "NOITE VTR 1318", sub: "NOITE CENTRO", tipo: "vtr", vagas: T(0, 0, 2, 2) },
+    { id: "n1321", secao: "vtrn", nome: "NOITE VTR 1321", sub: "NOITE CANUDOS", tipo: "vtr", vagas: T(0, 0, 2, 2) },
+    { id: "n1317", secao: "vtrn", nome: "NOITE VTR 1317", sub: "NOITE SANTO AFONSO", tipo: "vtr", vagas: T(0, 0, 2, 2) },
+    { id: "n1320", secao: "vtrn", nome: "NOITE VTR 1320", sub: "NOITE CENTRO 2", tipo: "vtr", vagas: T(0, 0, 2, 2) },
+    { id: "monit", secao: "monit", nome: "VIDEOMONITORAMENTO", obs: "SEG A SEX" },
+  ];
+
+  const DIA = [{ ini: "07:00", fim: "19:00", tipo: "normal" }];
+  const NOITE = [{ ini: "19:00", fim: "07:00", tipo: "normal" }];
+  const vagasDia = ["sala", "sala", "sala", "arm", "guarita", "acesso", "juventude", "ceu", "parcao", "parcao", "rodov", "cer", "lar", "upac", "upacan",
+    ...["v1319", "v1317", "v1320", "v1321", "v1281", "v1301", "v1272"].flatMap((v) => [[v, "Motorista"], [v, "Patrulheiro"]]),
+    "mt638", "mt631", "mt639", "mt646"];
+  const vagasNoite = ["sala", "sala", "arm", "guarita", "acesso", "juventude", "ceu", "parcao", "parcao", "cer", "lar", "upac", "upacan", "bombas",
+    ...["n1319", "n1318", "n1321", "n1317", "n1320"].flatMap((v) => [[v, "Motorista"], [v, "Patrulheiro"]])];
+
+  const nomes = [...NOMES];
+  const gms = [];
+  let n = 0;
+  const novoGm = (equipe, lotacao, extra = {}) => {
+    const nome = nomes.splice(Math.floor(r() * nomes.length), 1)[0];
+    gms.push({ id: `g${++n}`, nome, matricula: String(1000 + Math.floor(r() * 8999)), equipe, lotacao, ...extra });
+  };
+  for (const eq of ["D1", "D2"]) for (const v of vagasDia) {
+    const [posto, funcao] = Array.isArray(v) ? v : [v, ""];
+    // deixa algumas vagas sem titular para gerar furos realistas
+    if (eq === "D2" && (posto === "rodov" || (posto === "v1301" && funcao === "Patrulheiro"))) continue;
+    novoGm(eq, { posto, funcao, segmentos: DIA });
+  }
+  for (const eq of ["N1", "N2"]) for (const v of vagasNoite) {
+    const [posto, funcao] = Array.isArray(v) ? v : [v, ""];
+    if (eq === "N1" && posto === "lar") continue;
+    novoGm(eq, { posto, funcao, segmentos: posto === "bombas" ? [{ ini: "18:00", fim: "06:00", tipo: "normal" }] : NOITE });
+  }
+  novoGm("SEM", { posto: "portaria", funcao: "", segmentos: [{ ini: "06:00", fim: "12:00", tipo: "normal" }] });
+  novoGm("SEM", { posto: "portaria", funcao: "", segmentos: [{ ini: "12:00", fim: "18:00", tipo: "normal" }] });
+  novoGm("SEM", { posto: "hosp", funcao: "", segmentos: [{ ini: "07:00", fim: "12:00", tipo: "normal" }, { ini: "13:00", fim: "16:00", tipo: "normal" }, { ini: "16:00", fim: "18:00", tipo: "he" }] }, { obs: "HE fixa de 2h por dia" });
+  novoGm("SEM", { posto: "monit", funcao: "Operador", segmentos: [{ ini: "13:30", fim: "17:30", tipo: "normal" }, { ini: "18:30", fim: "22:30", tipo: "normal" }] });
+  novoGm("SEM", { posto: "monit", funcao: "Operador", segmentos: [{ ini: "22:30", fim: "01:00", tipo: "normal" }, { ini: "02:00", fim: "06:00", tipo: "normal" }] });
+  gms[7].naoFazHE = true; gms[7].obs = "Não realiza HE (restrição médica)";
+  gms[40].naoFazHE = true;
+
+  const data = {
+    config: { tetoHE: 60, mesInicial: "2026-10", cabecalho: "GUARDA MUNICIPAL · SEÇÃO DE ESCALA", transporteInicial: {} },
+    equipes, secoes, postos, gms, ocorrencias: [], _versao: 0,
+  };
+  let oid = 0;
+  const add = (o) => { data.ocorrencias.push({ id: `x${++oid}`, ...o }); };
+  const alternados = gms.filter((g) => data.equipes.find((e) => e.id === g.equipe).tipo === "alternado");
+  const fim = "2026-12-31";
+  const dias = [...diasDoMes("2026-10"), ...diasDoMes("2026-11"), ...diasDoMes("2026-12")];
+
+  // Afastamentos longos
+  const ferias = [["2026-10-05", "2026-10-19"], ["2026-10-12", "2026-11-10"], ["2026-11-02", "2026-11-16"], ["2026-11-16", "2026-12-15"],
+    ["2026-11-20", "2026-12-04"], ["2026-11-23", "2026-12-07"], ["2026-12-01", "2026-12-30"], ["2026-12-18", "2027-01-16"], ["2026-12-18", "2027-01-01"], ["2026-10-20", "2026-11-03"], ["2026-11-25", "2026-12-24"]];
+  const usados = new Set();
+  const sorteiaGm = (filtro = () => true) => { for (let i = 0; i < 500; i++) { const g = pick(alternados); if (!usados.has(g.id) && filtro(g)) { usados.add(g.id); return g; } } return pick(alternados); };
+  for (const [de, ate] of ferias) add({ tipo: "FERIAS", gm: sorteiaGm().id, de, ate, req: String(1400 + Math.floor(r() * 400)) });
+  add({ tipo: "LICENCA", gm: sorteiaGm().id, de: "2026-09-08", ate: "2027-03-08", obs: "Licença interesse" });
+  add({ tipo: "LICENCA", gm: sorteiaGm().id, de: "2026-11-11", ate: "2027-01-11", obs: "Licença saúde" });
+  for (const [de, ate] of [["2026-10-14", "2026-10-17"], ["2026-11-03", "2026-11-05"], ["2026-11-24", "2026-11-28"], ["2026-12-02", "2026-12-04"]])
+    add({ tipo: "ATESTADO", gm: sorteiaGm().id, de, ate });
+  add({ tipo: "CURSO", gm: sorteiaGm().id, de: "2026-11-23", ate: "2026-11-27", obs: "Curso de tiro" });
+
+  // Folgas: duas por mês para quem é 12x36 (em dezembro, alguns ainda sem a segunda)
+  for (const mes of ["2026-10", "2026-11", "2026-12"]) for (const g of alternados) {
+    const ds = diasDoMes(mes).filter((d) => trabalhaNoDia(data, g, d) && !afastamentoNoDia(data, g.id, d));
+    const qtd = mes === "2026-12" && r() < 0.3 ? 1 : 2;
+    for (let i = 0; i < qtd && ds.length; i++) add({ tipo: "FOLGA", gm: g.id, de: ds.splice(Math.floor(r() * ds.length), 1)[0] });
+  }
+
+  // Banco de horas, trocas, remanejamentos
+  for (let i = 0; i < 6; i++) { const g = pick(alternados); const ds = dias.filter((d) => trabalhaNoDia(data, g, d) && !afastamentoNoDia(data, g.id, d)); add({ tipo: "BH_COMP", gm: g.id, de: pick(ds), req: String(1400 + Math.floor(r() * 400)) }); }
+  for (let i = 0; i < 6; i++) {
+    const g = pick(alternados); const eq = data.equipes.find((e) => e.id === g.equipe);
+    const par = gms.filter((x) => { const e = data.equipes.find((q) => q.id === x.equipe); return e.tipo === "alternado" && e.periodo === eq.periodo && e.id !== eq.id; });
+    const ds = dias.filter((d) => trabalhaNoDia(data, g, d) && !afastamentoNoDia(data, g.id, d));
+    add({ tipo: "TROCA", gm: g.id, substituto: pick(par).id, de: pick(ds), req: String(1400 + Math.floor(r() * 400)) });
+  }
+  add({ tipo: "REMANEJ", gm: gms.find((g) => g.lotacao.posto === "mt646").id, de: "2026-11-26", ate: "2026-11-30", posto: "v1301", funcao: "Patrulheiro", obs: "Moto em revisão" });
+  add({ tipo: "FA", posto: "v1281", de: "2026-11-24", ate: "2026-11-30", obs: "Aguardando peça (embreagem)" });
+
+  // Reforço de ZA só com HE, e três GMs que fazem muita HE (para mostrar o teto de 60h e o transporte)
+  const avidos = [gms[20], gms[75], gms[52]];
+  data.config.transporteInicial[avidos[0].id] = 14;
+  for (const d of dias) {
+    if (d > "2026-11-29") break;
+    const ds = new Date(d + "T12:00:00Z").getUTCDay();
+    if (ds === 5 || ds === 6) for (const [i, posto] of [[0, "punta"], [1, "punta"], [2, "imigrante"]]) {
+      const g = avidos[i];
+      if (!afastamentoNoDia(data, g.id, d) && !trabalhaNoDia(data, g, d)) add({ tipo: "HE", gm: g.id, de: d, ini: "10:00", fim: "19:00", posto, req: "OS 7792" });
+    }
+  }
+
+  // Escalante cobrindo furos com HE até 29/11 (os dias seguintes ficam em aberto)
+  const heMes = new Map();
+  const conta = (g, d, min) => { const k = g + mesDe(d); heMes.set(k, (heMes.get(k) || 0) + min); };
+  for (const d of dias) {
+    if (d > "2026-11-29") break;
+    data._versao++;
+    const cd = calcularDia(data, d);
+    const ontem = calcularDia(data, somaDias(d, -1));
+    const ocup = new Map();
+    const marca = (g, a, b) => { if (!ocup.has(g)) ocup.set(g, []); ocup.get(g).push([a, b]); };
+    for (const x of cd.designacoes) marca(x.gm, x.ini, x.fim);
+    for (const x of ontem.designacoes) if (x.fim > 1440) marca(x.gm, x.ini - 1440, x.fim - 1440);
+    const afastHoje = new Set(gms.filter((g) => afastamentoNoDia(data, g.id, d)).map((g) => g.id));
+    const pedidos = [];
+    for (const f of cd.furos) for (let k = 0; k < f.faltam; k++) pedidos.push(f);
+    // junta 2º+3º e 4º+1º do mesmo posto em serviços de 12h quando sorteado
+    const vistos = new Set();
+    for (const f of pedidos) {
+      if (f.usado) continue;
+      if (r() < (d >= "2026-11-26" ? 0.55 : 0.1)) continue; // alguns furos ficam descobertos (mais nos próximos dias)
+      const t = TURNOS.find((x) => x.id === f.turno);
+      let [a, b] = [t.ini, t.fim];
+      const parId = { t2: "t3", t3: null, t4: "t1", t1: null }[f.turno];
+      const chave = f.posto + f.turno + vistos.size;
+      if (parId && r() < 0.5 && pedidos.some((p) => p.posto === f.posto && p.turno === parId && !p.usado)) {
+        const p = pedidos.find((p) => p.posto === f.posto && p.turno === parId && !p.usado); p.usado = true;
+        b = TURNOS.find((x) => x.id === parId).fim;
+      }
+      vistos.add(chave);
+      const cands = gms.filter((g) => !g.naoFazHE && !afastHoje.has(g.id) && !(ocup.get(g.id) || []).some(([x, y]) => sobrepoe(x, y, a - 60, b + 60) > 0) && !avidos.includes(g));
+      if (!cands.length) continue;
+      cands.sort((x, y) => (heMes.get(x.id + mesDe(d)) || 0) - (heMes.get(y.id + mesDe(d)) || 0) + (r() - 0.5) * 600);
+      const g = cands[0];
+      const fmt = (m) => `${String(Math.floor((m % 1440) / 60)).padStart(2, "0")}:00`;
+      add({ tipo: "HE", gm: g.id, de: d, ini: fmt(a), fim: fmt(b), posto: f.posto, funcao: "", req: r() < 0.85 ? String(1100 + Math.floor(r() * 500)) : "" });
+      marca(g.id, ...intervalo(fmt(a), fmt(b)));
+      conta(g.id, d, b - a);
+    }
+  }
+  // BH+ (serviço extra creditado no banco)
+  for (const [d, posto] of [["2026-11-06", "n1318"], ["2026-11-14", "n1320"], ["2026-11-21", "n1317"]]) {
+    data._versao++;
+    const cd = calcularDia(data, d);
+    const livres = gms.filter((g) => !g.naoFazHE && !afastamentoNoDia(data, g.id, d) && !cd.designacoes.some((x) => x.gm === g.id) && g.equipe.startsWith("N"));
+    add({ tipo: "BH_MAIS", gm: pick(livres).id, de: d, ini: "19:00", fim: "01:00", posto, req: String(1400 + Math.floor(r() * 400)) });
+  }
+  void fim;
+  data._versao++;
+  return data;
+}
+
+// ---- app.js ----
+
+
+const CHAVE = "escala-gm-prototipo-v1";
+const SEMANA = ["DOMINGO", "SEGUNDA", "TERÇA", "QUARTA", "QUINTA", "SEXTA", "SÁBADO"];
+const MESES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+const VIEWS = ["quadro", "lancamentos", "mes", "ficha", "folha"];
+
+// ---------- estado ----------
+let data = carregar();
+const hojeReal = new Date().toISOString().slice(0, 10);
+const ui = {
+  view: VIEWS.includes(location.hash.slice(1)) ? location.hash.slice(1) : "quadro",
+  dia: hojeReal >= "2026-10-01" && hojeReal <= "2026-12-31" ? hojeReal : "2026-11-26",
+  mes: null, gm: null, drawer: null, soFuros: false,
+  filtroMes: { equipe: "", ordem: "he" }, filtroLanc: { tipo: "", mes: null },
+  form: { tipo: "FOLGA" }, confirmar: null,
+};
+ui.mes = mesDe(ui.dia); ui.filtroLanc.mes = ui.mes;
+const desfazer = [];
+
+function carregar() {
+  try {
+    const s = localStorage.getItem(CHAVE);
+    if (s) { const d = JSON.parse(s); d._versao = 1; return d; }
+  } catch { /* sem armazenamento: usa exemplo */ }
+  return criarExemplo();
+}
+function salvar() { try { localStorage.setItem(CHAVE, JSON.stringify({ ...data, _versao: undefined })); } catch { /* ignora */ } }
+function mudar(msg, fn) {
+  desfazer.push(JSON.stringify(data.ocorrencias));
+  if (desfazer.length > 30) desfazer.shift();
+  fn();
+  data._versao = (data._versao || 0) + 1;
+  salvar();
+  render();
+  toast(msg, true);
+}
+const novoId = () => "u" + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36);
+
+// ---------- utilidades ----------
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const gmPorId = (id) => data.gms.find((g) => g.id === id);
+const postoPorId = (id) => data.postos.find((p) => p.id === id);
+const nomeGm = (id) => gmPorId(id)?.nome || "—";
+const ddmm = (d) => `${d.slice(8, 10)}/${d.slice(5, 7)}`;
+const ddmmaaaa = (d) => `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}`;
+const nomeMes = (m) => { const n = MESES[Number(m.slice(5, 7)) - 1]; return `${n[0].toUpperCase()}${n.slice(1)} de ${m.slice(0, 4)}`; };
+const mesAnterior = (m) => { const [y, mm] = m.split("-").map(Number); return mm === 1 ? `${y - 1}-12` : `${y}-${String(mm - 1).padStart(2, "0")}`; };
+const equipe = (id) => data.equipes.find((e) => e.id === id);
+const opcoesGm = (sel = "", filtro = () => true) => [...data.gms].filter(filtro).sort((a, b) => a.nome.localeCompare(b.nome))
+  .map((g) => `<option value="${g.id}" ${g.id === sel ? "selected" : ""}>${esc(g.nome)} · ${g.equipe}</option>`).join("");
+const opcoesPosto = (sel = "") => data.secoes.map((s) => `<optgroup label="${esc(s.nome)}">${data.postos.filter((p) => p.secao === s.id)
+  .map((p) => `<option value="${p.id}" ${p.id === sel ? "selected" : ""}>${esc(p.nome)}${p.sub ? " · " + esc(p.sub) : ""}</option>`).join("")}</optgroup>`).join("");
+function rotuloLotacao(g) {
+  if (!g.lotacao) return "sem lotação";
+  const p = postoPorId(g.lotacao.posto);
+  const seg = g.lotacao.segmentos.map((s) => `${s.ini}–${s.fim}${s.tipo === "he" ? " (HE)" : ""}`).join(" + ");
+  return `${p?.nome || "?"}${g.lotacao.funcao ? " · " + g.lotacao.funcao : ""} · ${seg}`;
+}
+const BADGE = { he: ["HE+", "he"], bh: ["BH+", "bh"], troca: ["TROCA", "troca"] };
+
+// ---------- shell ----------
+function render() {
+  document.querySelectorAll("[data-nav]").forEach((a) => a.setAttribute("aria-current", a.dataset.nav === ui.view ? "page" : "false"));
+  const main = $("#main");
+  const html = { quadro: vQuadro, lancamentos: vLancamentos, mes: vMes, ficha: vFicha, folha: vFolha }[ui.view]();
+  main.innerHTML = html;
+  $("#drawer").innerHTML = ui.drawer ? vDrawer() : "";
+  $("#drawer").hidden = !ui.drawer;
+  $("#veu").hidden = !ui.drawer;
+}
+
+let toastTimer;
+function toast(msg, comDesfazer) {
+  const t = $("#toast");
+  t.innerHTML = `<span>${esc(msg)}</span>${comDesfazer && desfazer.length ? `<button data-act="desfazer">Desfazer</button>` : ""}`;
+  t.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.hidden = true), 6000);
+}
+
+// ---------- QUADRO DO DIA ----------
+function textoCelula(d, t) {
+  const idx = TURNOS.indexOf(t);
+  const prev = TURNOS[idx - 1], next = TURNOS[idx + 1];
+  const a = d.ini < t.ini && !(prev && sobrepoe(d.ini, d.fim, prev.ini, prev.fim) > 0) ? d.ini : Math.max(d.ini, t.ini);
+  const b = d.fim > t.fim && !(next && sobrepoe(d.ini, d.fim, next.ini, next.fim) > 0) ? d.fim : Math.min(d.fim, t.fim);
+  return `${fmtHm(a)}/${fmtHm(b)}`;
+}
+function chip(d, t) {
+  const g = gmPorId(d.gm);
+  const [txt, cls] = BADGE[d.nat] || [];
+  const extras = [];
+  if (d.fixa) extras.push(`<span class="tag he">HE fixa</span>`);
+  else if (txt) extras.push(`<span class="tag ${cls}">${txt}</span>`);
+  if (d.remanejado) extras.push(`<span class="tag rem">REMANEJ.</span>`);
+  if (d.req && !d.fixa) extras.push(`<span class="req">REQ ${esc(d.req)}</span>`);
+  return `<button class="chip ${cls || ""} ${d.conflito ? "conflito" : ""}" data-act="gm" data-gm="${d.gm}" data-des="${d.id}" title="${esc(rotuloLotacao(g))}">
+    <span class="nm">${esc(g?.nome)}</span>${d.funcao ? `<span class="fn">${esc(d.funcao[0])}</span>` : ""}
+    <span class="hr">${textoCelula(d, t)}</span>${extras.join("")}</button>`;
+}
+function vQuadro() {
+  const cd = calcularDia(data, ui.dia);
+  const amanha = somaDias(ui.dia, 1);
+  const eqDia = cd.equipes.filter((e) => equipe(e).periodo === "dia"), eqNoite = cd.equipes.filter((e) => equipe(e).periodo === "noite");
+  const heHoje = cd.designacoes.filter((d) => d.nat === "he").reduce((t, d) => t + d.fim - d.ini, 0);
+  const furosTotal = cd.furos.reduce((t, f) => t + f.faltam, 0);
+  const faPostos = new Map(cd.fa.map((o) => [o.posto, o]));
+  let linhas = "";
+  for (const s of data.secoes) {
+    const postos = data.postos.filter((p) => p.secao === s.id);
+    let corpo = "";
+    for (const p of postos) {
+      const furosP = cd.furos.filter((f) => f.posto === p.id);
+      if (ui.soFuros && !furosP.length) continue;
+      const desP = cd.designacoes.filter((d) => d.posto === p.id);
+      const naoHoje = p.dias && !p.dias.includes(diaSemana(ui.dia));
+      let cels;
+      if (faPostos.has(p.id)) {
+        const o = faPostos.get(p.id);
+        cels = `<td colspan="4" class="fa-cel">Fora de atividade até ${ddmm(o.ate || o.de)}${o.obs ? " · " + esc(o.obs) : ""} — guarnição em <b>à disposição</b></td>`;
+      } else {
+        cels = TURNOS.map((t) => {
+          const aqui = desP.filter((d) => sobrepoe(d.ini, d.fim, t.ini, t.fim) > 0).sort((a, b) => a.ini - b.ini);
+          const furo = furosP.find((f) => f.turno === t.id);
+          let h = aqui.map((d) => chip(d, t)).join("");
+          if (furo) h += `<button class="furo" data-act="furo" data-posto="${p.id}" data-turno="${t.id}">Cobrir · falta ${furo.faltam}</button>`;
+          if (!aqui.length && !furo) h = p.rondas ? `<span class="rondas">VTR/RONDAS FREQUENTES</span>` : naoHoje && p.vagas ? `<span class="vazio">não funciona hoje</span>` : `<span class="vazio">—</span>`;
+          return `<td class="${t.id === "t2" || t.id === "t3" ? "dia" : "noite"}">${h}</td>`;
+        }).join("");
+      }
+      corpo += `<tr><th scope="row" class="posto"><span class="pn">${esc(p.nome)}</span>${p.sub ? `<span class="ps">${esc(p.sub)}</span>` : ""}${p.obs ? `<span class="po">(${esc(p.obs)})</span>` : ""}</th>${cels}</tr>`;
+    }
+    if (corpo) linhas += `<tr class="secao"><th colspan="5" scope="rowgroup">${esc(s.nome)}</th></tr>${corpo}`;
+  }
+
+  // efetivo fora da escala
+  const grupos = {};
+  for (const a of cd.afastados) (grupos[a.tipo] ||= []).push(a);
+  const blocosFora = ["FOLGA", "FERIAS", "LICENCA", "ATESTADO", "CURSO", "BH_COMP", "TROCA"].filter((k) => grupos[k]).map((k) => `
+    <section class="fora-g"><h4>${k === "TROCA" ? "Trocas (titular fora)" : TIPOS[k]} <span class="n">${grupos[k].length}</span></h4><ul>
+    ${grupos[k].map((a) => `<li><button class="link" data-act="gm" data-gm="${a.gm}">${esc(nomeGm(a.gm))}</button>
+      <span class="meta">${equipe(gmPorId(a.gm)?.equipe)?.id || ""}${a.oc.ate && a.oc.ate !== a.oc.de ? ` · volta ${ddmm(somaDias(a.oc.ate, 1))}` : ""}${a.tipo === "TROCA" ? ` · coberto por ${esc(nomeGm(a.oc.substituto))}` : ""}${a.oc.req ? ` · REQ ${esc(a.oc.req)}` : ""}</span></li>`).join("")}</ul></section>`).join("");
+  const disp = cd.disposicao.length ? `<section class="disposicao"><h3>À disposição <span class="n">${new Set(cd.disposicao.map((d) => d.gm)).size}</span></h3>
+    <p class="dica">Guarnição de viatura fora de atividade. Remaneje para um posto com furo.</p><div class="chips">
+    ${[...new Set(cd.disposicao.map((d) => d.gm))].map((id) => { const d = cd.disposicao.find((x) => x.gm === id); return `<button class="chip" data-act="gm" data-gm="${id}" data-des="${d.id}"><span class="nm">${esc(nomeGm(id))}</span><span class="hr">${fmtHm(d.ini)}/${fmtHm(d.fim)}</span><span class="req">de ${esc(postoPorId(d.postoOriginal)?.nome)}</span></button>`; }).join("")}
+    </div></section>` : "";
+
+  return `
+  <div class="barra">
+    <div class="datas">
+      <button class="ic" data-act="dia" data-n="-1" aria-label="Dia anterior">‹</button>
+      <input type="date" id="q-dia" value="${ui.dia}" min="2026-10-01" max="2026-12-31" aria-label="Data do serviço">
+      <button class="ic" data-act="dia" data-n="1" aria-label="Próximo dia">›</button>
+      <div class="periodo"><b>${SEMANA[diaSemana(ui.dia)]} ${ddmm(ui.dia)}</b> 07h → ${SEMANA[diaSemana(amanha)].toLowerCase()} ${ddmm(amanha)} 07h</div>
+    </div>
+    <div class="equipes">
+      <span class="eq dia">Dia <b>${eqDia.join(" ")}</b> ${eqDia.map((e) => esc(equipe(e).inspetor)).join("")}</span>
+      <span class="eq noite">Noite <b>${eqNoite.join(" ")}</b> ${eqNoite.map((e) => esc(equipe(e).inspetor)).join("")}</span>
+    </div>
+  </div>
+  <div class="resumo">
+    <div class="kpi ${furosTotal ? "ruim" : "bom"}"><span class="v">${furosTotal}</span><span class="l">${furosTotal === 1 ? "vaga descoberta" : "vagas descobertas"}</span></div>
+    <div class="kpi"><span class="v">${fmtHoras(heHoje)}</span><span class="l">de HE neste serviço</span></div>
+    <div class="kpi"><span class="v">${new Set(cd.designacoes.filter((d) => d.posto).map((d) => d.gm)).size}</span><span class="l">GMs escalados</span></div>
+    <div class="kpi"><span class="v">${cd.afastados.length}</span><span class="l">fora da escala hoje</span></div>
+    <label class="toggle"><input type="checkbox" id="q-sofuros" ${ui.soFuros ? "checked" : ""}> Só postos com furo</label>
+  </div>
+  ${cd.alertas.length ? `<div class="alertas">${cd.alertas.map((a) => `<p class="${a.nivel}">${esc(a.texto)}</p>`).join("")}</div>` : ""}
+  ${disp}
+  <div class="tabela-wrap"><table class="quadro">
+    <colgroup><col class="c-posto"><col><col><col><col></colgroup>
+    <thead><tr><th scope="col">POSTO</th>${TURNOS.map((t) => `<th scope="col" class="${t.id === "t2" || t.id === "t3" ? "dia" : "noite"}">${t.nome}<small>${fmtHm(t.ini)}–${fmtHm(t.fim)}</small></th>`).join("")}</tr></thead>
+    <tbody>${linhas || `<tr><td colspan="5" class="vazio-geral">Nenhum furo neste dia.</td></tr>`}</tbody>
+  </table></div>
+  <h3 class="sub">Fora da escala neste serviço</h3>
+  <div class="fora">${blocosFora || `<p class="dica">Ninguém afastado.</p>`}</div>`;
+}
+
+// ---------- DRAWER ----------
+function vDrawer() {
+  const d = ui.drawer;
+  if (d.tipo === "furo") return drawerFuro(d);
+  if (d.tipo === "gm") return drawerGm(d);
+  return "";
+}
+function drawerFuro(d) {
+  const p = postoPorId(d.posto), t = TURNOS.find((x) => x.id === d.turno);
+  const [ini, fim] = intervalo(d.ini, d.fim);
+  const lista = sugerir(data, ui.dia, d.posto, ini, fim);
+  const opcoes = [[fmtHm(t.ini), fmtHm(t.fim), `Só o ${t.nome.toLowerCase()}`]];
+  const par = { t2: "t3", t4: "t1" }[t.id];
+  if (par) opcoes.push([fmtHm(t.ini), fmtHm(TURNOS.find((x) => x.id === par).fim), "12 horas"]);
+  if (t.id === "t3") opcoes.push(["13:00", "01:00", "Emendar até 01:00"]);
+  return `<div class="dw-head"><div><p class="eyebrow">Cobrir vaga · ${SEMANA[diaSemana(ui.dia)].toLowerCase()} ${ddmm(ui.dia)}</p>
+    <h2>${esc(p.nome)}</h2><p class="meta">${esc(p.sub || "")} ${t.nome}</p></div><button class="ic" data-act="fechar" aria-label="Fechar">×</button></div>
+  <div class="dw-body">
+    <fieldset class="horario"><legend>Horário</legend>
+      <div class="opts">${opcoes.map(([a, b, l]) => `<button class="opt ${a === d.ini && b === d.fim ? "on" : ""}" data-act="furo-hora" data-ini="${a}" data-fim="${b}">${l}<small>${a}–${b}</small></button>`).join("")}</div>
+      <div class="linha"><label>Início <input type="time" id="f-ini" value="${d.ini}"></label><label>Fim <input type="time" id="f-fim" value="${d.fim}"></label>
+      <label>Tipo <select id="f-nat"><option value="HE" ${d.nat === "HE" ? "selected" : ""}>Hora extra</option><option value="BH_MAIS" ${d.nat === "BH_MAIS" ? "selected" : ""}>Banco de horas</option></select></label>
+      <label>REQ <input id="f-req" value="${esc(d.req || "")}" placeholder="nº" size="6"></label></div>
+      <p class="dica">${fmtHoras(fim - ini)} · ${d.nat === "HE" ? "conta no livro de HE do mês" : "crédito no banco de horas"}</p>
+    </fieldset>
+    <div class="busca"><input type="search" id="f-busca" placeholder="Buscar GM" aria-label="Buscar GM"></div>
+    <p class="dica">Ordem: quem já trabalha neste posto, depois descanso adequado, depois menos HE no mês (somando o que veio do mês anterior).</p>
+    <ul class="sug">${lista.map((s, i) => `<li data-nome="${esc(s.gm.nome.toLowerCase())}" ${i >= 15 ? 'class="mais" hidden' : ""}>
+      <div class="sg"><b>${esc(s.gm.nome)}</b> <span class="meta">${s.gm.equipe} · ${esc(postoPorId(s.gm.lotacao?.posto)?.nome || "")}</span>
+      <div class="notas">${s.notas.map((n) => `<span class="nota ${/emenda|não realiza|saiu|entra/.test(n) ? "atencao" : ""}">${esc(n)}</span>`).join("")}</div></div>
+      <div class="sh"><span class="num">${fmtHoras(s.heMes)}</span><span class="meta">HE no mês${s.transporte ? ` +${fmtHoras(s.transporte)} transp.` : ""}</span></div>
+      <button class="btn ${s.bloqueado ? "" : "pri"}" data-act="escalar" data-gm="${s.gm.id}" ${s.bloqueado ? "disabled" : ""}>Escalar</button></li>`).join("")}</ul>
+    ${lista.length > 15 ? `<button class="link" data-act="ver-todos">Ver todos os ${lista.length} disponíveis</button>` : ""}
+    ${!lista.length ? `<p class="dica">Ninguém disponível nesse horário.</p>` : ""}
+  </div>`;
+}
+function drawerGm(d) {
+  const g = gmPorId(d.gm);
+  const cd = calcularDia(data, ui.dia);
+  const minhas = cd.designacoes.filter((x) => x.gm === g.id);
+  const afast = cd.afastados.find((a) => a.gm === g.id);
+  const l = livroMes(data, mesDe(ui.dia)).get(g.id);
+  const escalado = minhas.some((x) => x.origem === "base" || x.nat === "troca");
+  const acao = d.acao || "";
+  const ocsDoDia = data.ocorrencias.filter((o) => o.gm === g.id && o.de <= ui.dia && ui.dia <= (o.ate || o.de));
+  const ocsSub = data.ocorrencias.filter((o) => o.tipo === "TROCA" && o.substituto === g.id && o.de === ui.dia);
+  let form = "";
+  if (acao === "afast") form = `<div class="form"><label>Tipo <select id="a-tipo">${Object.entries(AFASTAMENTOS).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select></label>
+    <div class="linha"><label>De <input type="date" id="a-de" value="${ui.dia}"></label><label>Até <input type="date" id="a-ate" value="${ui.dia}"></label></div>
+    <label>REQ / observação <input id="a-req" placeholder="opcional"></label><button class="btn pri" data-act="salvar-afast">Lançar</button></div>`;
+  if (acao === "troca") form = `<div class="form"><label>Quem assume o serviço <select id="t-sub">${opcoesGm("", (x) => x.id !== g.id && !cd.designacoes.some((y) => y.gm === x.id && sobrepoe(y.ini, y.fim, Math.min(...minhas.map((m) => m.ini)), Math.max(...minhas.map((m) => m.fim))) > 0))}</select></label>
+    <label>REQ <input id="t-req" placeholder="opcional"></label><button class="btn pri" data-act="salvar-troca">Lançar troca</button></div>`;
+  if (acao === "remanej") form = `<div class="form"><label>Novo posto <select id="r-posto">${opcoesPosto()}</select></label><label>Função <input id="r-fn" placeholder="opcional"></label>
+    <div class="linha"><label>De <input type="date" id="r-de" value="${ui.dia}"></label><label>Até <input type="date" id="r-ate" value="${ui.dia}"></label></div>
+    <button class="btn pri" data-act="salvar-remanej">Remanejar</button></div>`;
+  return `<div class="dw-head"><div><p class="eyebrow">${esc(equipe(g.equipe)?.nome)} · mat. ${esc(g.matricula)}</p><h2>${esc(g.nome)}</h2>
+    <p class="meta">${esc(rotuloLotacao(g))}</p>${g.naoFazHE ? `<p class="tag-linha"><span class="tag furo">Não realiza HE</span></p>` : ""}${g.obs ? `<p class="meta">${esc(g.obs)}</p>` : ""}</div>
+    <button class="ic" data-act="fechar" aria-label="Fechar">×</button></div>
+  <div class="dw-body">
+    <div class="mini"><div><span class="num">${fmtHoras(l?.he || 0)}</span><span class="meta">HE em ${MESES[Number(mesDe(ui.dia).slice(5)) - 1]}</span></div>
+      <div><span class="num">${fmtHoras(l?.transporte || 0)}</span><span class="meta">veio do mês anterior</span></div>
+      <div><span class="num">${fmtHoras(saldoBH(data, g.id, mesDe(ui.dia)))}</span><span class="meta">banco de horas</span></div></div>
+    <h3>Neste serviço</h3>
+    ${afast ? `<p class="estado">${esc(TIPOS[afast.tipo])}${afast.oc.ate && afast.oc.ate !== afast.oc.de ? ` até ${ddmm(afast.oc.ate)}` : ""}</p>` : ""}
+    ${minhas.length ? `<ul class="lista-des">${minhas.map((x) => `<li><span class="hr">${fmtHm(x.ini)}–${fmtHm(x.fim)}</span> ${esc(postoPorId(x.posto)?.nome || "À disposição")} ${BADGE[x.nat] ? `<span class="tag ${BADGE[x.nat][1]}">${x.fixa ? "HE fixa" : BADGE[x.nat][0]}</span>` : ""}${x.titular ? ` <span class="meta">no lugar de ${esc(nomeGm(x.titular))}</span>` : ""}</li>`).join("")}</ul>` : !afast ? `<p class="dica">Não está escalado neste serviço.</p>` : ""}
+    <h3>Ações</h3>
+    <div class="acoes">
+      ${escalado ? `<button class="btn" data-act="folga">Lançar folga hoje</button>` : ""}
+      <button class="btn ${acao === "afast" ? "on" : ""}" data-act="gm-acao" data-acao="afast">Afastamento…</button>
+      ${escalado ? `<button class="btn ${acao === "troca" ? "on" : ""}" data-act="gm-acao" data-acao="troca">Troca de serviço…</button>` : ""}
+      ${minhas.length ? `<button class="btn ${acao === "remanej" ? "on" : ""}" data-act="gm-acao" data-acao="remanej">Remanejar…</button>` : ""}
+      ${escalado ? `<button class="btn" data-act="bhcomp">Compensação BH hoje</button>` : ""}
+    </div>
+    ${form}
+    ${[...ocsDoDia, ...ocsSub].length ? `<h3>Lançamentos que valem hoje</h3><ul class="lista-oc">${[...ocsDoDia, ...ocsSub].map((o) => `<li><span>${esc(TIPOS[o.tipo])}${o.ini ? ` ${o.ini}–${o.fim}` : ""}${o.ate && o.ate !== o.de ? ` · ${ddmm(o.de)} a ${ddmm(o.ate)}` : ""}${o.req ? ` · REQ ${esc(o.req)}` : ""}</span>
+      ${ui.confirmar === o.id ? `<button class="btn perigo" data-act="apagar" data-id="${o.id}">Confirmar exclusão</button>` : `<button class="link" data-act="pre-apagar" data-id="${o.id}">Excluir</button>`}</li>`).join("")}</ul>` : ""}
+    <p><button class="link" data-act="abrir-ficha" data-gm="${g.id}">Abrir ficha completa do GM →</button></p>
+  </div>`;
+}
+
+// ---------- LANÇAMENTOS ----------
+function camposForm(tipo) {
+  const f = ui.form;
+  const gmSel = `<label>GM <select id="l-gm">${opcoesGm(f.gm)}</select></label>`;
+  if (tipo === "FA") return `<label>Viatura <select id="l-posto">${opcoesPosto(f.posto)}</select></label>
+    <div class="linha"><label>De <input type="date" id="l-de" value="${f.de || ui.dia}"></label><label>Até <input type="date" id="l-ate" value="${f.ate || ui.dia}"></label></div>`;
+  if (tipo === "HE" || tipo === "BH_MAIS") return `${gmSel}<label>Posto <select id="l-posto">${opcoesPosto(f.posto)}</select></label>
+    <div class="linha"><label>Data do serviço <input type="date" id="l-de" value="${f.de || ui.dia}"></label><label>Início <input type="time" id="l-ini" value="${f.ini || "19:00"}"></label><label>Fim <input type="time" id="l-fim" value="${f.fim || "01:00"}"></label></div>`;
+  if (tipo === "TROCA") return `${gmSel}<label>Substituto <select id="l-sub">${opcoesGm(f.substituto)}</select></label><label>Data <input type="date" id="l-de" value="${f.de || ui.dia}"></label>`;
+  if (tipo === "REMANEJ") return `${gmSel}<label>Novo posto <select id="l-posto">${opcoesPosto(f.posto)}</select></label>
+    <div class="linha"><label>De <input type="date" id="l-de" value="${f.de || ui.dia}"></label><label>Até <input type="date" id="l-ate" value="${f.ate || ui.dia}"></label></div>`;
+  const umDia = tipo === "FOLGA" || tipo === "BH_COMP";
+  return `${gmSel}<div class="linha"><label>${umDia ? "Data" : "De"} <input type="date" id="l-de" value="${f.de || ui.dia}"></label>${umDia ? "" : `<label>Até <input type="date" id="l-ate" value="${f.ate || ui.dia}"></label>`}</div>`;
+}
+function descreveOc(o) {
+  const p = o.posto ? postoPorId(o.posto)?.nome : "";
+  if (o.tipo === "HE" || o.tipo === "BH_MAIS") return `${o.ini}–${o.fim} · ${esc(p)}`;
+  if (o.tipo === "TROCA") return `assumido por ${esc(nomeGm(o.substituto))}`;
+  if (o.tipo === "REMANEJ") return `para ${esc(p)}`;
+  if (o.tipo === "FA") return esc(o.obs || "");
+  return o.obs ? esc(o.obs) : "";
+}
+function vLancamentos() {
+  const fl = ui.filtroLanc;
+  const lista = data.ocorrencias.filter((o) => (!fl.tipo || o.tipo === fl.tipo) && (o.de.startsWith(fl.mes) || (o.ate || o.de).startsWith(fl.mes) || (o.de < fl.mes && (o.ate || o.de) > fl.mes)))
+    .sort((a, b) => b.de.localeCompare(a.de) || (a.id < b.id ? 1 : -1));
+  const contagem = {};
+  for (const o of lista) contagem[o.tipo] = (contagem[o.tipo] || 0) + 1;
+  return `<div class="cols-lanc">
+  <section class="painel form-lanc"><h2>Novo lançamento</h2>
+    <p class="dica">Tudo o que foge da escala ideal é um lançamento. A escala de cada dia e o livro de horas se recalculam sozinhos.</p>
+    <label>Tipo <select id="l-tipo">${Object.entries(TIPOS).map(([k, v]) => `<option value="${k}" ${k === ui.form.tipo ? "selected" : ""}>${v}</option>`).join("")}</select></label>
+    ${camposForm(ui.form.tipo)}
+    <label>REQ <input id="l-req" value="${esc(ui.form.req || "")}" placeholder="número do requerimento"></label>
+    <label>Observação <input id="l-obs" value="${esc(ui.form.obs || "")}" placeholder="opcional"></label>
+    <button class="btn pri" data-act="lancar">Lançar</button>
+  </section>
+  <section class="painel"><div class="cab-lista"><h2>Lançamentos · ${nomeMes(fl.mes)}</h2>
+    <div class="filtros"><button class="ic" data-act="lmes" data-n="-1" aria-label="Mês anterior">‹</button><button class="ic" data-act="lmes" data-n="1" aria-label="Próximo mês">›</button>
+    <select id="lf-tipo" aria-label="Filtrar por tipo"><option value="">Todos os tipos</option>${Object.entries(TIPOS).map(([k, v]) => `<option value="${k}" ${k === fl.tipo ? "selected" : ""}>${v}${contagem[k] ? ` (${contagem[k]})` : ""}</option>`).join("")}</select>
+    <input type="search" id="lf-busca" placeholder="Buscar GM" aria-label="Buscar GM"></div></div>
+    <div class="tabela-wrap"><table class="lanc"><thead><tr><th>Data</th><th>Tipo</th><th>GM</th><th>Detalhe</th><th>REQ</th><th></th></tr></thead><tbody>
+    ${lista.slice(0, 400).map((o) => `<tr data-nome="${esc((nomeGm(o.gm) + " " + (o.substituto ? nomeGm(o.substituto) : "")).toLowerCase())}">
+      <td class="num">${ddmm(o.de)}${o.ate && o.ate !== o.de ? `–${ddmm(o.ate)}` : ""}</td><td><span class="tipo t-${o.tipo}">${esc(TIPOS[o.tipo])}</span></td>
+      <td>${o.gm ? `<button class="link" data-act="abrir-ficha" data-gm="${o.gm}">${esc(nomeGm(o.gm))}</button>` : esc(postoPorId(o.posto)?.nome)}</td><td>${descreveOc(o)}</td><td class="num">${esc(o.req || "")}</td>
+      <td>${ui.confirmar === o.id ? `<button class="btn perigo" data-act="apagar" data-id="${o.id}">Confirmar</button>` : `<button class="link" data-act="pre-apagar" data-id="${o.id}">Excluir</button>`}</td></tr>`).join("")}
+    </tbody></table></div>${lista.length > 400 ? `<p class="dica">Mostrando 400 de ${lista.length}. Filtre por tipo.</p>` : ""}
+  </section></div>`;
+}
+
+// ---------- MÊS ----------
+const COD = { S: ["S", "s"], TR: ["T", "tr"], HE: ["", "he"], "BH+": ["", "bh"], FOLGA: ["F", "f"], FERIAS: ["FÉ", "fe"], LICENCA: ["L", "l"], ATESTADO: ["A", "l"], CURSO: ["C", "l"], BH_COMP: ["BH", "bhc"], TROCA: ["T", "tr"] };
+function celulaDia(marcas) {
+  if (!marcas || !marcas.length) return `<td class="d"></td>`;
+  const prim = marcas.find((m) => m !== "HE" && m !== "BH+");
+  const [txt, cls] = prim ? COD[prim] : ["", ""];
+  const he = marcas.includes("HE"), bh = marcas.includes("BH+");
+  return `<td class="d ${cls}" title="${marcas.map((m) => TIPOS[m] || { S: "Serviço", TR: "Troca (cobrindo)", HE: "Hora extra", "BH+": "Banco de horas +" }[m]).join(", ")}">${txt}${he ? `<i class="dot he"></i>` : ""}${bh ? `<i class="dot bh"></i>` : ""}</td>`;
+}
+function vMes() {
+  const m = ui.mes;
+  const livro = livroMes(data, m);
+  const dias = diasDoMes(m);
+  const f = ui.filtroMes;
+  let gms = data.gms.filter((g) => !f.equipe || g.equipe === f.equipe);
+  const L = (g) => livro.get(g.id) || {};
+  gms.sort({ he: (a, b) => L(b).he - L(a).he, heAsc: (a, b) => L(a).he + L(a).transporte - L(b).he - L(b).transporte, proximo: (a, b) => L(b).proximo - L(a).proximo, nome: (a, b) => a.nome.localeCompare(b.nome), equipe: (a, b) => a.equipe.localeCompare(b.equipe) || a.nome.localeCompare(b.nome) }[f.ordem]);
+  const todos = [...livro.values()];
+  const tot = (k) => todos.reduce((t, l) => t + (l[k] || 0), 0);
+  const acima = todos.filter((l) => l.total > (data.config.tetoHE * 60)).length;
+  const alternados = data.gms.filter((g) => equipe(g.equipe)?.tipo === "alternado");
+  const folgaPend = alternados.filter((g) => (L(g).folgas || 0) < 2).length;
+  return `<div class="barra"><div class="datas"><button class="ic" data-act="mes" data-n="-1" aria-label="Mês anterior">‹</button><h2 class="titulo-mes">${nomeMes(m)}</h2><button class="ic" data-act="mes" data-n="1" aria-label="Próximo mês">›</button></div>
+    <div class="filtros"><select id="m-eq" aria-label="Equipe"><option value="">Todas as equipes</option>${data.equipes.map((e) => `<option value="${e.id}" ${e.id === f.equipe ? "selected" : ""}>${esc(e.nome)}</option>`).join("")}</select>
+    <select id="m-ord" aria-label="Ordenar"><option value="he" ${f.ordem === "he" ? "selected" : ""}>Mais HE no mês</option><option value="heAsc" ${f.ordem === "heAsc" ? "selected" : ""}>Menos HE (próximo a chamar)</option><option value="proximo" ${f.ordem === "proximo" ? "selected" : ""}>Maior transporte p/ próximo mês</option><option value="equipe" ${f.ordem === "equipe" ? "selected" : ""}>Equipe</option><option value="nome" ${f.ordem === "nome" ? "selected" : ""}>Nome</option></select>
+    <input type="search" id="m-busca" placeholder="Buscar GM" aria-label="Buscar GM"></div></div>
+  <div class="resumo">
+    <div class="kpi"><span class="v">${fmtHoras(tot("he"))}</span><span class="l">HE realizada no mês</span></div>
+    <div class="kpi"><span class="v">${fmtHoras(tot("paga"))}</span><span class="l">HE a pagar (teto ${data.config.tetoHE}h por GM)</span></div>
+    <div class="kpi ${tot("proximo") ? "atencao" : ""}"><span class="v">${fmtHoras(tot("proximo"))}</span><span class="l">vai para ${MESES[Number(mesSeguinte(m).slice(5)) - 1]} · ${acima} GM${acima === 1 ? "" : "s"} acima do teto</span></div>
+    <div class="kpi ${folgaPend ? "atencao" : ""}"><span class="v">${folgaPend}</span><span class="l">GMs 12x36 com menos de 2 folgas</span></div>
+  </div>
+  <div class="legenda"><span><i class="lg s"></i>Serviço</span><span><i class="lg tr"></i>Troca</span><span><i class="dot he"></i>HE</span><span><i class="dot bh"></i>BH+</span><span><i class="lg f"></i>Folga</span><span><i class="lg fe"></i>Férias</span><span><i class="lg l"></i>Licença/atestado/curso</span><span><i class="lg bhc"></i>Compensação</span></div>
+  <div class="tabela-wrap"><table class="mes"><thead><tr><th class="gmcol">GM</th><th>Eq.</th><th title="Serviços realizados / previstos pela escala">Serv.</th><th>Folgas</th><th>HE mês</th><th title="Horas que excederam o teto no mês anterior">Transp.</th><th>Paga</th><th>Próx. mês</th><th title="Parte da HE entre 22h e 5h — informativo para o RH">22–05h</th><th>BH</th>
+    ${dias.map((d) => `<th class="d ${[0, 6].includes(diaSemana(d)) ? "fds" : ""}">${Number(d.slice(8))}<small>${SEMANA[diaSemana(d)][0]}</small></th>`).join("")}</tr></thead><tbody>
+    ${gms.map((g) => { const l = L(g); const alt = equipe(g.equipe)?.tipo === "alternado"; return `<tr data-nome="${esc(g.nome.toLowerCase())}">
+      <th class="gmcol" scope="row"><button class="link" data-act="abrir-ficha" data-gm="${g.id}">${esc(g.nome)}</button>${g.naoFazHE ? ` <span class="tag furo" title="Não realiza HE">sem HE</span>` : ""}</th><td>${g.equipe}</td>
+      <td class="num">${l.servicos || 0}<small>/${l.servicosBase || 0}</small></td>
+      <td class="num ${alt && (l.folgas || 0) !== 2 ? "alerta" : ""}">${alt ? `${l.folgas || 0}/2` : "—"}</td>
+      <td class="num forte">${l.he ? fmtHoras(l.he) : "—"}</td><td class="num">${l.transporte ? fmtHoras(l.transporte) : "—"}</td>
+      <td class="num">${l.paga ? fmtHoras(l.paga) : "—"}</td><td class="num ${l.proximo ? "alerta" : ""}">${l.proximo ? fmtHoras(l.proximo) : "—"}</td>
+      <td class="num">${l.heNoturna ? fmtHoras(l.heNoturna) : "—"}</td><td class="num">${(() => { const s = saldoBH(data, g.id, m); return s ? fmtHoras(s) : "—"; })()}</td>
+      ${dias.map((d) => celulaDia(l.dias?.[d])).join("")}</tr>`; }).join("")}
+  </tbody></table></div>`;
+}
+
+// ---------- FICHA DO GM ----------
+function vFicha() {
+  const g = gmPorId(ui.gm) || data.gms[0];
+  ui.gm = g.id;
+  const m = ui.mes;
+  const l = livroMes(data, m).get(g.id) || {};
+  const eq = equipe(g.equipe);
+  const hist = [];
+  for (let x = data.config.mesInicial; x <= "2026-12"; x = mesSeguinte(x)) hist.push([x, livroMes(data, x).get(g.id) || {}]);
+  const dias = diasDoMes(m).map((d) => {
+    const cd = calcularDia(data, d);
+    const des = cd.designacoes.filter((x) => x.gm === g.id);
+    const af = cd.afastados.find((a) => a.gm === g.id);
+    const longo = !af && data.ocorrencias.find((o) => o.gm === g.id && ["FERIAS", "LICENCA", "ATESTADO", "CURSO"].includes(o.tipo) && o.de <= d && d <= (o.ate || o.de));
+    if (!des.length && !af && !longo) return "";
+    return `<li class="${d === ui.dia ? "hoje" : ""}"><button class="link data" data-act="ir-dia" data-dia="${d}">${SEMANA[diaSemana(d)].slice(0, 3)} ${ddmm(d)}</button><div>
+      ${des.map((x) => `<p><span class="hr">${fmtHm(x.ini)}–${fmtHm(x.fim)}</span> ${esc(postoPorId(x.posto)?.nome || "À disposição")}${x.funcao ? ` · ${esc(x.funcao)}` : ""} ${BADGE[x.nat] ? `<span class="tag ${BADGE[x.nat][1]}">${x.fixa ? "HE fixa" : BADGE[x.nat][0]}</span>` : ""}${x.titular ? ` <span class="meta">por ${esc(nomeGm(x.titular))}</span>` : ""}${x.req && !x.fixa ? ` <span class="req">REQ ${esc(x.req)}</span>` : ""}</p>`).join("")}
+      ${af ? `<p class="estado">${esc(TIPOS[af.tipo])}${af.tipo === "TROCA" ? ` · coberto por ${esc(nomeGm(af.oc.substituto))}` : ""}</p>` : ""}${longo ? `<p class="estado">${esc(TIPOS[longo.tipo])}</p>` : ""}</div></li>`;
+  }).join("");
+  return `<div class="barra"><div class="datas"><label class="sel-gm">GM <select id="fi-gm">${opcoesGm(g.id)}</select></label>
+    <button class="ic" data-act="mes" data-n="-1" aria-label="Mês anterior">‹</button><span class="titulo-mes">${nomeMes(m)}</span><button class="ic" data-act="mes" data-n="1" aria-label="Próximo mês">›</button></div></div>
+  <section class="painel ficha-cab"><div><p class="eyebrow">${esc(eq?.nome)} · mat. ${esc(g.matricula)}</p><h2>${esc(g.nome)}</h2><p class="meta">${esc(rotuloLotacao(g))}${eq?.tipo === "semanal" ? ` · ${(g.dias || [1, 2, 3, 4, 5]).map((d) => SEMANA[d].slice(0, 3).toLowerCase()).join(", ")}` : ""}</p>
+    ${g.naoFazHE ? `<p class="tag-linha"><span class="tag furo">Não realiza HE</span></p>` : ""}${g.obs ? `<p class="meta">${esc(g.obs)}</p>` : ""}</div>
+    <label class="toggle"><input type="checkbox" id="fi-semhe" ${g.naoFazHE ? "checked" : ""}> Não realiza HE</label></section>
+  <div class="resumo">
+    <div class="kpi"><span class="v">${l.servicos || 0}<small>/${l.servicosBase || 0}</small></span><span class="l">serviços realizados / previstos</span></div>
+    ${eq?.tipo === "alternado" ? `<div class="kpi ${(l.folgas || 0) !== 2 ? "atencao" : ""}"><span class="v">${l.folgas || 0}/2</span><span class="l">folgas do mês</span></div>` : ""}
+    <div class="kpi"><span class="v">${fmtHoras(l.he || 0)}</span><span class="l">HE no mês${l.heFixa ? ` (${fmtHoras(l.heFixa)} fixa)` : ""}</span></div>
+    <div class="kpi"><span class="v">${fmtHoras(l.paga || 0)}</span><span class="l">a pagar · ${fmtHoras(l.transporte || 0)} vieram do mês anterior</span></div>
+    <div class="kpi ${l.proximo ? "atencao" : ""}"><span class="v">${fmtHoras(l.proximo || 0)}</span><span class="l">passa para o mês seguinte</span></div>
+    <div class="kpi"><span class="v">${fmtHoras(saldoBH(data, g.id, m))}</span><span class="l">saldo do banco de horas</span></div>
+  </div>
+  <div class="cols-ficha">
+    <section class="painel"><h3>Dia a dia</h3><ul class="diaadia">${dias || `<li><p class="dica">Nada neste mês.</p></li>`}</ul></section>
+    <section class="painel"><h3>Livro de HE</h3><table class="hist"><thead><tr><th>Mês</th><th>Veio</th><th>Feita</th><th>Paga</th><th>Passa</th></tr></thead><tbody>
+      ${hist.map(([x, h]) => `<tr class="${x === m ? "atual" : ""}"><td>${MESES[Number(x.slice(5)) - 1].slice(0, 3)}/${x.slice(2, 4)}</td><td class="num">${fmtHoras(h.transporte || 0)}</td><td class="num">${fmtHoras(h.he || 0)}</td><td class="num">${fmtHoras(h.paga || 0)}</td><td class="num">${fmtHoras(h.proximo || 0)}</td></tr>`).join("")}
+    </tbody></table><p class="dica">Pagamento até ${data.config.tetoHE}h por mês. O que passa disso entra no mês seguinte. O adicional noturno é calculado pelo RH${l.heNoturna ? `; neste mês ${fmtHoras(l.heNoturna)} da HE caíram entre 22h e 5h` : ""}.</p></section>
+  </div>`;
+}
+
+// ---------- FOLHA (impressão) ----------
+function vFolha() {
+  const cd = calcularDia(data, ui.dia);
+  const amanha = somaDias(ui.dia, 1);
+  const eqs = cd.equipes.map(equipe);
+  const insp = (per) => eqs.filter((e) => e.periodo === per).map((e) => e.inspetor).join(", ");
+  const faPostos = new Map(cd.fa.map((o) => [o.posto, o]));
+  const cel = (p, t) => {
+    if (faPostos.has(p.id)) return `<td colspan="2" class="c">FA</td>`;
+    const aqui = cd.designacoes.filter((d) => d.posto === p.id && sobrepoe(d.ini, d.fim, t.ini, t.fim) > 0).sort((a, b) => a.ini - b.ini);
+    if (!aqui.length) {
+      if (p.rondas) return `<td colspan="2" class="c rondas-p">VTR/RONDAS FREQUENTES</td>`;
+      if (cd.furos.some((f) => f.posto === p.id && f.turno === t.id)) return `<td colspan="2" class="c furo-p">X</td>`;
+      return `<td></td><td></td>`;
+    }
+    return `<td class="gn">${aqui.map((d) => `<div class="${d.nat}">${esc(nomeGm(d.gm))}${d.nat === "he" ? (d.fixa ? "" : " HE+") : d.nat === "bh" ? " BH+" : ""}${d.req && !d.fixa ? ` <span class="r">${esc(d.req)}</span>` : ""}</div>`).join("")}</td>
+      <td class="gh">${aqui.map((d) => `<div class="${d.nat}">(${textoCelula(d, t)})</div>`).join("")}</td>`;
+  };
+  let corpo = "";
+  for (const s of data.secoes) {
+    const ps = data.postos.filter((p) => p.secao === s.id);
+    corpo += `<tr class="sec"><th>${esc(s.nome)}</th>${TURNOS.map((t) => `<th colspan="2">${t.nome}</th>`).join("")}</tr>`;
+    corpo += ps.map((p) => `<tr><th class="p">${esc(p.nome)}${p.sub ? `<br><span class="sub">${esc(p.sub)}</span>` : ""}${p.obs ? `<br><span class="sub">(${esc(p.obs)})</span>` : ""}</th>${TURNOS.map((t) => cel(p, t)).join("")}</tr>`).join("");
+  }
+  const grupo = (tipos, titulo, colRet) => {
+    const g = cd.afastados.filter((a) => tipos.includes(a.tipo));
+    if (!g.length) return "";
+    return `<tr class="sec"><th>${titulo}</th><th colspan="4">GM</th><th colspan="4">${colRet}</th></tr>
+      ${g.map((a) => `<tr><th class="p"></th><td colspan="4" class="c">${esc(nomeGm(a.gm))} <span class="sub">${a.gm && equipe(gmPorId(a.gm).equipe)?.periodo === "noite" ? "(noite)" : "(dia)"}</span></td><td colspan="4" class="c r">${a.tipo === "TROCA" ? `coberto por ${esc(nomeGm(a.oc.substituto))}` : a.oc.ate && a.oc.ate !== a.oc.de ? `${ddmm(a.oc.de)} a ${ddmm(a.oc.ate)}` : a.oc.req ? `REQ ${esc(a.oc.req)}` : ddmm(a.oc.de)}</td></tr>`).join("")}`;
+  };
+  const enquadrado = window.self !== window.top;
+  return `<div class="barra nao-imprimir"><div class="datas"><button class="ic" data-act="dia" data-n="-1" aria-label="Dia anterior">‹</button><input type="date" id="q-dia" value="${ui.dia}" aria-label="Data"><button class="ic" data-act="dia" data-n="1" aria-label="Próximo dia">›</button></div>
+    ${enquadrado ? `<p class="dica">Folha no formato que vai para os inspetores. Para gerar o PDF, abra <code>prototipo/index.html</code> no Chrome e use Ctrl+P (A4, frente e verso).</p>` : `<button class="btn pri" data-act="imprimir">Imprimir / salvar PDF</button>`}</div>
+  <div class="papel-wrap"><article class="papel">
+    <header class="pcab"><div><b>${esc(data.config.cabecalho)}</b><span>INSP. OP. DIA: ${esc(insp("dia"))}</span><span>INSP. OP. NOITE: ${esc(insp("noite"))}</span></div>
+      <div class="pdata"><span>DATA: ${ddmmaaaa(ui.dia)} · 2º 3º 4º TURNOS · ${SEMANA[diaSemana(ui.dia)]}</span><span>DATA: ${ddmmaaaa(amanha)} · 1º TURNO · ${SEMANA[diaSemana(amanha)]}</span></div></header>
+    <table class="pt">${corpo}</table>
+    <div class="quebra"></div>
+    <table class="pt verso">
+      ${grupo(["BH_COMP"], "BANCO DE HORAS / COMPENSAÇÃO", "REQ.")}
+      ${grupo(["FOLGA"], "FOLGAS", "DATA")}
+      ${grupo(["TROCA"], "TROCAS DE SERVIÇO", "SITUAÇÃO")}
+      ${grupo(["ATESTADO", "LICENCA", "CURSO"], "ATESTADO / LICENÇAS / CURSOS", "PERÍODO")}
+      ${grupo(["FERIAS"], "FÉRIAS", "PERÍODO")}
+    </table>
+  </article></div>`;
+}
+
+// ---------- eventos ----------
+function abrirFuro(posto, turno) {
+  const t = TURNOS.find((x) => x.id === turno);
+  ui.drawer = { tipo: "furo", posto, turno, ini: fmtHm(t.ini), fim: fmtHm(t.fim), nat: "HE", req: "" };
+  render();
+}
+document.addEventListener("click", (e) => {
+  const el = e.target.closest("[data-act],[data-nav]");
+  if (!el) return;
+  if (el.dataset.nav) { ui.view = el.dataset.nav; ui.drawer = null; location.hash = ui.view; render(); return; }
+  const a = el.dataset.act;
+  const d = ui.drawer;
+  if (a !== "apagar" && a !== "pre-apagar") ui.confirmar = null;
+  switch (a) {
+    case "dia": ui.dia = somaDias(ui.dia, Number(el.dataset.n)); ui.mes = mesDe(ui.dia); ui.drawer = null; render(); break;
+    case "mes": ui.mes = Number(el.dataset.n) > 0 ? mesSeguinte(ui.mes) : mesAnterior(ui.mes); render(); break;
+    case "lmes": ui.filtroLanc.mes = Number(el.dataset.n) > 0 ? mesSeguinte(ui.filtroLanc.mes) : mesAnterior(ui.filtroLanc.mes); render(); break;
+    case "furo": abrirFuro(el.dataset.posto, el.dataset.turno); break;
+    case "furo-hora": d.ini = el.dataset.ini; d.fim = el.dataset.fim; render(); break;
+    case "ver-todos": document.querySelectorAll(".sug li.mais").forEach((li) => (li.hidden = false)); el.hidden = true; break;
+    case "escalar": {
+      const g = gmPorId(el.dataset.gm);
+      const req = $("#f-req")?.value.trim() || "";
+      mudar(`${g.nome} escalado ${d.ini}–${d.fim} em ${postoPorId(d.posto).nome} (${d.nat === "HE" ? "HE" : "BH+"})`, () => {
+        data.ocorrencias.push({ id: novoId(), tipo: d.nat, gm: g.id, de: ui.dia, ini: d.ini, fim: d.fim, posto: d.posto, req });
+        ui.drawer = null;
+      });
+      break;
+    }
+    case "gm": ui.drawer = { tipo: "gm", gm: el.dataset.gm }; render(); break;
+    case "gm-acao": d.acao = d.acao === el.dataset.acao ? "" : el.dataset.acao; render(); break;
+    case "folga": mudar(`Folga lançada para ${nomeGm(d.gm)}`, () => { data.ocorrencias.push({ id: novoId(), tipo: "FOLGA", gm: d.gm, de: ui.dia }); ui.drawer = null; }); break;
+    case "bhcomp": mudar(`Compensação lançada para ${nomeGm(d.gm)}`, () => { data.ocorrencias.push({ id: novoId(), tipo: "BH_COMP", gm: d.gm, de: ui.dia }); ui.drawer = null; }); break;
+    case "salvar-afast": {
+      const tipo = $("#a-tipo").value, de = $("#a-de").value, ate = $("#a-ate").value || de, req = $("#a-req").value.trim();
+      if (ate < de) { toast("A data final é anterior à inicial."); break; }
+      mudar(`${TIPOS[tipo]} lançada para ${nomeGm(d.gm)}`, () => { data.ocorrencias.push({ id: novoId(), tipo, gm: d.gm, de, ate, req }); ui.drawer = null; });
+      break;
+    }
+    case "salvar-troca": {
+      const sub = $("#t-sub").value;
+      mudar(`${nomeGm(sub)} assume o serviço de ${nomeGm(d.gm)}`, () => { data.ocorrencias.push({ id: novoId(), tipo: "TROCA", gm: d.gm, substituto: sub, de: ui.dia, req: $("#t-req").value.trim() }); ui.drawer = null; });
+      break;
+    }
+    case "salvar-remanej": {
+      const posto = $("#r-posto").value;
+      mudar(`${nomeGm(d.gm)} remanejado para ${postoPorId(posto).nome}`, () => { data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: d.gm, posto, funcao: $("#r-fn").value.trim(), de: $("#r-de").value, ate: $("#r-ate").value || $("#r-de").value }); ui.drawer = null; });
+      break;
+    }
+    case "pre-apagar": ui.confirmar = el.dataset.id; render(); break;
+    case "apagar": mudar("Lançamento excluído", () => { data.ocorrencias = data.ocorrencias.filter((o) => o.id !== el.dataset.id); ui.confirmar = null; }); break;
+    case "abrir-ficha": ui.gm = el.dataset.gm; ui.mes = mesDe(ui.dia); ui.view = "ficha"; ui.drawer = null; location.hash = "ficha"; render(); window.scrollTo(0, 0); break;
+    case "ir-dia": ui.dia = el.dataset.dia; ui.view = "quadro"; location.hash = "quadro"; render(); break;
+    case "fechar": ui.drawer = null; render(); break;
+    case "desfazer": if (desfazer.length) { data.ocorrencias = JSON.parse(desfazer.pop()); data._versao++; salvar(); render(); toast("Alteração desfeita"); } break;
+    case "imprimir": window.print(); break;
+    case "restaurar": ui.confirmar = "restaurar"; $("#restaurar").outerHTML = `<button id="restaurar" class="btn perigo" data-act="restaurar-ok">Apagar meus lançamentos e restaurar</button>`; return;
+    case "restaurar-ok": try { localStorage.removeItem(CHAVE); } catch { /* ignora */ } data = criarExemplo(); desfazer.length = 0; $("#restaurar").outerHTML = `<button id="restaurar" class="link" data-act="restaurar">Restaurar exemplo</button>`; render(); toast("Dados de exemplo restaurados"); break;
+    case "lancar": {
+      const t = ui.form.tipo, v = (id) => $(id)?.value?.trim() || "";
+      const o = { id: novoId(), tipo: t, de: v("#l-de"), req: v("#l-req"), obs: v("#l-obs") };
+      if (t !== "FA") o.gm = v("#l-gm");
+      if (["FERIAS", "LICENCA", "ATESTADO", "CURSO", "REMANEJ", "FA"].includes(t)) o.ate = v("#l-ate") || o.de;
+      if (["HE", "BH_MAIS", "REMANEJ", "FA"].includes(t)) o.posto = v("#l-posto");
+      if (t === "HE" || t === "BH_MAIS") { o.ini = v("#l-ini"); o.fim = v("#l-fim"); if (!o.ini || !o.fim) { toast("Informe início e fim."); break; } }
+      if (t === "TROCA") { o.substituto = v("#l-sub"); if (o.substituto === o.gm) { toast("O substituto precisa ser outro GM."); break; } }
+      if (!o.de) { toast("Informe a data."); break; }
+      if (o.ate && o.ate < o.de) { toast("A data final é anterior à inicial."); break; }
+      mudar(`${TIPOS[t]} lançado${o.gm ? " para " + nomeGm(o.gm) : ""}`, () => { data.ocorrencias.push(o); ui.form = { tipo: t }; ui.filtroLanc.mes = mesDe(o.de); });
+      break;
+    }
+  }
+});
+document.addEventListener("change", (e) => {
+  const id = e.target.id, v = e.target.value;
+  if (id === "q-dia" && v) { ui.dia = v; ui.mes = mesDe(v); ui.drawer = null; render(); }
+  else if (id === "q-sofuros") { ui.soFuros = e.target.checked; render(); }
+  else if (id === "f-ini" || id === "f-fim") { ui.drawer[id === "f-ini" ? "ini" : "fim"] = v; ui.drawer.req = $("#f-req").value; render(); }
+  else if (id === "f-nat") { ui.drawer.nat = v; ui.drawer.req = $("#f-req").value; render(); }
+  else if (id === "f-req") ui.drawer.req = v;
+  else if (id === "l-tipo") { ui.form = { tipo: v }; render(); }
+  else if (id === "lf-tipo") { ui.filtroLanc.tipo = v; render(); }
+  else if (id === "m-eq") { ui.filtroMes.equipe = v; render(); }
+  else if (id === "m-ord") { ui.filtroMes.ordem = v; render(); }
+  else if (id === "fi-gm") { ui.gm = v; render(); }
+  else if (id === "fi-semhe") { const g = gmPorId(ui.gm); g.naoFazHE = e.target.checked; data._versao++; salvar(); render(); toast(g.naoFazHE ? `${g.nome} não aparece mais nas sugestões de HE` : `${g.nome} volta às sugestões de HE`); }
+});
+document.addEventListener("input", (e) => {
+  const map = { "f-busca": ".sug li", "m-busca": "table.mes tbody tr", "lf-busca": "table.lanc tbody tr" };
+  const sel = map[e.target.id];
+  if (!sel) return;
+  const q = e.target.value.trim().toLowerCase();
+  document.querySelectorAll(sel).forEach((el) => { el.hidden = q ? !el.dataset.nome.includes(q) : el.classList.contains("mais"); });
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && ui.drawer) { ui.drawer = null; render(); } });
+$("#veu").addEventListener("click", () => { ui.drawer = null; render(); });
+window.addEventListener("hashchange", () => { const h = location.hash.slice(1); if (VIEWS.includes(h) && h !== ui.view) { ui.view = h; ui.drawer = null; render(); } });
+
+void hm; void trabalhaNoDia; void resumoMes;
+render();
+
+})();
+</script>
+
+</body>
+</html>
