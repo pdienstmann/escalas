@@ -221,6 +221,28 @@ export function criarExemplo() {
   }
   void fim;
   data._versao++;
+  // frota da logística (exemplo): as viaturas dos postos + algumas fora de uso
+  const modeloDe = (p) => (p.tipo === "moto" ? "XRE300" : /^\D*12/.test(p.nome) ? "COBALT" : "DUSTER");
+  const vistos = new Set();
+  data.frota = [];
+  for (const p of data.postos.filter((x) => x.tipo === "vtr" || x.tipo === "moto")) {
+    const n = (p.nome.match(/\b(\d{3,4})\b/) || [])[1];
+    if (!n || vistos.has(n)) continue;
+    vistos.add(n);
+    data.frota.push({ id: `fr${n}`, prefixo: n, modelo: modeloDe(p), situacao: "QAP", finalidade: p.sub ? p.sub.split(" · ")[0] : "Convencional", guarnicao: "" });
+  }
+  data.frota.push(
+    { id: "fr1296", prefixo: "1296", modelo: "COBALT", situacao: "FA", finalidade: "Administrativo", guarnicao: "" },
+    { id: "fr1323", prefixo: "1323", modelo: "COBALT", situacao: "FAP", finalidade: "", guarnicao: "" },
+    { id: "fr521", prefixo: "521", modelo: "VAN", situacao: "FAP", finalidade: "", guarnicao: "" },
+    { id: "fr522", prefixo: "522", modelo: "VAN", situacao: "QAP", finalidade: "Transporte", guarnicao: "" },
+    { id: "fr1303", prefixo: "1303", modelo: "L200", situacao: "QAP", finalidade: "Gescom", guarnicao: "" },
+  );
+  const f1320 = data.frota.find((v) => v.prefixo === "1320"); if (f1320) Object.assign(f1320, { situacao: "FA", finalidade: "Oficina" });
+  // escala mensal dos inspetores de serviço (exemplo, rodízio de 3)
+  data.config.rodizioInsp = { dia: ["MOREIRA", "TEIXEIRA", "CAMPOS"], noite: ["VIEIRA", "PINTO", "ROCHA"] };
+  data.inspetores = {};
+  diasDoMes("2026-11").forEach((d, i) => { data.inspetores[d] = { dia: data.config.rodizioInsp.dia[i % 3], noite: data.config.rodizioInsp.noite[i % 3] }; });
   // escalas já finalizadas até o dia anterior a 26/11: a HE delas está no controle
   data.controle = [];
   for (let d = (data.config.mesInicial || "2026-11") + "-01"; d < "2026-11-26"; d = somaDias(d, 1)) {

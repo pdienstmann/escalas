@@ -360,3 +360,17 @@ test("EJA: primeiro os GMs do dia que estendem, começando quando o serviço del
   assert.ok(["a", "b", "s6"].every((g) => ids.indexOf(g) < ids.indexOf("nn")));
   assert.ok(ids.indexOf("nn") < ids.indexOf("c")); // noturno de folga antes do diurno de folga
 });
+
+test("função no dia e inspetor da escala mensal", () => {
+  const data = base();
+  const d = diaDe(data, "D1");
+  data.ocorrencias.push({ id: "fx", tipo: "FUNCAO", gm: "b", de: d, funcao: "Motorista" }); data._versao++;
+  const cd = calcularDia(data, d);
+  assert.equal(cd.designacoes.find((x) => x.gm === "b").funcao, "Motorista");
+  assert.equal(calcularDia(data, "2026-11-20").designacoes.find((x) => x.gm === "b")?.funcao ?? "Patrulheiro", "Patrulheiro");
+  data.equipes.find((e) => e.id === "D1").inspetor = "FIXO";
+  data.inspetores = { [d]: { dia: "MENSAL" } }; data._versao++;
+  assert.equal(calcularDia(data, d).inspetores.get("D1"), "MENSAL");
+  data.ocorrencias.push({ id: "in", tipo: "INSPETOR", equipe: "D1", de: d, ate: d, nome: "DO DIA" }); data._versao++;
+  assert.equal(calcularDia(data, d).inspetores.get("D1"), "DO DIA");
+});

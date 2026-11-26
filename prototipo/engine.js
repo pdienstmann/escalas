@@ -39,6 +39,7 @@ export const TIPOS = {
   PREFIXO: "Viatura substituta",
   VAGAS: "Vagas alteradas no dia",
   INSPETOR: "Inspetor do dia",
+  FUNCAO: "Função no dia",
   SEM_HE_REC: "HE recorrente suspensa no dia",
   HORARIO: "Horário alterado",
 };
@@ -240,6 +241,9 @@ export function calcularDia(data, dia) {
   }
   for (const d of des) if (d.posto && fa.has(d.posto)) { d.postoOriginal = d.posto; d.posto = null; }
 
+  // 6b. Função no dia (motorista / patrulheiro) só para aquele dia
+  for (const oc of ocs.filter((o) => o.tipo === "FUNCAO")) for (const d of des) if (d.gm === oc.gm && d.nat !== "he") d.funcao = oc.funcao || "";
+
   // 7. Conflitos de horário do mesmo GM
   const porGm = new Map();
   for (const d of des) { if (!porGm.has(d.gm)) porGm.set(d.gm, []); porGm.get(d.gm).push(d); }
@@ -266,6 +270,9 @@ export function calcularDia(data, dia) {
 
   const inspetores = new Map();
   for (const oc of ocs.filter((o) => o.tipo === "INSPETOR")) inspetores.set(oc.equipe, oc.nome);
+  // escala mensal dos inspetores de serviço (dia e noite)
+  const escInsp = data.inspetores?.[dia];
+  if (escInsp) for (const e of data.equipes) if (e.periodo && escInsp[e.periodo] && !inspetores.has(e.id)) inspetores.set(e.id, escInsp[e.periodo]);
   const res = { dia, inspetores, designacoes: des, afastados, furos, alertas, fa: [...fa.values()].filter((o) => o.tipo !== "INATIVO"), ajustesPosto,
     disposicao: des.filter((d) => d.posto === null), equipes: equipesDoDia(data, dia) };
   void postoPorId;

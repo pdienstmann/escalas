@@ -5,7 +5,7 @@
 import pagina from "./pagina.html";
 
 const COLECOES = ["gms", "ocorrencias", "controle"];
-const DOCS = ["postos", "secoes", "equipes", "config", "requerimentos"];
+const DOCS = ["postos", "secoes", "equipes", "config", "requerimentos", "inspetores", "frota"];
 const DIA_SEG = 60 * 60 * 24;
 const enc = new TextEncoder();
 
@@ -70,7 +70,7 @@ async function lerEstado(env) {
     env.DB.prepare("SELECT chave, valor FROM docs").all(),
     lerRevisao(env),
   ]);
-  const estado = { gms: [], ocorrencias: [], controle: [], postos: [], secoes: [], equipes: [], config: {}, requerimentos: {} };
+  const estado = { gms: [], ocorrencias: [], controle: [], postos: [], secoes: [], equipes: [], config: {}, requerimentos: {}, inspetores: {}, frota: [] };
   for (const r of regs.results) estado[r.colecao].push(JSON.parse(r.valor));
   for (const d of docs.results) estado[d.chave] = JSON.parse(d.valor);
   return { revisao: rev.numero, estado, vazio: !estado.gms.length };
@@ -115,7 +115,7 @@ async function importar(env, sessao, estado) {
       st.push(db.prepare(`INSERT INTO registros (colecao, id, valor, atualizado) VALUES ${lote.map(() => "(?, ?, ?, ?)").join(", ")}`).bind(...lote.flat()));
     }
   }
-  for (const k of DOCS) st.push(db.prepare("INSERT INTO docs (chave, valor) VALUES (?, ?) ON CONFLICT (chave) DO UPDATE SET valor = excluded.valor").bind(k, JSON.stringify(estado[k] ?? (k === "requerimentos" || k === "config" ? {} : []))));
+  for (const k of DOCS) st.push(db.prepare("INSERT INTO docs (chave, valor) VALUES (?, ?) ON CONFLICT (chave) DO UPDATE SET valor = excluded.valor").bind(k, JSON.stringify(estado[k] ?? (k === "requerimentos" || k === "config" || k === "inspetores" ? {} : []))));
   st.push(db.prepare("UPDATE meta SET valor = '1:importacao' WHERE chave = 'revisao'"));
   st.push(db.prepare("INSERT INTO eventos (quando, quem, resumo, revisao, alteracoes) VALUES (?, ?, ?, 1, ?)").bind(quando, sessao.nome, `Carga inicial: ${estado.gms.length} GMs e ${estado.ocorrencias.length} lançamentos`, estado.gms.length + estado.ocorrencias.length));
   await db.batch(st);

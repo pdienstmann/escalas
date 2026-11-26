@@ -1,7 +1,7 @@
 import {
   TURNOS, TIPOS, AFASTAMENTOS, calcularDia, sugerir, livroMes, resumoMes, saldoBH, somaDias, diaSemana, diasDoMes,
   mesDe, mesSeguinte, fmtHm, fmtHoras, intervalo, sobrepoe, trabalhaNoDia, hm, planejarCobertura, vigente, TIPOS_REQ, montarSegmentos, lerFaixas, descreverSegmentos,
-  limitarExtensao, horarioEja, diaFinalizado, heDoDia, diasEmAberto, controleMes, previstaMes,
+  limitarExtensao, horarioEja, horarioProposto, pendencias, diaFinalizado, afastamentoNoDia, heDoDia, diasEmAberto, controleMes, previstaMes,
 } from "./engine.js";
 import { criarExemplo } from "./seed.js";
 import { interpretar, norm } from "./comando.js";
@@ -9,7 +9,7 @@ import { interpretar, norm } from "./comando.js";
 const CHAVE = "escala-gm-prototipo-v2";
 const SEMANA = ["DOMINGO", "SEGUNDA", "TERÇA", "QUARTA", "QUINTA", "SEXTA", "SÁBADO"];
 const MESES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
-const VIEWS = ["pendencias", "quadro", "padroes", "lancamentos", "mes", "ficha", "folha", "ajustes"];
+const VIEWS = ["pendencias", "quadro", "padroes", "lancamentos", "mes", "ficha", "folha", "frota", "ajustes"];
 
 // ---------- estado ----------
 let data = carregar();
@@ -25,7 +25,7 @@ ui.mes = mesDe(ui.dia); ui.filtroLanc.mes = ui.mes;
 const desfazer = [];
 
 function carregar() {
-  if (typeof window !== "undefined" && window.ESCALA_SERVIDOR) return { config: { tetoHE: 60, mesInicial: "2026-10", cabecalho: "" }, equipes: [], secoes: [], postos: [], gms: [], ocorrencias: [], controle: [], requerimentos: {}, _versao: 0 };
+  if (typeof window !== "undefined" && window.ESCALA_SERVIDOR) return { config: { tetoHE: 60, mesInicial: "2026-10", cabecalho: "" }, equipes: [], secoes: [], postos: [], gms: [], ocorrencias: [], controle: [], requerimentos: {}, inspetores: {}, frota: [], _versao: 0 };
   try {
     const s = localStorage.getItem(CHAVE);
     if (s) { const d = JSON.parse(s); d._versao = 1; return d; }
@@ -34,7 +34,7 @@ function carregar() {
 }
 function salvar() { if (SERVIDOR) { sincronizar(); return; } try { localStorage.setItem(CHAVE, JSON.stringify({ ...data, _versao: undefined })); } catch { /* ignora */ } }
 function mudar(msg, fn) {
-  desfazer.push(JSON.stringify({ o: data.ocorrencias, p: data.postos, s: data.secoes, g: data.gms, r: data.requerimentos || {}, e: data.equipes, c: data.controle || [] }));
+  desfazer.push(JSON.stringify({ o: data.ocorrencias, p: data.postos, s: data.secoes, g: data.gms, r: data.requerimentos || {}, e: data.equipes, c: data.controle || [], i: data.inspetores || {}, f: data.frota || [] }));
   if (desfazer.length > 30) desfazer.shift();
   fn();
   data._versao = (data._versao || 0) + 1;
@@ -83,7 +83,7 @@ function render() {
   document.querySelectorAll("[data-nav]").forEach((a) => a.setAttribute("aria-current", a.dataset.nav === ui.view ? "page" : "false"));
   if (SERVIDOR && (!ui.pronto || ui.vazio)) { $("#main").innerHTML = telaServidor(); $("#drawer").hidden = true; $("#veu").hidden = true; return; }
   const main = $("#main");
-  const html = { padroes: vPadroes, pendencias: vPendencias, ajustes: vAjustes, quadro: vQuadro, lancamentos: vLancamentos, mes: vMes, ficha: vFicha, folha: vFolha }[ui.view]();
+  const html = { padroes: vPadroes, pendencias: vPendencias, ajustes: vAjustes, quadro: vQuadro, lancamentos: vLancamentos, mes: vMes, ficha: vFicha, folha: vFolha, frota: vFrota }[ui.view]();
   main.innerHTML = html;
   $("#drawer").innerHTML = ui.drawer ? vDrawer() : "";
   $("#drawer").hidden = !ui.drawer;
@@ -145,7 +145,7 @@ function chip(d, t, junto) {
   if (d.req && !d.fixa) extras.push(`<span class="req">REQ ${esc(d.req)}</span>`);
   const reserva = postoPorId(d.posto)?.tipo === "reserva" ? "reserva" : "";
   return `<button class="chip ${cls || ""} ${reserva} ${d.conflito ? "conflito" : ""} ${d.alterado && ultimo ? "alterado" : ""}" data-act="card" data-des="${d.id}" title="Clique para mudar horário, REQ, observação ou trocar o GM">
-    <span class="nm">${esc(g?.nome)}</span>${d.funcao ? `<span class="fn" title="${esc(d.funcao)}">${esc(d.funcao[0])}</span>` : ""}
+    <span class="nm">${esc(g?.nome)}</span>${d.funcao ? `<span class="fn" title="${esc(d.funcao)} · botão direito › Função para mudar">${esc(d.funcao === "Motorista" ? "MOT" : d.funcao === "Patrulheiro" ? "PAT" : d.funcao.slice(0, 3).toUpperCase())}</span>` : ""}
     <span class="hr" ${junto ? `data-junto="${junto.he.id}"` : ""}>${junto ? `${textoCelula(d, t).split("/")[0]}/${fmtHm(junto.he.fim)}` : textoCelula(d, t)}</span>${junto ? `<span class="he-num" title="${fmtHoras(junto.total)} de hora extra fixa">${fmtHE(junto.total)}</span>` : ""}${extras.join("")}${d.obs && ultimo ? `<span class="obs" title="${esc(d.obs)}">${esc(d.obs.length > 34 ? d.obs.slice(0, 33) + "…" : d.obs)}</span>` : ""}</button>`;
 }
 function vQuadro() {
@@ -185,7 +185,7 @@ function vQuadro() {
       const ninguem = !p.rondas && !faPostos.has(p.id) && !cd.designacoes.some((d) => d.posto === p.id);
       corpo += `<tr class="${s.grupamento ? "em-grupo" : ""} ${ninguem ? "ninguem" : ""}"><th scope="row" class="posto"><button class="posto-btn" data-act="pop-posto" data-posto="${p.id}" title="Clique para mudar este ${ehViatura(p) ? "viatura" : "posto"}">
         <span class="pn">${iconePosto(p)}${esc(nomeNoDia(p, cd))}</span>${p.sub ? `<span class="ps">${esc(p.sub)}</span>` : ""}${p.obs ? `<span class="po">(${esc(p.obs)})</span>` : ""}
-        ${aj.vagas ? `<span class="tag rem">vagas do dia alteradas</span>` : ""}${ninguem ? `<span class="tag vazio" title="Ninguém escalado neste dia. Botão direito: excluir ou mudar as vagas.">ninguém escalado</span>` : ""}<span class="lapis" aria-hidden="true">✎</span></button></th>${cels}</tr>`;
+        ${aj.vagas ? `<span class="tag rem">vagas do dia alteradas</span>` : ""}${(() => { const fv = viaturaNaFrota(numeroDe(nomeNoDia(p, cd))); if (!fv || fv.situacao === "QAP" || faPostos.has(p.id)) return ""; const alt = (data.frota || []).filter((x) => x.situacao === "QAP" && x.modelo === fv.modelo && !guarnicaoNaEscala(x.prefixo, cd)).map((x) => x.prefixo); return `<span class="tag fa-log" title="A logística marcou a ${esc(fv.prefixo)} como ${SIT[fv.situacao][0]}.${alt.length ? ` Livres do mesmo modelo: ${alt.join(", ")}.` : ""} Botão direito › Usar outra viatura hoje.">logística: ${fv.situacao === "FAP" ? "FA perm." : "FA"}</span>`; })()}${ninguem ? `<span class="tag vazio" title="Ninguém escalado neste dia. Botão direito: excluir ou mudar as vagas.">ninguém escalado</span>` : ""}<span class="lapis" aria-hidden="true">✎</span></button></th>${cels}</tr>`;
     }
     const vazioGrupo = s.grupamento && !cd.designacoes.some((d) => postos.some((p) => p.id === d.posto));
     if (vazioGrupo) continue; // grupamento sem ninguém escalado no dia não aparece
@@ -609,15 +609,62 @@ function vFolha() {
 // ---------- PENDÊNCIAS (semana) ----------
 const PERIODOS = [["dia", ["t2", "t3"], "Dia"], ["noite", ["t4", "t1"], "Noite"]];
 function pendenciasDoDia(dia) {
-  const cd = calcularDia(data, dia);
+  return pendencias(data, dia).map((x) => ({ ...x, posto: postoPorId(x.posto) })).filter((x) => x.posto);
+}
+// junta trechos seguidos do mesmo GM no mesmo posto (ex.: 07–13 + 13–19 → 07–19)
+function juntarPlano(plano) {
   const out = [];
-  for (const p of data.postos) for (const [per, ts] of PERIODOS) {
-    const fs = cd.furos.filter((f) => f.posto === p.id && ts.includes(f.turno));
-    if (!fs.length) continue;
-    const t0 = TURNOS.find((x) => x.id === fs[0].turno), t1 = TURNOS.find((x) => x.id === fs[fs.length - 1].turno);
-    out.push({ dia, posto: p, per, turnos: fs.map((f) => f.turno), faltam: Math.max(...fs.map((f) => f.faltam)), ini: t0.ini, fim: t1.fim });
+  for (const x of [...plano].sort((a, b) => String(a.gm).localeCompare(String(b.gm)) || String(a.posto).localeCompare(String(b.posto)) || a.ini - b.ini)) {
+    const u = out.at(-1);
+    if (u && x.tipo === "HE" && u.tipo === "HE" && u.gm === x.gm && u.posto === x.posto && u.dia === x.dia && u.fim === x.ini) u.fim = x.fim; else out.push({ ...x });
   }
   return out;
+}
+// Motivo da sugestão em poucas palavras
+const motivoSug = (x) => (x.notas || []).filter((n) => !/teto/.test(n))[0] || "";
+// Cartões do "O que falta resolver": para cada dia, um plano sem repetir GM (o mesmo do "Preencher sozinho"),
+// mais 2 alternativas por vaga, cada uma já com o horário que vai ser lançado.
+function cartoesPendencias(porDia) {
+  return porDia.filter((x) => x.pend.length).map(({ d, pend }) => {
+    const plano = juntarPlano(planejarCobertura(data, [d])), usados = new Set(plano.filter((x) => x.gm).map((x) => x.gm));
+    const nOk = plano.filter((x) => x.tipo).length;
+    return `<section class="pdia"><header><h3>${SEMANA[diaSemana(d)].toLowerCase()} <b>${ddmm(d)}</b></h3>
+      <span class="n">${pend.length}</span>${nOk ? `<button class="btn pri mini" data-act="pend-aceitar-dia" data-dia="${d}">Aceitar as ${nOk} sugestões do dia</button>` : ""}<button class="link" data-act="ir-dia" data-dia="${d}">Abrir quadro →</button></header>
+      <ul>${pend.map((x) => {
+        const meus = plano.filter((y) => y.posto === x.posto.id && sobrepoe(y.ini, y.fim, x.ini, x.fim) > 0);
+        const { remanejar, he } = sugerir(data, d, x.posto.id, x.ini, x.fim);
+        const alts = he.filter((s) => !s.bloqueado && !usados.has(s.gm.id)).slice(0, 2);
+        const btn = (gm, ini, fim, via, motivo, principal) => via === "rem"
+          ? `<button class="btn rem ${principal ? "" : "alt"}" data-act="pend-rem" data-dia="${d}" data-posto="${x.posto.id}" data-gm="${gm}">Remanejar <b>${esc(nomeGm(gm))}</b><small>${esc(motivo)}</small></button>`
+          : `<button class="btn hebtn ${principal ? "" : "alt"}" data-act="pend-he" data-dia="${d}" data-posto="${x.posto.id}" data-gm="${gm}" data-ini="${fmtHm(ini)}" data-fim="${fmtHm(fim)}"><b>${esc(nomeGm(gm))}</b> <span class="hr">${fmtHm(ini)}–${fmtHm(fim)}</span><small>${esc(motivo)}</small></button>`;
+        const principais = meus.filter((y) => y.tipo).map((y) => {
+          const s = he.find((z) => z.gm.id === y.gm) || remanejar.find((z) => z.gm.id === y.gm);
+          return btn(y.gm, y.ini, y.fim, y.tipo === "REMANEJ" ? "rem" : "he", y.tipo === "REMANEJ" ? `da ${y.de}` : `${motivoSug(s) || "menos horas no mês"} · ${fmtHoras((s?.heMes || 0) + (s?.transporte || 0))} no mês`, true);
+        }).join("");
+        const outras = alts.map((s) => { const [a, b] = horarioProposto(data, d, s.gm.id, x.posto.id, x.ini, x.fim); return btn(s.gm.id, a, b, "he", `${motivoSug(s) || "livre"} · ${fmtHoras(s.heMes + s.transporte)}`, false); }).join("");
+        return `<li><div class="pinfo"><b>${esc(x.posto.nome)}</b> <span class="meta">${x.posto.reforco ? "Reforço" : x.per === "dia" ? "Dia" : "Noite"} ${fmtHm(x.ini)}–${fmtHm(x.fim)}${x.faltam > 1 ? ` · faltam ${x.faltam}` : ""}</span></div>
+          <div class="pacoes">${principais || `<span class="meta">ninguém livre</span>`}${outras ? `<span class="ou">ou</span>${outras}` : ""}
+          <button class="link" data-act="pend-abrir" data-dia="${d}" data-posto="${x.posto.id}" data-turno="${x.turnos[0]}">mais…</button></div></li>`;
+      }).join("")}</ul></section>`;
+  }).join("");
+}
+// Lembretes do mês: o que costuma ficar esquecido
+function lembretesMes() {
+  const m = mesDe(ui.dia), it = [];
+  const abertos = diasEmAberto(data, m, somaDias(hojeBase(), -1));
+  if (abertos.length) it.push(`<li><b>${abertos.length}</b> dia${abertos.length === 1 ? "" : "s"} já passado${abertos.length === 1 ? "" : "s"} sem finalizar a escala (as HEs ainda não estão no controle). <button class="link" data-act="ir-mes-fin">Finalizar…</button></li>`);
+  const livro = livroMes(data, m), poucas = data.gms.filter((g) => g.ativo !== false && equipe(g.equipe)?.tipo === "alternado" && (livro.get(g.id)?.folgas || 0) < 2);
+  if (poucas.length) it.push(`<li><b>${poucas.length}</b> GM${poucas.length === 1 ? "" : "s"} 12x36 com menos de 2 folgas em ${MESES[Number(m.slice(5)) - 1]}: ${poucas.slice(0, 6).map((g) => `<button class="link" data-act="abrir-ficha" data-gm="${g.id}">${esc(g.nome)}</button>`).join(", ")}${poucas.length > 6 ? "…" : ""}</li>`);
+  const ctl = controleMes(data, m), prev = previstaMes(data, m), teto = data.config.tetoHE * 60;
+  const acima = data.gms.filter((g) => (ctl.get(g.id)?.total || 0) + (prev.get(g.id) || 0) > teto);
+  if (acima.length) it.push(`<li><b>${acima.length}</b> GM${acima.length === 1 ? "" : "s"} vai${acima.length === 1 ? "" : "o"} passar de ${data.config.tetoHE}h de HE no mês (o excedente fica para o próximo): ${acima.slice(0, 6).map((g) => esc(g.nome)).join(", ")}${acima.length > 6 ? "…" : ""}</li>`);
+  const semana = Array.from({ length: 7 }, (_, i) => somaDias(ui.dia, i));
+  const faVtr = new Set();
+  for (const d of semana) { const cd = calcularDia(data, d); for (const p of data.postos) { const fv = viaturaNaFrota(numeroDe(nomeNoDia(p, cd))); if (fv && fv.situacao !== "QAP" && !cd.fa.some((o) => o.posto === p.id) && cd.designacoes.some((x) => x.posto === p.id)) faVtr.add(fv.prefixo); } }
+  if (faVtr.size) it.push(`<li>Viatura${faVtr.size === 1 ? "" : "s"} em FA pela logística, mas com guarnição escalada: <b>${[...faVtr].join(", ")}</b>. <button class="link" data-act="ir-frota">Ver viaturas</button></li>`);
+  const semInsp = semana.filter((d) => !data.inspetores?.[d]?.dia || !data.inspetores?.[d]?.noite);
+  if (Object.keys(data.inspetores || {}).length && semInsp.length) it.push(`<li>Sem inspetor de serviço na escala mensal: ${semInsp.map(ddmm).join(", ")}. <button class="link" data-act="ir-insp">Abrir</button></li>`);
+  return it.length ? `<section class="painel lembretes"><h3>Não esqueça</h3><ul>${it.join("")}</ul></section>` : "";
 }
 function vPendencias() {
   const dias = Array.from({ length: 7 }, (_, i) => somaDias(ui.dia, i));
@@ -651,16 +698,7 @@ function vPendencias() {
     }).join("")).join("")}</tr>`).join("");
   }).join("");
 
-  const cards = porDia.filter((x) => x.pend.length).map(({ d, pend }) => `<section class="pdia"><header><h3>${SEMANA[diaSemana(d)].toLowerCase()} <b>${ddmm(d)}</b></h3>
-      <span class="n">${pend.length}</span><button class="link" data-act="ir-dia" data-dia="${d}">Abrir quadro do dia →</button></header>
-      <ul>${pend.map((x) => {
-        const { remanejar, he } = sugerir(data, d, x.posto.id, x.ini, x.fim);
-        const r = remanejar[0], h = he.find((s) => !s.bloqueado);
-        return `<li><div class="pinfo"><b>${esc(x.posto.nome)}</b> <span class="meta">${x.per === "dia" ? "Dia" : "Noite"} ${fmtHm(x.ini)}–${fmtHm(x.fim)}${x.faltam > 1 ? ` · faltam ${x.faltam}` : ""}</span></div>
-          <div class="pacoes">${h ? `<button class="btn hebtn" data-act="pend-he" data-dia="${d}" data-posto="${x.posto.id}" data-gm="${h.gm.id}" data-ini="${fmtHm(x.ini)}" data-fim="${fmtHm(x.fim)}">HE <b>${esc(h.gm.nome)}</b><small>${fmtHoras(x.fim - x.ini)} · ${h.notas?.[0] ? esc(h.notas[0]) + " · " : ""}${fmtHoras(h.heMes + h.transporte)} no mês</small></button>` : ""}
-          ${r ? `<button class="btn rem" data-act="pend-rem" data-dia="${d}" data-posto="${x.posto.id}" data-gm="${r.gm.id}" title="Remanejar ${esc(r.gm.nome)} da ${esc(r.origem)}">Remanejar <b>${esc(r.gm.nome)}</b><small>${esc(r.origem)}</small></button>` : ""}
-          <button class="link" data-act="pend-abrir" data-dia="${d}" data-posto="${x.posto.id}" data-turno="${x.turnos[0]}">Outras opções</button></div></li>`;
-      }).join("")}</ul></section>`).join("");
+  const cards = cartoesPendencias(porDia);
 
   return `<div class="barra"><div class="datas"><button class="ic" data-act="dia" data-n="-7" aria-label="Semana anterior">‹</button>
     <h2 class="titulo-mes">Semana de ${ddmm(dias[0])} a ${ddmm(dias[6])}</h2><button class="ic" data-act="dia" data-n="7" aria-label="Próxima semana">›</button>
@@ -672,12 +710,13 @@ function vPendencias() {
     <div class="kpi"><span class="v">${fmtHoras(heSemana)}</span><span class="l">de HE lançada na semana</span></div>
     <div class="kpi ${acima ? "atencao" : ""}"><span class="v">${acima}</span><span class="l">GM${acima === 1 ? "" : "s"} acima de ${data.config.tetoHE}h no mês</span></div>
   </div>
+  ${lembretesMes()}
   <div class="cols-pend">
     <section class="painel"><h3>Cobertura da semana</h3><p class="dica">Cada bolinha é um posto coberto. Número vermelho = vagas descobertas; clique para resolver.</p>
       <div class="tabela-wrap mapa-wrap"><table class="mapa"><thead><tr><th></th>${dias.map((d) => `<th colspan="2" class="${d === ui.dia ? "hoje" : ""}">${SEMANA[diaSemana(d)].slice(0, 3)} ${ddmm(d)}</th>`).join("")}</tr>
       <tr><th></th>${dias.map(() => `<th class="sub dia">D</th><th class="sub noite">N</th>`).join("")}</tr></thead><tbody>${linhas}</tbody></table></div></section>
     <section class="painel fila"><div class="fila-cab"><h3>O que falta resolver</h3>${totalFuros ? `<button class="btn pri grande" data-act="auto" data-dias="7">Preencher a semana sozinho</button>` : ""}</div>
-      ${ui.plano ? painelPlano() : `<p class="dica">Primeiro a sugestão sem custo (reserva técnica ou à disposição); depois a HE para quem tem menos horas no mês. Um clique lança.</p>
+      ${ui.plano ? painelPlano() : `<p class="dica">Para cada vaga, a melhor opção (sem repetir GM no mesmo dia) e duas alternativas, já com o horário. Um clique lança; “mais…” abre todas as opções.</p>
       ${cards || `<p class="tudo-ok">Semana coberta. Nada pendente.</p>`}`}</section>
   </div>`;
 }
@@ -870,6 +909,43 @@ const stepper = (pref, vagas) => `<div class="steppers">${TURNOS.map((t) => `<di
   <button class="ic" data-act="step" data-alvo="${pref}-${t.id}" data-d="1" aria-label="Mais no ${NOME_TURNO[t.id]} turno">+</button></div></div>`).join("")}</div>`;
 const lerStepper = (pref) => Object.fromEntries(TURNOS.map((t) => [t.id, Math.max(0, Math.min(9, Number($(`#${pref}-${t.id}`).value) || 0))]));
 const ehViatura = (p) => p.tipo === "vtr" || p.tipo === "moto";
+// ---------- VIATURAS (logística) ----------
+// data.frota: [{ id, prefixo, modelo, situacao: "QAP" | "FA" | "FAP", finalidade, guarnicao }]
+const SIT = { QAP: ["QAP", "qap"], FA: ["FA", "fa"], FAP: ["FA permanente", "fap"] };
+const numeroDe = (txt) => (String(txt || "").match(/\b(\d{3,4})\b/) || [])[1] || "";
+const viaturaNaFrota = (num) => num && (data.frota || []).find((v) => String(v.prefixo) === String(num));
+// quem está na viatura hoje, pela escala (dia / noite)
+function guarnicaoNaEscala(prefixo, cd) {
+  const ps = data.postos.filter((p) => p.ativo !== false && numeroDe(nomeNoDia(p, cd)) === String(prefixo));
+  const nomes = (per) => [...new Set(cd.designacoes.filter((d) => ps.some((p) => p.id === d.posto) && (per === "dia" ? d.ini % 1440 < 1140 && d.ini % 1440 >= 300 : !(d.ini % 1440 < 1140 && d.ini % 1440 >= 300))).map((d) => nomeGm(d.gm)))];
+  const d = nomes("dia"), n = nomes("noite");
+  return [d.length ? d.join("/") : "", n.length ? `noite: ${n.join("/")}` : ""].filter(Boolean).join(" · ");
+}
+function vFrota() {
+  const fr = data.frota || [], f = (ui.frota ||= { sit: "", busca: "" }), cd = calcularDia(data, ui.dia);
+  const conta = (k) => fr.filter((v) => v.situacao === k).length;
+  const modelos = [...new Set(fr.map((v) => v.modelo || "SEM MODELO"))];
+  const vis = (v) => (!f.sit || v.situacao === f.sit) && (!f.busca || norm(`${v.prefixo} ${v.modelo} ${v.finalidade} ${v.guarnicao}`).includes(norm(f.busca)));
+  const linha = (v) => { const esc2 = guarnicaoNaEscala(v.prefixo, cd);
+    return `<tr class="sit-${SIT[v.situacao]?.[1] || "qap"}"><td class="num pref"><input class="fr-in pref" data-fr="${v.id}" data-campo="prefixo" value="${esc(v.prefixo)}" size="5" aria-label="Prefixo"></td>
+      <td class="sit">${Object.entries(SIT).map(([k, [t, c]]) => `<button class="sitb ${c} ${v.situacao === k ? "on" : ""}" data-act="fr-sit" data-fr="${v.id}" data-sit="${k}" aria-pressed="${v.situacao === k}" title="${t}">${k === "FAP" ? "FA perm." : k}</button>`).join("")}</td>
+      <td><input class="fr-in" data-fr="${v.id}" data-campo="finalidade" value="${esc(v.finalidade || "")}" placeholder="${v.situacao === "FAP" ? "FA permanente" : "finalidade"}" aria-label="Finalidade"></td>
+      <td><input class="fr-in" data-fr="${v.id}" data-campo="guarnicao" value="${esc(v.guarnicao || "")}" placeholder="${esc(esc2 || "guarnição")}" title="${esc2 ? `Na escala de ${ddmm(ui.dia)}: ${esc(esc2)}` : ""}" aria-label="Guarnição"></td>
+      <td><button class="ic" data-act="fr-del" data-fr="${v.id}" aria-label="Excluir viatura ${esc(v.prefixo)}" title="Excluir">×</button></td></tr>`; };
+  const cards = modelos.map((m) => { const vs = fr.filter((v) => (v.modelo || "SEM MODELO") === m), mostra = vs.filter(vis);
+    if (!mostra.length && (f.sit || f.busca)) return "";
+    return `<section class="fr-card"><header><span class="fr-qtd">${vs.length}</span><button class="link fr-modelo" data-act="fr-renomear" data-modelo="${esc(m)}" title="Renomear modelo">${esc(m)}</button>
+        <span class="fr-mini">${["QAP", "FA", "FAP"].map((k) => vs.filter((v) => v.situacao === k).length ? `<i class="${SIT[k][1]}">${vs.filter((v) => v.situacao === k).length} ${k === "FAP" ? "FA perm." : k}</i>` : "").join("")}</span>
+        <button class="btn mini" data-act="fr-add" data-modelo="${esc(m)}">+ viatura</button></header>
+      <table class="fr"><thead><tr><th>Prefixo</th><th>Situação</th><th>Finalidade</th><th>Guarnição</th><th></th></tr></thead><tbody>${mostra.map(linha).join("")}</tbody></table></section>`; }).join("");
+  return `<div class="barra"><div class="datas"><h2 class="titulo-mes">Viaturas</h2><span class="meta">situação atual da frota · guarnição sugerida pela escala de ${ddmm(ui.dia)}</span></div>
+    <div class="filtros"><input type="search" id="fr-busca" value="${esc(f.busca)}" placeholder="Buscar prefixo, modelo, finalidade" aria-label="Buscar viatura"></div></div>
+  <div class="resumo fr-resumo">
+    ${[["", "Geral", fr.length, ""], ["QAP", "QAP", conta("QAP"), "qap"], ["FA", "FA", conta("FA"), "fa"], ["FAP", "FA permanente", conta("FAP"), "fap"]].map(([k, t, n, c]) => `<button class="kpi fr-kpi ${c} ${f.sit === k ? "on" : ""}" data-act="fr-filtro" data-sit="${k}"><span class="v">${n}</span><span class="l">${t}</span></button>`).join("")}
+  </div>
+  <div class="fr-grade">${cards || `<p class="meta">Nenhuma viatura cadastrada.</p>`}</div>
+  <section class="painel fr-novo"><h3>Novo modelo</h3><div class="linha"><label>Modelo <input id="fr-nm" placeholder="ex.: DUSTER"></label><label>Prefixo <input id="fr-np" placeholder="ex.: 1351" size="6"></label><button class="btn" data-act="fr-novo">Adicionar</button></div></section>`;
+}
 function nomeNoDia(p, cd) {
   const pre = cd?.ajustesPosto?.get(p.id)?.prefixo;
   return pre ? `${pre.nome} (no lugar da ${p.nome.replace(/^(NOITE )?(VTR|MT) /, "")})` : p.nome;
@@ -1010,7 +1086,7 @@ function popInsp(s) {
 // Sem servidor, tudo fica no navegador (localStorage). Com servidor, cada alteração vira um
 // comando enviado com a revisão que a tela conhece; se outra pessoa salvou antes, recarrega.
 const SERVIDOR = typeof window !== "undefined" ? window.ESCALA_SERVIDOR : null;
-const DOCS_SYNC = ["postos", "secoes", "equipes", "config", "requerimentos"];
+const DOCS_SYNC = ["postos", "secoes", "equipes", "config", "requerimentos", "inspetores", "frota"];
 const srv = { revisao: 0, foto: null, enviando: false, pendente: false, resumos: [], estado: "ok" };
 function fotografar(d) {
   return {
@@ -1128,6 +1204,11 @@ function itensGm(d, turnoId) {
   return [
     { t: "Editar horário, REQ e observação…", act: "mn-card", padrao: true },
     { t: "Trocar o GM…", act: "mn-trocar" },
+    ...(ehHeLancada(d) || d.fixa ? [] : [{ t: `Função${d.funcao ? ` (${d.funcao.toLowerCase()})` : ""}`, sub: [
+      ...[["Motorista", "Motorista"], ["Patrulheiro", "Patrulheiro"], ["", "Sem função"]].map(([f, t]) => ({ t: `${d.funcao === f ? "✓ " : ""}${t} · só hoje`, act: "mn-funcao", d: { f, escopo: "dia" } })),
+      { sep: true },
+      ...[["Motorista", "Motorista"], ["Patrulheiro", "Patrulheiro"]].map(([f, t]) => ({ t: `${t} · sempre (no padrão)`, act: "mn-funcao", d: { f, escopo: "sempre" } })),
+    ] }]),
     ...itensEstender(d),
     { sep: true },
     ...(d.recorrente ? [{ t: "Não fazer esta HE recorrente hoje", act: "mn-sem-rec" }]
@@ -1592,6 +1673,7 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "Enter") { e.preventDefault(); escolherEditor(ed.sel); }
 }, true);
 document.addEventListener("input", (e) => {
+  if (e.target.id === "fr-busca") { ui.frota.busca = e.target.value; render(); const i = $("#fr-busca"); i.focus(); i.setSelectionRange(i.value.length, i.value.length); return; }
   if (e.target.id === "ng-nome") {
     const g = data.gms.find((x) => norm(x.nome) === norm(e.target.value.trim()));
     $("#ng-info").textContent = !e.target.value.trim() ? "" : g ? `Já cadastrado: ${rotuloEquipe(equipe(vigente(g, ui.dia).equipe))} · ${rotuloLotacao(g)}. Será transferido.` : "GM novo: será cadastrado.";
@@ -1838,9 +1920,10 @@ function vPadroes() {
   const eqImp = equipesDoPadrao("impar", mes), eqPar = equipesDoPadrao("par", mes);
   const conta = (eqs, per) => ativos.filter(({ v }) => eqs.includes(v.equipe) && equipe(v.equipe).periodo === per).length;
   const sem = ativos.filter(({ v }) => equipe(v.equipe)?.tipo === "semanal");
-  const abas = [["impar", `Padrão ímpar · ${conta(eqImp, "dia")} dia / ${conta(eqImp, "noite")} noite`], ["par", `Padrão par · ${conta(eqPar, "dia")} dia / ${conta(eqPar, "noite")} noite`], ["semanal", `Semanal · ${sem.length}`]];
+  const abas = [["impar", `Padrão ímpar · ${conta(eqImp, "dia")} dia / ${conta(eqImp, "noite")} noite`], ["par", `Padrão par · ${conta(eqPar, "dia")} dia / ${conta(eqPar, "noite")} noite`], ["semanal", `Semanal · ${sem.length}`], ["inspetores", "Inspetores de serviço"]];
   let corpo;
-  if (pd.aba === "semanal") {
+  if (pd.aba === "inspetores") corpo = tabelaInspetores(mes);
+  else if (pd.aba === "semanal") {
     const livro = livroMes(data, mes);
     corpo = `<div class="tabela-wrap"><table class="lanc pad-sem"><thead><tr><th>GM</th><th>Posto</th><th>Dias</th><th>Horário fixo</th><th>Padrão par</th><th>HE fixa no mês</th></tr></thead><tbody>
       ${sem.sort((a, b) => a.g.nome.localeCompare(b.g.nome)).map(({ g, v }) => `<tr><td><button class="link" data-act="pad-gm" data-gm="${g.id}">${esc(g.nome)}</button></td><td>${esc(postoPorId(v.lotacao?.posto)?.nome || "—")}</td>
@@ -1885,15 +1968,48 @@ function vPadroes() {
   return `<div class="barra"><div class="datas"><button class="ic" data-act="pad-mes" data-n="-1" aria-label="Mês anterior">‹</button><h2 class="titulo-mes">${nomeMes(mes)}</h2><button class="ic" data-act="pad-mes" data-n="1" aria-label="Próximo mês">›</button></div>
     <label class="desde">Mudanças valem a partir de <input type="date" id="pad-desde" value="${pd.desde}"></label></div>
   <div class="abas-pad" role="tablist">${abas.map(([k, t]) => `<button role="tab" aria-selected="${pd.aba === k}" data-act="pad-aba" data-aba="${k}">${t}</button>`).join("")}
-    <button class="btn pri add-gm" data-act="pad-novo-gm">+ Adicionar GM${pd.aba === "semanal" ? " na semanal" : ""}</button></div>
-  <p class="dica">${pd.aba === "semanal" ? "Quem trabalha de segunda a sexta, com o horário fixo e a HE fixa de cada um. Clique no nome para editar." : `Composição do padrão ${pd.aba === "impar" ? "ímpar" : "par"} em ${nomeMes(mes).toLowerCase()} (quem trabalha nos dias ${pd.aba === "impar" ? "ímpares" : "pares"}), sem folgas e afastamentos. Clique no GM, no posto ou na seção para editar; o botão direito mostra mais opções (novo posto, subir/descer, desativar). Em vermelho: vaga sem GM ou quantidade diferente do outro padrão.`}</p>
+    ${pd.aba === "inspetores" ? "" : `<button class="btn pri add-gm" data-act="pad-novo-gm">+ Adicionar GM${pd.aba === "semanal" ? " na semanal" : ""}</button>`}</div>
+  <p class="dica">${pd.aba === "inspetores" ? "Escala mensal dos inspetores de serviço. Clique no nome para trocar (vale só para aquele dia e período). Para férias ou curso, use “Substituir no período”." : pd.aba === "semanal" ? "Quem trabalha de segunda a sexta, com o horário fixo e a HE fixa de cada um. Clique no nome para editar." : `Composição do padrão ${pd.aba === "impar" ? "ímpar" : "par"} em ${nomeMes(mes).toLowerCase()} (quem trabalha nos dias ${pd.aba === "impar" ? "ímpares" : "pares"}), sem folgas e afastamentos. Clique no GM, no posto ou na seção para editar; o botão direito mostra mais opções (novo posto, subir/descer, desativar). Em vermelho: vaga sem GM ou quantidade diferente do outro padrão.`}</p>
   ${corpo}`;
+}
+// ---------- INSPETORES DE SERVIÇO (escala mensal) ----------
+// inspetor de um dia/período: escala mensal; sem ela, o da equipe que trabalha no dia
+function inspetorDe(dia, per) {
+  const cd = calcularDia(data, dia);
+  return data.inspetores?.[dia]?.[per] || cd.equipes.map(equipe).filter((e) => e.periodo === per).map((e) => cd.inspetores.get(e.id) || e.inspetor).filter(Boolean)[0] || "";
+}
+const nomesInspetores = () => [...new Set([...Object.values(data.inspetores || {}).flatMap((x) => [x.dia, x.noite]), ...data.equipes.map((e) => e.inspetor), ...(data.config.rodizioInsp?.dia || []), ...(data.config.rodizioInsp?.noite || [])].filter(Boolean))].sort();
+function tabelaInspetores(mes) {
+  const dias = diasDoMes(mes), rod = data.config.rodizioInsp || {}, nomes = nomesInspetores();
+  const afastado = (nome, dia) => { const g = data.gms.find((x) => norm(x.nome) === norm(nome)); return g && afastamentoNoDia(data, g.id, dia); };
+  const conta = {};
+  for (const d of dias) for (const per of ["dia", "noite"]) { const n = inspetorDe(d, per); if (n) conta[n] = (conta[n] || 0) + 1; }
+  const cel = (d, per) => { const n = inspetorDe(d, per), proprio = !!data.inspetores?.[d]?.[per], af = n && afastado(n, d);
+    return `<td class="insp-${per} ${af ? "insp-af" : ""}"><input class="insp-in ${proprio ? "" : "herdado"}" list="insp-nomes" data-insp-dia="${d}" data-insp-per="${per}" value="${esc(n)}" aria-label="Inspetor ${per} ${ddmm(d)}" title="${af ? `${esc(n)} está afastado neste dia (${esc(TIPOS[af.tipo] || af.tipo)})` : proprio ? "" : "Sem escala mensal: inspetor da equipe"}"></td>`; };
+  return `<div class="insp-wrap"><div class="tabela-wrap"><table class="lanc insp"><thead><tr><th>Dia</th><th class="th-d">DIA</th><th class="th-n">NOITE</th></tr></thead><tbody>
+    ${dias.map((d) => `<tr class="${[0, 6].includes(diaSemana(d)) ? "fds" : ""} ${d === ui.dia ? "hoje" : ""}"><td class="num">${Number(d.slice(8))} <small>${SEMANA[diaSemana(d)].slice(0, 3).toLowerCase()}</small></td>${cel(d, "dia")}${cel(d, "noite")}</tr>`).join("")}
+    </tbody></table><datalist id="insp-nomes">${nomes.map((n) => `<option value="${esc(n)}">`).join("")}</datalist></div>
+  <aside class="insp-lado">
+    <section class="painel"><h3>Preencher pelo rodízio</h3>
+      <p class="dica">Os nomes na ordem em que se revezam, um por dia. Preenche ${nomeMes(mes).toLowerCase()} inteiro a partir do dia escolhido; depois dá para ajustar cada dia na tabela.</p>
+      <label>Dia <input id="rod-dia" value="${esc((rod.dia || []).join(", "))}" placeholder="ex.: DIEGO, ZONATTO, GIAN"></label>
+      <label>Noite <input id="rod-noite" value="${esc((rod.noite || []).join(", "))}" placeholder="ex.: RIBEIRO, PEREIRA, DA CRUZ"></label>
+      <label>A partir do dia <input type="date" id="rod-de" value="${mes}-01"></label>
+      <button class="btn pri" data-act="insp-rodizio">Preencher o mês</button></section>
+    <section class="painel"><h3>Substituir no período</h3>
+      <p class="dica">Férias, curso, troca: põe outro inspetor no lugar só nesses dias.</p>
+      <div class="linha"><label>De <input type="date" id="sub-de" value="${ui.dia.startsWith(mes) ? ui.dia : mes + "-01"}"></label><label>Até <input type="date" id="sub-ate" value="${dias.at(-1)}"></label></div>
+      <div class="linha"><label>Sai <input id="sub-quem" list="insp-nomes" placeholder="quem sai"></label><label>Entra <input id="sub-por" list="insp-nomes" placeholder="quem entra"></label></div>
+      <button class="btn" data-act="insp-substituir">Substituir</button></section>
+    <section class="painel"><h3>Serviços no mês</h3><ul class="insp-conta">${Object.entries(conta).sort((a, b) => b[1] - a[1]).map(([n, c]) => `<li><b>${esc(n)}</b> <span class="num">${c}</span></li>`).join("") || "<li class='meta'>—</li>"}</ul></section>
+  </aside></div>`;
 }
 function itensPadraoGm(g) {
   const v = vigente(g, ui.padrao.desde), eq = equipe(v.equipe);
   const outro = eq?.tipo === "alternado" ? data.equipes.find((e) => e.tipo === "alternado" && e.periodo === eq.periodo && e.id !== eq.id) : null;
   return [
     { t: "Lotação e horário fixo…", act: "pad-editar", d: { gm: g.id }, padrao: true },
+    { t: `Função${v.lotacao?.funcao ? ` (${v.lotacao.funcao.toLowerCase()})` : ""}`, sub: [["Motorista", "Motorista"], ["Patrulheiro", "Patrulheiro"], ["", "Sem função"]].map(([f, t]) => ({ t: `${(v.lotacao?.funcao || "") === f ? "✓ " : ""}${t}`, act: "pad-funcao", d: { gm: g.id, f } })) },
     ...(outro ? [{ t: `Passar para o padrão ${padraoNoMes(outro.id, ui.padrao.mes + "-01")} (${eq.periodo})`, act: "pad-trocar", d: { gm: g.id, eq: outro.id } }] : []),
     ...(eq?.tipo === "alternado" ? [{ t: `Passar para a ${eq.periodo === "dia" ? "noite" : "dia"} (mesmo padrão)`, act: "pad-trocar", d: { gm: g.id, eq: data.equipes.find((e) => e.tipo === "alternado" && e.periodo !== eq.periodo && padraoNoMes(e.id, ui.padrao.mes + "-01") === padraoNoMes(eq.id, ui.padrao.mes + "-01"))?.id } }] : []),
     { sep: true },
@@ -2125,8 +2241,7 @@ document.addEventListener("click", (e) => {
       mudar(`Inspetor ${nome} ${escopo === "dia" ? `em ${ddmm(ui.dia)}` : `para a equipe ${eq.id}`}`, () => {
         const atual = data.ocorrencias.find((o) => o.tipo === "INSPETOR" && o.equipe === eq.id && o.de === ui.dia);
         if (escopo === "sempre") { eq.inspetor = nome; if (atual) data.ocorrencias = data.ocorrencias.filter((o) => o !== atual); }
-        else if (atual) atual.nome = nome;
-        else data.ocorrencias.push({ id: novoId(), tipo: "INSPETOR", equipe: eq.id, de: ui.dia, ate: ui.dia, nome });
+        else { if (atual) data.ocorrencias = data.ocorrencias.filter((o) => o !== atual); data.inspetores ||= {}; (data.inspetores[ui.dia] ||= {})[eq.periodo] = nome; }
       });
       return;
     }
@@ -2159,6 +2274,47 @@ document.addEventListener("click", (e) => {
       return;
     }
     case "mn-excluir-ok": { const p = postoPorId(ui.menu.posto); fecharMenu(); mudar(`${p.nome} excluído (desfazer volta ele)`, () => { p.ativo = false; }); return; }
+    case "mn-funcao": {
+      const d = ui.menu.des, f = el.dataset.f, quem = d.titular || d.gm, g = gmPorId(quem); fecharMenu();
+      if (el.dataset.escopo === "sempre") { const v = vigente(g, ui.dia); mudarLotacao(g, { lotacao: { ...v.lotacao, funcao: f } }, ui.dia, `${g.nome}: ${f || "sem função"} no padrão a partir de ${ddmm(ui.dia)}`); return; }
+      mudar(`${nomeGm(d.gm)}: ${f ? f.toLowerCase() : "sem função"} em ${ddmm(ui.dia)}`, () => {
+        data.ocorrencias = data.ocorrencias.filter((o) => !(o.tipo === "FUNCAO" && o.gm === d.gm && o.de === ui.dia));
+        if (f !== (vigente(gmPorId(d.gm), ui.dia).lotacao?.funcao || "")) data.ocorrencias.push({ id: novoId(), tipo: "FUNCAO", gm: d.gm, de: ui.dia, funcao: f });
+      });
+      return;
+    }
+    case "pad-funcao": { const g = gmPorId(el.dataset.gm), f = el.dataset.f, v = vigente(g, ui.padrao.desde); fecharMenu(); mudarLotacao(g, { lotacao: { ...v.lotacao, funcao: f } }, ui.padrao.desde, `${g.nome}: ${f || "sem função"} no padrão a partir de ${ddmm(ui.padrao.desde)}`); return; }
+    case "insp-rodizio": {
+      const lista = (id) => $(id).value.split(/[,;\n]/).map((x) => x.trim().toUpperCase()).filter(Boolean);
+      const rd = lista("#rod-dia"), rn = lista("#rod-noite"), de = $("#rod-de").value, mes = ui.padrao.mes;
+      if (!rd.length && !rn.length) { toast("Escreva os nomes do rodízio."); return; }
+      const dias = diasDoMes(mes).filter((d) => d >= de);
+      mudar(`Inspetores de ${nomeMes(mes).toLowerCase()} preenchidos pelo rodízio a partir de ${ddmm(de)}`, () => {
+        data.inspetores ||= {}; data.config.rodizioInsp = { dia: rd, noite: rn };
+        dias.forEach((d, i) => { const x = (data.inspetores[d] ||= {}); if (rd.length) x.dia = rd[i % rd.length]; if (rn.length) x.noite = rn[i % rn.length]; });
+        data.ocorrencias = data.ocorrencias.filter((o) => !(o.tipo === "INSPETOR" && dias.includes(o.de)));
+      });
+      return;
+    }
+    case "insp-substituir": {
+      const de = $("#sub-de").value, ate = $("#sub-ate").value || de, quem = $("#sub-quem").value.trim().toUpperCase(), por = $("#sub-por").value.trim().toUpperCase();
+      if (!de || !quem || !por) { toast("Informe o período, quem sai e quem entra."); return; }
+      let n = 0;
+      const alvo = [];
+      for (let d = de; d <= ate; d = somaDias(d, 1)) for (const per of ["dia", "noite"]) if (norm(inspetorDe(d, per)) === norm(quem)) alvo.push([d, per]);
+      if (!alvo.length) { toast(`${quem} não está escalado entre ${ddmm(de)} e ${ddmm(ate)}.`); return; }
+      mudar(`${por} no lugar de ${quem} de ${ddmm(de)} a ${ddmm(ate)} (${alvo.length} serviço${alvo.length === 1 ? "" : "s"})`, () => {
+        data.inspetores ||= {};
+        for (const [d, per] of alvo) { (data.inspetores[d] ||= {})[per] = por; n++; }
+      });
+      void n; return;
+    }
+    case "fr-sit": { const v = data.frota.find((x) => x.id === el.dataset.fr), k = el.dataset.sit; if (v.situacao === k) return; mudar(`Viatura ${v.prefixo}: ${SIT[k][0]}`, () => { v.situacao = k; }); return; }
+    case "fr-filtro": ui.frota.sit = ui.frota.sit === el.dataset.sit ? "" : el.dataset.sit; render(); return;
+    case "fr-add": { const id = novoId(); mudar(`Nova viatura em ${el.dataset.modelo}`, () => (data.frota ||= []).push({ id, prefixo: "", modelo: el.dataset.modelo, situacao: "QAP", finalidade: "", guarnicao: "" })); document.querySelector(`[data-fr="${id}"][data-campo=prefixo]`)?.focus(); return; }
+    case "fr-del": { const v = data.frota.find((x) => x.id === el.dataset.fr); if (!confirm(`Excluir a viatura ${v.prefixo || "(sem prefixo)"} (${v.modelo})?`)) return; mudar(`Viatura ${v.prefixo} excluída`, () => { data.frota = data.frota.filter((x) => x !== v); }); return; }
+    case "fr-novo": { const m = $("#fr-nm").value.trim().toUpperCase(), pf = $("#fr-np").value.trim(); if (!m) { toast("Escreva o modelo."); return; } mudar(`Modelo ${m} adicionado`, () => (data.frota ||= []).push({ id: novoId(), prefixo: pf, modelo: m, situacao: "QAP", finalidade: "", guarnicao: "" })); return; }
+    case "fr-renomear": { const m = el.dataset.modelo, novo = prompt("Nome do modelo", m)?.trim().toUpperCase(); if (!novo || novo === m) return; mudar(`Modelo ${m} → ${novo}`, () => { for (const v of data.frota) if ((v.modelo || "SEM MODELO") === m) v.modelo = novo; }); return; }
     case "pad-posto": abrirPop("posto", el, { posto: el.dataset.posto, aba: "sempre" }); return;
     case "pad-semvaga": mudarVagasPeriodo(postoPorId(el.dataset.posto), el.dataset.per, 0); return;
     case "pad-vagas": { const p = postoPorId(ui.menu.posto); fecharMenu(); mudarVagasPeriodo(p, el.dataset.per, Number(el.dataset.n)); return; }
@@ -2337,6 +2493,16 @@ document.addEventListener("click", (e) => {
     case "remanejar": mudar(`${nomeGm(el.dataset.gm)} remanejado para ${postoPorId(d.posto).nome}`, () => { data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: el.dataset.gm, de: ui.dia, ate: ui.dia, posto: d.posto }); ui.drawer = null; }); break;
     case "pend-rem": mudar(`${nomeGm(el.dataset.gm)} remanejado para ${postoPorId(el.dataset.posto).nome} em ${ddmm(el.dataset.dia)}`, () => data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: el.dataset.gm, de: el.dataset.dia, ate: el.dataset.dia, posto: el.dataset.posto })); break;
     case "pend-he": mudar(`HE: ${nomeGm(el.dataset.gm)} ${el.dataset.ini}–${el.dataset.fim} em ${postoPorId(el.dataset.posto).nome} (${ddmm(el.dataset.dia)})`, () => data.ocorrencias.push({ id: novoId(), tipo: "HE", gm: el.dataset.gm, de: el.dataset.dia, ini: el.dataset.ini, fim: el.dataset.fim, posto: el.dataset.posto, req: "" })); break;
+    case "pend-aceitar-dia": {
+      const d = el.dataset.dia, plano = juntarPlano(planejarCobertura(data, [d])).filter((x) => x.tipo);
+      mudar(`${plano.length} vaga${plano.length === 1 ? "" : "s"} de ${ddmm(d)} resolvida${plano.length === 1 ? "" : "s"}`, () => {
+        for (const x of plano) data.ocorrencias.push(x.tipo === "REMANEJ" ? { id: novoId(), tipo: "REMANEJ", gm: x.gm, de: d, ate: d, posto: x.posto } : { id: novoId(), tipo: "HE", gm: x.gm, de: d, ini: fmtHm(x.ini), fim: fmtHm(x.fim), posto: x.posto, req: "" });
+      });
+      return;
+    }
+    case "ir-mes-fin": ui.view = "mes"; ui.mes = mesDe(ui.dia); location.hash = "mes"; render(); $("[data-act=fin-pendentes]")?.click(); return;
+    case "ir-frota": ui.view = "frota"; location.hash = "frota"; render(); return;
+    case "ir-insp": ui.view = "padroes"; (ui.padrao ||= { aba: "impar", mes: mesDe(ui.dia), desde: ui.dia }).aba = "inspetores"; location.hash = "padroes"; render(); return;
     case "pend-abrir": ui.dia = el.dataset.dia; ui.mes = mesDe(ui.dia); ui.view = "quadro"; location.hash = "quadro"; abrirFuro(el.dataset.posto, el.dataset.turno); break;
     case "ir-hoje": ui.dia = hojeBase(); ui.mes = mesDe(ui.dia); render(); break;
     case "cmd-ex": $("#cmd").value = el.dataset.txt; $("#cmd").focus(); previaComando(el.dataset.txt); return;
@@ -2420,7 +2586,7 @@ document.addEventListener("click", (e) => {
       return;
     }
     case "desfazer": if (SERVIDOR && desfazer.length) srv.resumos.push("Desfez a última alteração");
-      if (desfazer.length) { const u = JSON.parse(desfazer.pop()); data.ocorrencias = u.o; data.postos = u.p; data.secoes = u.s; data.gms = u.g; data.requerimentos = u.r; data.equipes = u.e; data.controle = u.c || []; data._versao++; ui.plano = null; salvar(); render(); toast("Última alteração desfeita"); } break;
+      if (desfazer.length) { const u = JSON.parse(desfazer.pop()); data.ocorrencias = u.o; data.postos = u.p; data.secoes = u.s; data.gms = u.g; data.requerimentos = u.r; data.equipes = u.e; data.controle = u.c || []; data.inspetores = u.i || {}; data.frota = u.f || []; data._versao++; ui.plano = null; salvar(); render(); toast("Última alteração desfeita"); } break;
     case "imprimir": window.print(); break;
     case "restaurar": ui.confirmar = "restaurar"; $("#restaurar").outerHTML = `<button id="restaurar" class="btn perigo" data-act="restaurar-ok">Apagar meus lançamentos e restaurar</button>`; return;
     case "restaurar-ok": try { localStorage.removeItem(CHAVE); } catch { /* ignora */ } data = criarExemplo(); desfazer.length = 0; $("#restaurar").outerHTML = `<button id="restaurar" class="link" data-act="restaurar">Restaurar exemplo</button>`; render(); toast("Dados de exemplo restaurados"); break;
@@ -2443,6 +2609,22 @@ document.addEventListener("change", (e) => {
   const id = e.target.id, v = e.target.value;
   if (id === "pad-desde" && v) { ui.padrao.desde = v; ui.padrao.mes = mesDe(v); render(); return; }
   if (e.target.closest?.(".form-hf")) { previaHorarioFixo(); return; }
+  if (e.target.dataset?.fr && e.target.dataset.campo) {
+    const x = data.frota.find((y) => y.id === e.target.dataset.fr), campo = e.target.dataset.campo, val = campo === "prefixo" ? v.trim() : v.trim();
+    if (!x || (x[campo] || "") === val) return;
+    mudar(`Viatura ${x.prefixo || val}: ${campo} atualizado`, () => { x[campo] = val; });
+    return;
+  }
+  if (e.target.dataset?.inspDia) {
+    const dia = e.target.dataset.inspDia, per = e.target.dataset.inspPer, nome = v.trim().toUpperCase();
+    mudar(`Inspetor ${per === "dia" ? "do dia" : "da noite"} em ${ddmm(dia)}: ${nome || "da equipe"}`, () => {
+      data.inspetores ||= {};
+      if (nome) (data.inspetores[dia] ||= {})[per] = nome; else if (data.inspetores[dia]) { delete data.inspetores[dia][per]; if (!Object.keys(data.inspetores[dia]).length) delete data.inspetores[dia]; }
+      const eqs = data.equipes.filter((x) => x.periodo === per).map((x) => x.id);
+      data.ocorrencias = data.ocorrencias.filter((o) => !(o.tipo === "INSPETOR" && o.de === dia && eqs.includes(o.equipe)));
+    });
+    return;
+  }
   if (e.target.dataset?.fin) { // confirmação da finalização: marca/desmarca sem redesenhar
     const fora = new Set(ui.drawer.fora); if (e.target.checked) fora.delete(e.target.dataset.fin); else fora.add(e.target.dataset.fin); ui.drawer.fora = [...fora];
     const min = [...document.querySelectorAll("[data-fin]:checked")].reduce((t, x) => t + Number(x.dataset.min), 0);

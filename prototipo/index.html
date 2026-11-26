@@ -591,6 +591,44 @@ table.padrao .posto-btn { width: 100%; text-align: left; }
 .tag.vazio { display: inline-block; margin-top: .15rem; color: var(--muted); border: 1px dashed var(--line-strong); }
 tr.ninguem > td { background: repeating-linear-gradient(135deg, transparent 0 8px, var(--line) 8px 9px); }
 tr.ninguem .posto-btn .pn { color: var(--muted); }
+/* motorista / patrulheiro */
+.chip .fn { letter-spacing: .03em; }
+/* inspetores de serviço */
+.insp-wrap { display: grid; grid-template-columns: minmax(0, 520px) minmax(260px, 1fr); gap: 1rem; align-items: start; }
+@media (max-width: 900px) { .insp-wrap { grid-template-columns: 1fr; } }
+table.insp td { padding: .15rem .3rem; } table.insp tr.fds td:first-child { color: var(--furo); } table.insp tr.hoje td { background: var(--accent-soft); }
+table.insp th.th-d { background: #f4e04d; color: #222; text-align: center; } table.insp th.th-n { background: #8a8f98; color: #fff; text-align: center; } table.insp td.insp-dia, table.insp td.insp-noite { width: 42%; }
+.insp-in { width: 100%; box-sizing: border-box; font: 600 .85rem var(--f-grid); text-transform: uppercase; text-align: center; border: 1px solid transparent; background: transparent; padding: .25rem; border-radius: 4px; color: inherit; }
+.insp-in:hover, .insp-in:focus { border-color: var(--line-strong); background: var(--surface); }
+.insp-in.herdado { color: var(--muted); font-weight: 400; font-style: italic; }
+td.insp-af .insp-in { color: var(--furo); text-decoration: line-through; }
+.insp-lado .painel { margin-bottom: .8rem; } .insp-lado label { display: block; margin: .3rem 0; } .insp-lado input { width: 100%; box-sizing: border-box; }
+.insp-conta { list-style: none; padding: 0; margin: 0; columns: 2; } .insp-conta li { display: flex; justify-content: space-between; padding: .1rem .4rem; }
+/* viaturas */
+.fr-resumo .fr-kpi { cursor: pointer; text-align: left; border: 2px solid transparent; font: inherit; }
+.fr-kpi.qap { background: #2e9e4a; color: #fff; } .fr-kpi.fa { background: #e2231a; color: #fff; } .fr-kpi.fap { background: #111; color: #fff; }
+.fr-kpi.qap .l, .fr-kpi.fa .l, .fr-kpi.fap .l { color: inherit; opacity: .9; } .fr-kpi.on { border-color: var(--accent); outline: 2px solid var(--accent); }
+.fr-grade { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr)); gap: .8rem; margin-top: .8rem; }
+.fr-card { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); overflow: hidden; }
+.fr-card header { display: flex; align-items: center; gap: .5rem; padding: .45rem .6rem; background: var(--bg-soft, #eef1f5); border-bottom: 1px solid var(--line); }
+.fr-qtd { font: 700 1.2rem var(--f-num); } .fr-modelo { font-weight: 700; font-size: 1rem; } .fr-card header .btn { margin-left: auto; }
+.fr-mini i { font-style: normal; font-size: .7rem; padding: .05rem .3rem; border-radius: 3px; margin-right: .2rem; color: #fff; } .fr-mini i.qap { background: #2e9e4a; } .fr-mini i.fa { background: #e2231a; } .fr-mini i.fap { background: #111; }
+table.fr { width: 100%; border-collapse: collapse; } table.fr th { font-size: .7rem; text-align: left; color: var(--muted); padding: .2rem .4rem; }
+table.fr td { padding: .15rem .3rem; border-top: 1px solid var(--line); }
+.fr-in { width: 100%; box-sizing: border-box; font: inherit; font-size: .85rem; border: 1px solid transparent; background: transparent; padding: .25rem .3rem; border-radius: 4px; color: inherit; }
+.fr-in:hover, .fr-in:focus { border-color: var(--line-strong); background: var(--surface); } .fr-in.pref { font: 700 .95rem var(--f-num); width: 4.2rem; }
+td.sit { white-space: nowrap; } .sitb { font: 600 .68rem var(--f-ui); padding: .2rem .35rem; border: 1px solid var(--line-strong); background: var(--surface); color: var(--muted); cursor: pointer; }
+.sitb:first-child { border-radius: 4px 0 0 4px; } .sitb:last-child { border-radius: 0 4px 4px 0; } .sitb + .sitb { border-left: 0; }
+.sitb.qap.on { background: #2e9e4a; color: #fff; border-color: #2e9e4a; } .sitb.fa.on { background: #e2231a; color: #fff; border-color: #e2231a; } .sitb.fap.on { background: #111; color: #fff; border-color: #111; }
+tr.sit-fap .fr-in { color: var(--furo); font-style: italic; } tr.sit-fa .pref { color: #e2231a; }
+.btn.mini { padding: .15rem .5rem; font-size: .8rem; }
+.fr-novo { margin-top: 1rem; }
+.tag.fa-log { display: inline-block; margin-top: .15rem; background: #e2231a; color: #fff; }
+/* ajudante da semana */
+.lembretes { margin: .8rem 0; border-left: 4px solid var(--warn); } .lembretes ul { margin: .3rem 0 0; padding-left: 1.1rem; } .lembretes li { margin: .25rem 0; }
+.pdia header .btn.mini { margin-left: .4rem; }
+.pacoes .btn.alt { background: var(--surface); border: 1px dashed var(--line-strong); color: inherit; }
+.pacoes .btn .hr { font-size: .78rem; } .pacoes .ou { color: var(--muted); font-size: .75rem; align-self: center; }
 /* finalizar escala e controle de HE */
 .btn.fin { border-color: var(--accent); color: var(--accent); font-weight: 600; padding: .2rem .6rem; }
 .fin-ok { color: var(--ok, #2e7d32); font-weight: 600; } .fin-ok .link { font-weight: 400; margin-left: .3rem; }
@@ -620,6 +658,7 @@ table.ctl tr.editado td:first-child::after { content: " ✎"; color: var(--pdf-r
     <a href="#lancamentos" data-nav="lancamentos">Lançamentos</a>
     <a href="#mes" data-nav="mes">Mês e horas</a>
     <a href="#folha" data-nav="folha">Folha</a>
+    <a href="#frota" data-nav="frota">Viaturas</a>
   </nav>
   <div class="cmd">
     <label for="cmd" class="cmd-rot">Lançar</label>
