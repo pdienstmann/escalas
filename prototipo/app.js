@@ -236,6 +236,7 @@ function vQuadro() {
     <span class="${furosTotal ? "ruim" : "bom"}"><b>${furosTotal}</b> ${furosTotal === 1 ? "vaga descoberta" : "vagas descobertas"}</span>
     <span><b>${fmtHoras(heHoje)}</b> de HE</span>
     <button class="btn" data-act="pad-novo" title="Adicionar posto, viatura, seção ou grupamento">+ Posto / viatura</button>
+    ${(() => { const a = alteracoesDoDia(ui.dia); return a.ocs.length + a.extras.length ? `<button class="link" data-act="rst-abrir" title="Voltar a escala deste dia para o padrão">Desfazer alterações do dia…</button>` : ""; })()}
     ${diaFinalizado(data, ui.dia) ? `<span class="fin-ok">✓ Escala finalizada <button class="link" data-act="fin-reabrir">reabrir</button></span>` : `<button class="btn fin" data-act="fin-abrir" title="Confirmar as horas extras deste dia e lançar no controle do mês">Finalizar escala…</button>`}
     <span><b>${new Set(cd.designacoes.filter((d) => d.posto).map((d) => d.gm)).size}</b> GMs escalados</span>
     <span><b>${cd.afastados.length}</b> fora da escala</span>
@@ -262,8 +263,33 @@ function vDrawer() {
   if (d.tipo === "finalizar") return drawerFinalizar(d);
   if (d.tipo === "controle") return drawerControle(d);
   if (d.tipo === "gmnovo") return drawerGmNovo(d);
+  if (d.tipo === "resetdia") return drawerResetDia(d);
   if (d.tipo === "folgasmud") return drawerFolgasMud();
   return "";
+}
+// ---------- RESET DAS ALTERAÇÕES DO DIA ----------
+// Só o que foi mexido no próprio dia (HE, BH+, horário, remanejamento, função, ajustes do posto, inspetor, extras).
+// Folgas, afastamentos, trocas lançadas, FA e o que veio do Sistema de Folgas ficam.
+const TIPOS_DO_DIA = ["HE", "BH_MAIS", "HORARIO", "REMANEJ", "FUNCAO", "PREFIXO", "VAGAS", "AREA", "INSPETOR", "SEM_HE_REC"];
+function alteracoesDoDia(dia) {
+  const ocs = data.ocorrencias.filter((o) => TIPOS_DO_DIA.includes(o.tipo) && o.de === dia && (!o.ate || o.ate === dia) && o.origem !== "folgas-gmnh");
+  const extras = data.postos.filter((p) => p.so === dia);
+  const insp = data.inspetores?.[dia] ? Object.keys(data.inspetores[dia]).filter((k) => ["dia", "noite"].includes(k)) : [];
+  return { ocs, extras, insp };
+}
+function drawerResetDia(d) {
+  const { ocs, extras } = alteracoesDoDia(ui.dia), fora = new Set(d.fora || []);
+  const linha = (id, txt) => `<li><label class="fin-he"><input type="checkbox" data-rst="${id}" ${fora.has(id) ? "" : "checked"}><span>${txt}</span></label></li>`;
+  const total = ocs.length + extras.length;
+  return `<div class="dw-head"><div><p class="eyebrow">Escala do dia</p><h2>Desfazer alterações de ${ddmm(ui.dia)}</h2>
+    <p class="meta">Volta a escala deste dia para o padrão. <b>Não mexe</b> em folgas, férias, atestados, cursos, trocas lançadas, FA nem no que veio do Sistema de Folgas.</p></div>
+    <button class="ic" data-act="fechar" aria-label="Fechar">×</button></div>
+  <div class="dw-body">
+    ${total ? `<ul class="fin-lista">${ocs.map((o) => linha(o.id, `<b>${esc(TIPOS[o.tipo])}</b> · ${o.gm ? esc(nomeGm(o.gm)) + " · " : ""}${descreveOc(o)}`)).join("")}
+      ${extras.map((p) => linha("p:" + p.id, `<b>Viatura/posto extra</b> · ${esc(p.nome)} (só neste dia)`)).join("")}</ul>
+      <button class="btn perigo largo" data-act="rst-ok">Desfazer ${total - fora.size} alteraç${total - fora.size === 1 ? "ão" : "ões"}</button>
+      <p class="dica">Dá para voltar atrás com Ctrl+Z.</p>` : `<p class="tudo-ok">Nenhuma alteração feita neste dia.</p>`}
+  </div>`;
 }
 // ---------- FINALIZAR ESCALA E CONTROLE DE HE ----------
 // Ao finalizar, a HE do dia vai para o controle. HE fixa/recorrente da semanal entra direto; as demais pedem confirmação.
@@ -467,6 +493,11 @@ function descreveOc(o) {
   if (o.tipo === "TROCA") return `assumido por ${esc(nomeGm(o.substituto))}`;
   if (o.tipo === "REMANEJ") return `para ${esc(p)}`;
   if (o.tipo === "FA") return esc(o.obs || "");
+  if (o.tipo === "AREA") return `${esc(p)}: ${esc(o.sub || "sem complemento")}`;
+  if (o.tipo === "VAGAS") return `${esc(p)}: vagas do dia`;
+  if (o.tipo === "FUNCAO") return esc(o.funcao || "sem função");
+  if (o.tipo === "SEM_HE_REC") return "HE recorrente suspensa";
+  if (o.tipo === "CURSO") return esc([o.curso, o.local].filter(Boolean).join(" · "));
   return o.obs ? esc(o.obs) : "";
 }
 // ---------- LANÇAMENTOS em seções ----------
@@ -2770,6 +2801,17 @@ document.addEventListener("click", (e) => {
       if (imp.competencia) { syncFolgas.mudancas = syncFolgas.mudancas.filter((x) => x.mes !== imp.competencia.mes); syncFolgas.prontos = syncFolgas.prontos.filter((m) => m !== imp.competencia.mes); try { localStorage.removeItem("folgas-cache2"); } catch { /* ignora */ } mostrarSeloFolgas(); }
       return;
     }
+    case "rst-abrir": ui.drawer = { tipo: "resetdia", fora: [] }; render(); return;
+    case "rst-ok": {
+      const fora = new Set(ui.drawer.fora || []), { ocs, extras } = alteracoesDoDia(ui.dia);
+      const tirarOc = new Set(ocs.filter((o) => !fora.has(o.id)).map((o) => o.id)), tirarP = new Set(extras.filter((p) => !fora.has("p:" + p.id)).map((p) => p.id));
+      mudar(`Escala de ${ddmm(ui.dia)}: ${tirarOc.size + tirarP.size} alteraç${tirarOc.size + tirarP.size === 1 ? "ão desfeita" : "ões desfeitas"}`, () => {
+        data.ocorrencias = data.ocorrencias.filter((o) => !tirarOc.has(o.id));
+        data.postos = data.postos.filter((p) => !tirarP.has(p.id));
+        ui.drawer = null;
+      });
+      return;
+    }
     case "pad-posto": abrirPop("posto", el, { posto: el.dataset.posto, aba: "sempre" }); return;
     case "pad-semvaga": mudarVagasPeriodo(postoPorId(el.dataset.posto), el.dataset.per, 0); return;
     case "pad-vagas": { const p = postoPorId(ui.menu.posto); fecharMenu(); mudarVagasPeriodo(p, el.dataset.per, Number(el.dataset.n)); return; }
@@ -3131,6 +3173,10 @@ document.addEventListener("change", (e) => {
       data.ocorrencias = data.ocorrencias.filter((o) => !(o.tipo === "INSPETOR" && o.de === dia && eqs.includes(o.equipe)));
     });
     return;
+  }
+  if (e.target.dataset?.rst) {
+    const f = new Set(ui.drawer.fora || []); if (e.target.checked) f.delete(e.target.dataset.rst); else f.add(e.target.dataset.rst); ui.drawer.fora = [...f];
+    const n = document.querySelectorAll("[data-rst]:checked").length; $("[data-act=rst-ok]").textContent = `Desfazer ${n} alteraç${n === 1 ? "ão" : "ões"}`; return;
   }
   if (e.target.dataset?.fin) { // confirmação da finalização: marca/desmarca sem redesenhar
     const fora = new Set(ui.drawer.fora); if (e.target.checked) fora.delete(e.target.dataset.fin); else fora.add(e.target.dataset.fin); ui.drawer.fora = [...fora];
