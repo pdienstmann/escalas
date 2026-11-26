@@ -728,10 +728,49 @@ table.mes td.alerta { color: var(--furo); font-weight: 700; background: var(--fu
 /* botões primários um pouco mais vivos */
 .btn.pri { background: var(--accent); border-color: var(--accent); }
 .btn.pri:hover { filter: brightness(1.1); }
+
+/* ===== cabeçalho com as cores da Guarda: azul-marinho e dourado ===== */
+:root { --gm-azul: #0f2a4f; --gm-azul-2: #17407a; --gm-ouro: #d4af37; --gm-ouro-claro: #f3dc8a; --modelo: #6b3fb8; --modelo-bg: #f3eefc; --modelo-forte: #5a2fa3; }
+header.app { background: linear-gradient(100deg, var(--gm-azul) 0%, var(--gm-azul-2) 100%); color: #fff; border-top: 0; border-bottom: 3px solid var(--gm-ouro); box-shadow: 0 2px 10px rgba(0,0,0,.18); }
+.marca { align-items: center; gap: .55rem; }
+.marca .escudo { width: 34px; height: 38px; color: var(--gm-ouro); display: grid; place-items: center; filter: drop-shadow(0 1px 1px rgba(0,0,0,.35)); }
+.marca .escudo svg { width: 100%; height: 100%; } .marca .escudo img { max-width: 100%; max-height: 100%; }
+.marca-txt { display: grid; line-height: 1.05; }
+.marca-txt small { font: 600 .62rem var(--f-ui); letter-spacing: .14em; text-transform: uppercase; color: var(--gm-ouro-claro); }
+.marca-txt b { font: 700 1.15rem var(--f-grid); letter-spacing: .03em; color: #fff; }
+header.app nav.abas a { color: rgba(255,255,255,.82); }
+header.app nav.abas a:hover { background: rgba(255,255,255,.12); color: #fff; }
+header.app nav.abas a[aria-current="page"] { background: rgba(255,255,255,.16); color: #fff; box-shadow: inset 0 -3px 0 var(--gm-ouro); }
+header.app .cmd-rot { color: var(--gm-ouro-claro); }
+header.app #cmd { background: #fff; color: #17212d; border-color: transparent; }
+header.app kbd { background: rgba(255,255,255,.15); color: #fff; border-color: rgba(255,255,255,.3); }
+header.app .ferr .btn { background: transparent; color: #fff; border-color: rgba(255,255,255,.45); }
+header.app .ferr .btn:hover:not(:disabled) { background: rgba(255,255,255,.14); }
+header.app .ferr .btn:disabled { opacity: .45; }
+header.app .exemplo, header.app .exemplo .link { color: rgba(255,255,255,.85); }
+header.app .exemplo .link:hover { color: var(--gm-ouro-claro); }
+header.app .selo-folgas { background: var(--gm-ouro); color: var(--gm-azul); border-color: var(--gm-ouro); }
+header.app .sync { color: #fff; }
+/* ===== escala do dia × padrões (modelo) ===== */
+.selo-dia { display: inline-flex; align-items: center; gap: .3rem; font: 700 .7rem var(--f-ui); letter-spacing: .08em; text-transform: uppercase; color: #fff; background: var(--accent); padding: .2rem .55rem; border-radius: 999px; }
+body[data-view="padroes"] { background: var(--modelo-bg); }
+body[data-view="padroes"] main { background-image: linear-gradient(rgba(107,63,184,.06) 1px, transparent 1px), linear-gradient(90deg, rgba(107,63,184,.06) 1px, transparent 1px); background-size: 24px 24px; }
+body[data-view="padroes"] header.app nav.abas a[aria-current="page"] { background: var(--modelo); box-shadow: inset 0 -3px 0 var(--gm-ouro); }
+body[data-view="padroes"] .pad-fixo { background: var(--modelo-bg); }
+.faixa-modelo { display: flex; align-items: center; gap: .7rem; background: var(--modelo); color: #fff; border-radius: 8px; padding: .55rem .9rem; margin-bottom: .5rem; font-size: .9rem; box-shadow: 0 2px 0 var(--modelo-forte); }
+.faixa-modelo b { letter-spacing: .1em; text-transform: uppercase; font-size: .78rem; background: rgba(255,255,255,.18); padding: .15rem .5rem; border-radius: 4px; white-space: nowrap; }
+.faixa-modelo .link { color: #fff; text-decoration: underline; margin-left: auto; white-space: nowrap; }
+body[data-view="padroes"] .abas-pad button[aria-selected="true"] { background: var(--modelo); border-color: var(--modelo); color: #fff; }
+body[data-view="padroes"] table.quadro.padrao { border: 2px dashed var(--modelo); }
+body[data-view="padroes"] table.quadro.padrao thead th { background: var(--modelo); color: #fff; }
+body[data-view="padroes"] table.quadro.padrao tr.secao th { background: linear-gradient(90deg, #e6dcf8, transparent 70%); border-left-color: var(--modelo); }
+body[data-view="padroes"] table.quadro.padrao td.dia { background: #fbf9ff; } body[data-view="padroes"] table.quadro.padrao td.noite { background: #f1edfa; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --modelo-bg: #1b1428; } body[data-view="padroes"] table.quadro.padrao td.dia { background: #1d1a26; } body[data-view="padroes"] table.quadro.padrao td.noite { background: #191526; } }
 </style>
 
 <header class="app">
-  <div class="marca">Escala GM <span>protótipo</span></div>
+  <div class="marca"><span class="escudo" id="marca-escudo" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2l8 3v6c0 5-3.4 9.3-8 11-4.6-1.7-8-6-8-11V5z" fill="currentColor"/><path d="M12 6.2l1.3 2.7 3 .4-2.2 2.1.5 3L12 13l-2.6 1.4.5-3-2.2-2.1 3-.4z" fill="#0f2a4f"/></svg></span>
+    <span class="marca-txt"><small>Guarda Municipal</small><b>Escala GM</b></span></div>
   <nav class="abas" aria-label="Seções">
     <a href="#pendencias" data-nav="pendencias">Semana</a>
     <a href="#quadro" data-nav="quadro">Quadro do dia</a>

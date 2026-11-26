@@ -91,6 +91,8 @@ function render() {
   $("#btn-desfazer").disabled = !desfazer.length;
   if (SERVIDOR && ui.view === "ajustes") carregarHistorico();
   if (ui.view === "folha") alinharFolha();
+  document.body.dataset.view = ui.view;
+  const esc0 = $("#marca-escudo"); if (esc0 && data.config?.brasoes?.esq && !esc0.querySelector("img")) esc0.innerHTML = `<img src="${data.config.brasoes.esq}" alt="">`;
   const hdr = document.querySelector("header.app"); if (hdr) document.documentElement.style.setProperty("--hdr", hdr.offsetHeight + "px");
   if (ui.pop) desenharPop(); else fecharPop();
 }
@@ -224,7 +226,7 @@ function vQuadro() {
       <button class="ic" data-act="dia" data-n="-1" aria-label="Dia anterior">‹</button>
       <input type="date" id="q-dia" value="${ui.dia}" min="2026-10-01" max="2026-12-31" aria-label="Data do serviço">
       <button class="ic" data-act="dia" data-n="1" aria-label="Próximo dia">›</button>
-      <div class="periodo"><b>${SEMANA[diaSemana(ui.dia)]} ${ddmm(ui.dia)}</b> 07h → ${SEMANA[diaSemana(amanha)].toLowerCase()} ${ddmm(amanha)} 07h</div>
+      <span class="selo-dia" title="Mudanças aqui valem só para este dia">Escala do dia</span><div class="periodo"><b>${SEMANA[diaSemana(ui.dia)]} ${ddmm(ui.dia)}</b> 07h → ${SEMANA[diaSemana(amanha)].toLowerCase()} ${ddmm(amanha)} 07h</div>
     </div>
     <div class="equipes">
       ${[...eqDia, ...eqNoite].map((e) => `<button class="eq ${equipe(e).periodo}" data-act="pop-insp" data-equipe="${e}" title="Clique para trocar o inspetor"><b>${esc(rotuloEquipe(equipe(e)))}</b> ${cd.inspetores.get(e) === "" ? `<span class="sem-insp">sem inspetor</span>` : esc(cd.inspetores.get(e) || equipe(e).inspetor || "")}</button>`).join("")}
@@ -2307,7 +2309,7 @@ function vPadroes() {
     corpo = `<div class="tabela-wrap"><table class="quadro padrao"><colgroup><col class="c-posto"><col><col></colgroup>
       <thead><tr><th>POSTO</th><th class="dia">DIA (2º e 3º turno)</th><th class="noite">NOITE (4º e 1º turno)</th></tr></thead><tbody>${corpo}</tbody></table></div>`;
   }
-  return `<div class="pad-fixo"><div class="barra"><div class="datas"><button class="ic" data-act="pad-mes" data-n="-1" aria-label="Mês anterior">‹</button><h2 class="titulo-mes">${nomeMes(mes)}</h2><button class="ic" data-act="pad-mes" data-n="1" aria-label="Próximo mês">›</button></div>
+  return `<div class="pad-fixo"><div class="faixa-modelo"><b>Modelo da escala</b><span>Aqui você muda o <u>padrão</u>: vale para <b style="all:unset;font-weight:700">todos os dias a partir de ${ddmm(pd.desde)}</b>. Para mexer só num dia, use o Quadro do dia.</span><a class="link" href="#quadro" data-nav="quadro">ir para o Quadro do dia</a></div><div class="barra"><div class="datas"><button class="ic" data-act="pad-mes" data-n="-1" aria-label="Mês anterior">‹</button><h2 class="titulo-mes">${nomeMes(mes)}</h2><button class="ic" data-act="pad-mes" data-n="1" aria-label="Próximo mês">›</button></div>
     <label class="desde">Mudanças valem a partir de <input type="date" id="pad-desde" value="${pd.desde}"></label></div>
   <div class="abas-pad" role="tablist">${abas.map(([k, t]) => `<button role="tab" aria-selected="${pd.aba === k}" data-act="pad-aba" data-aba="${k}">${t}</button>`).join("")}
     ${pd.aba === "inspetores" ? "" : `<span class="add-gm"><button class="btn" data-act="pad-novo">+ Posto / viatura / seção</button><button class="btn pri" data-act="pad-novo-gm">+ Adicionar GM${pd.aba === "semanal" ? " na semanal" : ""}</button></span>`}</div></div>
