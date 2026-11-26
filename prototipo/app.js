@@ -91,6 +91,7 @@ function render() {
   $("#btn-desfazer").disabled = !desfazer.length;
   if (SERVIDOR && ui.view === "ajustes") carregarHistorico();
   if (ui.view === "folha") alinharFolha();
+  const hdr = document.querySelector("header.app"); if (hdr) document.documentElement.style.setProperty("--hdr", hdr.offsetHeight + "px");
   if (ui.pop) desenharPop(); else fecharPop();
 }
 
@@ -145,7 +146,7 @@ function chip(d, t, junto) {
   if (d.req && !d.fixa) extras.push(`<span class="req">REQ ${esc(d.req)}</span>`);
   const reserva = postoPorId(d.posto)?.tipo === "reserva" ? "reserva" : "";
   return `<button class="chip ${cls || ""} ${reserva} ${d.conflito ? "conflito" : ""} ${d.alterado && ultimo ? "alterado" : ""}" data-act="card" data-des="${d.id}" title="Clique para mudar horário, REQ, observação ou trocar o GM">
-    <span class="nm">${esc(g?.nome)}</span>${d.funcao ? `<span class="fn" title="${esc(d.funcao)} · botão direito › Função para mudar">${esc(d.funcao === "Motorista" ? "MOT" : d.funcao === "Patrulheiro" ? "PAT" : d.funcao.slice(0, 3).toUpperCase())}</span>` : ""}
+    <span class="nm">${esc(g?.nome)}</span>${d.funcao ? `<span class="fn${ICO_FUNCAO[d.funcao] ? " fn-ico" : ""}" title="${esc(d.funcao)} · botão direito › Função para mudar">${ICO_FUNCAO[d.funcao] || esc(d.funcao.slice(0, 3).toUpperCase())}</span>` : ""}
     <span class="hr" ${junto ? `data-junto="${junto.he.id}"` : ""}>${junto ? `${textoCelula(d, t).split("/")[0]}/${fmtHm(junto.he.fim)}` : textoCelula(d, t)}</span>${junto ? `<span class="he-num" title="${fmtHoras(junto.total)} de hora extra fixa">${fmtHE(junto.total)}</span>` : ""}${extras.join("")}${d.obs && ultimo ? `<span class="obs" title="${esc(d.obs)}">${esc(d.obs.length > 34 ? d.obs.slice(0, 33) + "…" : d.obs)}</span>` : ""}</button>`;
 }
 function vQuadro() {
@@ -738,7 +739,13 @@ function linhasCabecalho() {
   const c = data.config;
   return c.cabecalhoLinhas?.length ? c.cabecalhoLinhas : String(c.cabecalho || "").split(" · ").filter(Boolean);
 }
-const funcaoFolha = (d) => (d.funcao === "Motorista" ? "MOT. " : d.funcao === "Patrulheiro" ? "PAT. " : "");
+// Função como ícone (volante = motorista, distintivo = patrulheiro) para não poluir a folha
+const ICO_FUNCAO = {
+  Motorista: `<svg class="ico-fn" viewBox="0 0 24 24" aria-label="Motorista" role="img"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.4"/><circle cx="12" cy="12" r="2.6"/><path d="M3.5 11h6M14.5 11h6M12 14.6V21" stroke="currentColor" stroke-width="2.4" fill="none"/></svg>`,
+  Patrulheiro: `<svg class="ico-fn" viewBox="0 0 24 24" aria-label="Patrulheiro" role="img"><path d="M12 2l8 3v6c0 5-3.4 9.3-8 11-4.6-1.7-8-6-8-11V5z" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M12 7.5l1.3 2.7 3 .4-2.2 2.1.5 3L12 14.3l-2.6 1.4.5-3-2.2-2.1 3-.4z"/></svg>`,
+};
+const icoFuncao = (f) => ICO_FUNCAO[f] || "";
+const funcaoFolha = (d) => (ICO_FUNCAO[d.funcao] ? `${ICO_FUNCAO[d.funcao]} ` : "");
 function vAjustes() {
   const c = data.config;
   const anc = c.ancora || { data: ui.dia, equipes: [] };
@@ -853,9 +860,9 @@ function posicionarPop() {
 function fecharPop() { ui.pop = null; const p = $("#pop"); if (p) { p.hidden = true; p.innerHTML = ""; } }
 function desenharPop() {
   const p = $("#pop"), s = ui.pop;
-  p.innerHTML = { hora: popCard, card: popCard, tirar: popTirar, insp: popInsp, gm: popGm, add: popGm, motivo: popMotivo, posto: popPosto, secao: popSecao }[s.modo](s);
+  p.innerHTML = { hora: popCard, card: popCard, tirar: popTirar, insp: popInsp, gm: popGm, add: popGm, motivo: popMotivo, posto: popPosto, secao: popSecao, novo: popNovo }[s.modo](s);
   p.hidden = false;
-  const W = Math.min(s.modo === "posto" || s.modo === "secao" ? 440 : 380, innerWidth - 24);
+  const W = Math.min(s.modo === "posto" || s.modo === "secao" || s.modo === "novo" ? 440 : 380, innerWidth - 24);
   p.style.width = W + "px";
   posicionarPop();
   const foco = p.querySelector("#p-busca, #p-ini, #in-nome");
@@ -945,6 +952,20 @@ function vFrota() {
   </div>
   <div class="fr-grade">${cards || `<p class="meta">Nenhuma viatura cadastrada.</p>`}</div>
   <section class="painel fr-novo"><h3>Novo modelo</h3><div class="linha"><label>Modelo <input id="fr-nm" placeholder="ex.: DUSTER"></label><label>Prefixo <input id="fr-np" placeholder="ex.: 1351" size="6"></label><button class="btn" data-act="fr-novo">Adicionar</button></div></section>`;
+}
+function popNovo(s) {
+  const sec = s.secao || data.secoes[0]?.id;
+  return `${cabPop("Adicionar", "Posto, viatura, moto, seção ou grupamento")}<div class="pop-corpo">
+    <div class="bloco"><b>Posto, viatura ou moto</b>
+      <label>Nome <input id="np-nome" placeholder="ex.: VTR 1352 ou PRAÇA NOVA" autocomplete="off"></label>
+      <div class="linha"><label>Tipo <select id="np-tipo"><option value="vtr">Viatura</option><option value="moto">Moto</option><option value="posto">Posto fixo</option></select></label>
+        <label class="cresce">Seção <select id="np-secao">${data.secoes.map((x) => `<option value="${x.id}" ${x.id === sec ? "selected" : ""}>${esc(x.nome)}</option>`).join("")}</select></label></div>
+      <div class="linha"><label>GMs de dia <input type="number" id="np-dia" min="0" max="9" value="2" size="3"></label><label>GMs de noite <input type="number" id="np-noite" min="0" max="9" value="0" size="3"></label></div>
+      <button class="btn pri" data-act="posto-criar">Criar</button></div>
+    <div class="bloco"><b>Seção ou grupamento</b>
+      <div class="linha"><label class="cresce">Nome <input id="ns-nome" placeholder="ex.: GOC ou OPERAÇÃO VERÃO"></label></div>
+      <label class="toggle"><input type="checkbox" id="ns-grupo"> É um grupamento (motos, GOC…): só aparece quando tem GM escalado</label>
+      <button class="btn" data-act="secao-criar">Criar seção</button></div></div>`;
 }
 function nomeNoDia(p, cd) {
   const pre = cd?.ajustesPosto?.get(p.id)?.prefixo;
@@ -1932,7 +1953,7 @@ function vPadroes() {
       </tbody></table></div>`;
   } else {
     const eqs = pd.aba === "impar" ? eqImp : eqPar, outros = pd.aba === "impar" ? eqPar : eqImp;
-    const pessoa = ({ g, v }, extra = "") => `<button class="pgm ${extra}" data-act="pad-gm" data-gm="${g.id}" title="Clique ou botão direito para editar">${v.lotacao?.funcao ? `<small>${v.lotacao.funcao === "Motorista" ? "MOT." : v.lotacao.funcao === "Patrulheiro" ? "PAT." : esc(v.lotacao.funcao)}</small> ` : ""}${esc(g.nome)}${extra === "sem" ? ` <span class="tag rem">seg–sex</span>` : ""}<span class="num">${textoHorario(v.lotacao?.segmentos)}</span></button>`;
+    const pessoa = ({ g, v }, extra = "") => `<button class="pgm ${extra}" data-act="pad-gm" data-gm="${g.id}" title="Clique ou botão direito para editar">${v.lotacao?.funcao ? `<small title="${esc(v.lotacao.funcao)}">${icoFuncao(v.lotacao.funcao) || esc(v.lotacao.funcao)}</small> ` : ""}${esc(g.nome)}${extra === "sem" ? ` <span class="tag rem">seg–sex</span>` : ""}<span class="num">${textoHorario(v.lotacao?.segmentos)}</span></button>`;
     const periodoDe = (segs) => { const [a] = segs?.length ? intervalo(segs[0].ini, segs[0].fim) : [420]; return a >= 900 || a < 300 ? "noite" : "dia"; };
     corpo = data.secoes.map((s) => {
       const linhas = data.postos.filter((p) => p.secao === s.id && p.ativo !== false).map((p) => {
@@ -1960,15 +1981,15 @@ function vPadroes() {
         const html = `<tr class="${s.grupamento ? "em-grupo" : ""}"><th scope="row" class="posto"><button class="posto-btn" data-act="pad-posto" data-posto="${p.id}" title="Clique para editar · botão direito: mais opções"><span class="pn">${iconePosto(p)}${esc(p.nome)}</span>${p.sub ? `<span class="ps">${esc(p.sub)}</span>` : ""}${p.obs ? `<span class="po">(${esc(p.obs)})</span>` : ""}<span class="lapis" aria-hidden="true">✎</span></button></th>${cel("dia")}${cel("noite")}</tr>`;
         return s.grupamento && !tem ? "" : html; // grupamento sem ninguém neste padrão não aparece
       }).join("");
-      return linhas || !s.grupamento ? `<tr class="secao ${s.grupamento ? "grupo" : ""}"><th colspan="3"><button class="secao-btn" data-act="secao-nome" data-secao="${s.id}" title="Clique para renomear · botão direito: mais opções">${s.grupamento ? ICONES.grupo : ""}${esc(s.nome)} <span class="lapis" aria-hidden="true">✎</span></button>${s.grupamento ? `<span class="selo-grupo">GRUPAMENTO</span>` : ""}</th></tr>${linhas}` : "";
+      return linhas || !s.grupamento || !data.postos.some((p) => p.secao === s.id && p.ativo !== false) ? `<tr class="secao ${s.grupamento ? "grupo" : ""}"><th colspan="3"><button class="secao-btn" data-act="secao-nome" data-secao="${s.id}" title="Clique para renomear · botão direito: mais opções">${s.grupamento ? ICONES.grupo : ""}${esc(s.nome)} <span class="lapis" aria-hidden="true">✎</span></button>${s.grupamento ? `<span class="selo-grupo">GRUPAMENTO</span>` : ""}<button class="link add-sec" data-act="pad-novo" data-secao="${s.id}">+ posto/viatura</button></th></tr>${linhas}` : "";
     }).join("");
     corpo = `<div class="tabela-wrap"><table class="quadro padrao"><colgroup><col class="c-posto"><col><col></colgroup>
       <thead><tr><th>POSTO</th><th class="dia">DIA (2º e 3º turno)</th><th class="noite">NOITE (4º e 1º turno)</th></tr></thead><tbody>${corpo}</tbody></table></div>`;
   }
-  return `<div class="barra"><div class="datas"><button class="ic" data-act="pad-mes" data-n="-1" aria-label="Mês anterior">‹</button><h2 class="titulo-mes">${nomeMes(mes)}</h2><button class="ic" data-act="pad-mes" data-n="1" aria-label="Próximo mês">›</button></div>
+  return `<div class="pad-fixo"><div class="barra"><div class="datas"><button class="ic" data-act="pad-mes" data-n="-1" aria-label="Mês anterior">‹</button><h2 class="titulo-mes">${nomeMes(mes)}</h2><button class="ic" data-act="pad-mes" data-n="1" aria-label="Próximo mês">›</button></div>
     <label class="desde">Mudanças valem a partir de <input type="date" id="pad-desde" value="${pd.desde}"></label></div>
   <div class="abas-pad" role="tablist">${abas.map(([k, t]) => `<button role="tab" aria-selected="${pd.aba === k}" data-act="pad-aba" data-aba="${k}">${t}</button>`).join("")}
-    ${pd.aba === "inspetores" ? "" : `<button class="btn pri add-gm" data-act="pad-novo-gm">+ Adicionar GM${pd.aba === "semanal" ? " na semanal" : ""}</button>`}</div>
+    ${pd.aba === "inspetores" ? "" : `<span class="add-gm"><button class="btn" data-act="pad-novo">+ Posto / viatura / seção</button><button class="btn pri" data-act="pad-novo-gm">+ Adicionar GM${pd.aba === "semanal" ? " na semanal" : ""}</button></span>`}</div></div>
   <p class="dica">${pd.aba === "inspetores" ? "Escala mensal dos inspetores de serviço. Clique no nome para trocar (vale só para aquele dia e período). Para férias ou curso, use “Substituir no período”." : pd.aba === "semanal" ? "Quem trabalha de segunda a sexta, com o horário fixo e a HE fixa de cada um. Clique no nome para editar." : `Composição do padrão ${pd.aba === "impar" ? "ímpar" : "par"} em ${nomeMes(mes).toLowerCase()} (quem trabalha nos dias ${pd.aba === "impar" ? "ímpares" : "pares"}), sem folgas e afastamentos. Clique no GM, no posto ou na seção para editar; o botão direito mostra mais opções (novo posto, subir/descer, desativar). Em vermelho: vaga sem GM ou quantidade diferente do outro padrão.`}</p>
   ${corpo}`;
 }
@@ -2315,6 +2336,7 @@ document.addEventListener("click", (e) => {
     case "fr-del": { const v = data.frota.find((x) => x.id === el.dataset.fr); if (!confirm(`Excluir a viatura ${v.prefixo || "(sem prefixo)"} (${v.modelo})?`)) return; mudar(`Viatura ${v.prefixo} excluída`, () => { data.frota = data.frota.filter((x) => x !== v); }); return; }
     case "fr-novo": { const m = $("#fr-nm").value.trim().toUpperCase(), pf = $("#fr-np").value.trim(); if (!m) { toast("Escreva o modelo."); return; } mudar(`Modelo ${m} adicionado`, () => (data.frota ||= []).push({ id: novoId(), prefixo: pf, modelo: m, situacao: "QAP", finalidade: "", guarnicao: "" })); return; }
     case "fr-renomear": { const m = el.dataset.modelo, novo = prompt("Nome do modelo", m)?.trim().toUpperCase(); if (!novo || novo === m) return; mudar(`Modelo ${m} → ${novo}`, () => { for (const v of data.frota) if ((v.modelo || "SEM MODELO") === m) v.modelo = novo; }); return; }
+    case "pad-novo": abrirPop("novo", el, { secao: el.dataset.secao }); $("#np-nome")?.focus(); return;
     case "pad-posto": abrirPop("posto", el, { posto: el.dataset.posto, aba: "sempre" }); return;
     case "pad-semvaga": mudarVagasPeriodo(postoPorId(el.dataset.posto), el.dataset.per, 0); return;
     case "pad-vagas": { const p = postoPorId(ui.menu.posto); fecharMenu(); mudarVagasPeriodo(p, el.dataset.per, Number(el.dataset.n)); return; }
@@ -2366,7 +2388,7 @@ document.addEventListener("click", (e) => {
     case "posto-desativar-ok": { const p = postoPorId(ui.pop.posto); fecharPop(); mudar(`${p.nome} desativado`, () => { p.ativo = false; }); return; }
     case "posto-reativar": { const p = postoPorId(el.dataset.posto); fecharPop(); mudar(`${p.nome} reativado`, () => { delete p.ativo; }); return; }
     case "posto-criar": {
-      const sec = ui.pop.secao, nome = $("#np-nome").value.trim().toUpperCase();
+      const sec = $("#np-secao")?.value || ui.pop.secao, nome = $("#np-nome").value.trim().toUpperCase();
       if (!nome) { toast("Digite o nome do posto ou viatura."); return; }
       const tipo = $("#np-tipo").value, nd = Number($("#np-dia").value) || 0, nn = Number($("#np-noite").value) || 0;
       fecharPop();
@@ -2414,10 +2436,10 @@ document.addEventListener("click", (e) => {
     case "mn-sem-rec": { const d = ui.menu.des; fecharMenu(); mudar(`${nomeGm(d.gm)}: HE recorrente suspensa em ${ddmm(ui.dia)}`, () => data.ocorrencias.push({ id: novoId(), tipo: "SEM_HE_REC", gm: d.gm, de: ui.dia })); return; }
     case "ed-estender": { const inp = $("#ed-in"), f = parseFaixa(inp.value); if (f) { inp.value = `${f[0]}–${el.dataset.fim}`; atualizarDicaHora(); } inp.focus(); return; }
     case "secao-criar": {
-      const nome = $("#ns-nome").value.trim().toUpperCase(), i = data.secoes.findIndex((x) => x.id === ui.pop.secao);
+      const nome = $("#ns-nome").value.trim().toUpperCase(), i = ui.pop.modo === "novo" ? data.secoes.length - 1 : data.secoes.findIndex((x) => x.id === ui.pop.secao), grupo = !!$("#ns-grupo")?.checked;
       if (!nome) { toast("Digite o nome da seção."); return; }
       fecharPop();
-      mudar(`Seção ${nome} criada. Clique no nome dela para pôr postos.`, () => data.secoes.splice(i + 1, 0, { id: "s" + novoId(), nome }));
+      mudar(`${grupo ? "Grupamento" : "Seção"} ${nome} criad${grupo ? "o" : "a"}. Use "+ posto/viatura" nela para pôr postos.`, () => data.secoes.splice(i + 1, 0, { id: "s" + novoId(), nome, ...(grupo ? { grupamento: true } : {}) }));
       return;
     }
     case "salvar-lotacao": {
