@@ -23,6 +23,8 @@ export const AFASTAMENTOS = {
 };
 // Afastamentos de um dia só (valem apenas se o GM estaria de serviço)
 export const DE_UM_DIA = ["FOLGA", "FALTA", "BH_COMP"];
+// textos que versões antigas gravavam sozinhas no remanejamento (não são observação do escalante)
+export const OBS_AUTO_REMANEJ = new Set(["Remanejado", "Da reserva técnica"]);
 // O que cada requerimento significa (cadastro de REQ)
 export const TIPOS_REQ = { BH: "Banco de horas", TROCA: "Troca de serviço", HE: "Hora extra", FOLGA: "Folga", AFAST: "Atestado / licença", FERIAS: "Férias", OUTRO: "Outro" };
 
@@ -165,7 +167,8 @@ export function calcularDia(data, dia) {
     const partes = [];
     const falta = d.fim - d.ini - Math.max(0, Math.min(b, d.fim) - Math.max(a, d.ini));
     const ehBH = oc.req && data.requerimentos?.[oc.req]?.tipo === "BH";
-    if (oc.semHE) { base.splice(idx, 1, { ...d, ...marca, ini: a, fim: b, req: oc.req || d.req, deslocado: true }); continue; } // só mudou o horário: tudo continua normal
+    if (oc.remover) { base.splice(idx, 1); continue; } // ex.: HE fixa que não acontece no dia
+    if (oc.semHE) { base.splice(idx, 1, { ...d, ...marca, ini: a, fim: b, req: oc.req || d.req, deslocado: true }); continue; } // só mudou o horário: tudo continua normal (HE fixa continua HE fixa)
     if (a < d.ini) partes.push({ ...d, ...marca, id: d.id + "a", ini: a, fim: Math.min(b, d.ini), nat: "he", fixa: false, req: oc.req || "", extensao: true });
     if (Math.min(b, d.fim) > Math.max(a, d.ini)) partes.push({ ...d, ...marca, ini: Math.max(a, d.ini), fim: Math.min(b, d.fim), req: oc.req || d.req, bhDebito: ehBH && d.nat === "normal" ? falta : 0 });
     if (b > d.fim) partes.push({ ...d, ...marca, id: d.id + "z", ini: Math.max(a, d.fim), fim: b, nat: "he", fixa: false, req: oc.req || "", extensao: true });
@@ -196,14 +199,19 @@ export function calcularDia(data, dia) {
     afastados.push({ gm: oc.gm, tipo: "TROCA", oc, minutos: 0 });
   }
 
-  // 4. Remanejamentos
+  // 4. Remanejamentos (o REQ e a observação podem ficar no próprio remanejamento)
   // Com ini/fim, só o trecho do serviço dentro desse horário muda de posto (remanejamento parcial).
   for (const oc of ocs.filter((o) => o.tipo === "REMANEJ")) {
     const [ra, rb] = oc.ini ? intervalo(oc.ini, oc.fim) : [-Infinity, Infinity];
     const novos = [];
     for (const d of des) {
       if (d.gm !== oc.gm || d.nat === "he" || sobrepoe(d.ini, d.fim, ra, rb) <= 0) { novos.push(d); continue; }
-      const mover = (x) => { x.posto = oc.posto; if (oc.funcao) x.funcao = oc.funcao; x.remanejado = true; x.req = x.req || oc.req || ""; return x; };
+      const mover = (x) => {
+        x.posto = oc.posto; if (oc.funcao) x.funcao = oc.funcao; x.remanejado = true; x.remanej = oc.id;
+        x.req = oc.req || x.req || "";
+        if (oc.obs && !OBS_AUTO_REMANEJ.has(oc.obs)) x.obs = oc.obs;
+        return x;
+      };
       if (d.ini < ra) novos.push({ ...d, id: d.id + "r0", fim: ra });
       novos.push(mover({ ...d, id: d.ini < ra || d.fim > rb ? d.id + "r1" : d.id, ini: Math.max(d.ini, ra), fim: Math.min(d.fim, rb), bhDebito: d.fim <= rb ? d.bhDebito : 0 }));
       if (d.fim > rb) novos.push({ ...d, id: d.id + "r2", ini: rb });
@@ -464,4 +472,37 @@ export function planejarCobertura(data, dias) {
     }
   }
   return plano;
+}
+
+// Monta o horário fixo a partir de faixas ("07-12 13-19") e das horas de HE fixa por dia:
+// as últimas N horas viram hora extra fixa, como no padrão impresso ("13:00/19:00 3HE").
+export function montarSegmentos(faixas, heMin = 0) {
+  let partes = faixas.map(([i, f]) => intervalo(i, f)).sort((x, y) => x[0] - y[0]);
+  if (partes.length && partes[0][0] < 420 && partes.some(([a]) => a >= 900)) partes = partes.map(([a, b]) => (a < 420 ? [a + 1440, b + 1440] : [a, b])).sort((x, y) => x[0] - y[0]);
+  const unidos = [];
+  for (const [a, b] of partes) { if (unidos.length && a <= unidos.at(-1)[1]) unidos.at(-1)[1] = Math.max(b, unidos.at(-1)[1]); else unidos.push([a, b]); }
+  const segs = unidos.map(([a, b]) => ({ a, b, tipo: "normal" }));
+  let resto = heMin;
+  for (let i = segs.length - 1; i >= 0 && resto > 0; i--) {
+    const s = segs[i], dur = s.b - s.a;
+    if (dur <= resto) { s.tipo = "he"; resto -= dur; }
+    else { segs.splice(i + 1, 0, { a: s.b - resto, b: s.b, tipo: "he" }); s.b -= resto; resto = 0; }
+  }
+  return segs.map((s) => ({ ini: fmtHm(s.a), fim: fmtHm(s.b), tipo: s.tipo }));
+}
+// "07-12 13-19" ou "7h às 12h e 13h às 19h" → [["07:00","12:00"],["13:00","19:00"]]
+export function lerFaixas(txt) {
+  const nums = [...String(txt).matchAll(/(\d{1,2})(?:[:hH.]?(\d{2}))?/g)].map(([, h, m]) => (Number(h) > 24 || Number(m || 0) > 59 ? null : `${String(Number(h) % 24).padStart(2, "0")}:${m || "00"}`));
+  if (nums.length < 2 || nums.length % 2 || nums.includes(null)) return null;
+  const out = [];
+  for (let i = 0; i < nums.length; i += 2) { if (nums[i] === nums[i + 1]) return null; out.push([nums[i], nums[i + 1]]); }
+  return out;
+}
+// Descreve o horário fixo de volta: { faixas: "07:00-12:00 13:00-19:00", heMin: 180 }
+export function descreverSegmentos(segs) {
+  const parts = segs.map((s) => intervalo(s.ini, s.fim)).sort((x, y) => x[0] - y[0]);
+  const heMin = segs.filter((s) => s.tipo === "he").reduce((t, s) => { const [a, b] = intervalo(s.ini, s.fim); return t + b - a; }, 0);
+  const unidos = [];
+  for (const [a, b] of parts) { if (unidos.length && a === unidos.at(-1)[1]) unidos.at(-1)[1] = b; else unidos.push([a, b]); }
+  return { faixas: unidos.map(([a, b]) => `${fmtHm(a)}-${fmtHm(b)}`).join(" "), heMin };
 }

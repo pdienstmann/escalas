@@ -150,7 +150,8 @@ button.chip { cursor: pointer; }
 .tag.he { color: var(--he); border: 1px solid var(--he); } .tag.bh { color: var(--bh); border: 1px solid var(--bh); }
 .tag.troca { color: var(--troca); border: 1px solid var(--troca); } .tag.rem { color: var(--accent); border: 1px solid var(--accent); }
 .tag.furo { color: var(--furo); border: 1px solid var(--furo); }
-.req { font-size: .66rem; color: var(--pdf-red); font-weight: 600; }
+.req { font-size: .66rem; color: var(--pdf-red); font-weight: 600; white-space: nowrap; }
+.chip .nm { min-width: 0; overflow-wrap: anywhere; } .chip .hr { white-space: nowrap; } .chip .tag, .chip .req { flex: none; }
 .furo { display: block; width: 100%; margin-top: .15rem; border: 1px dashed var(--furo); color: var(--furo); background: var(--furo-bg); border-radius: 5px; padding: .3rem .35rem; text-align: left; font: 600 .8rem var(--f-grid); cursor: pointer; }
 .furo:hover { border-style: solid; }
 
@@ -284,7 +285,8 @@ table.hist tr.atual td { font-weight: 600; background: var(--accent-soft); }
 .pt th.p { text-align: center; font-size: 10px; } .pt .sub { color: var(--paper-red); font-size: 9px; }
 .pt td.gn { text-align: center; } .pt td.gh { text-align: center; font-weight: 400; white-space: nowrap; }
 .pt td.gn .r { font-size: 8px; font-weight: 400; }
-.pt td.gn > div, .pt td.gh > div { min-height: 13px; }
+.pt .req-l { display: block; font-size: 8px; line-height: 10px; height: 10px; } .pt td.gn .req-l { font-weight: 600; }
+.pt td.gn > div, .pt td.gh > div { min-height: 13px; box-sizing: border-box; } .pt td.gh > div { display: flex; align-items: center; justify-content: center; gap: .3em; }
 .pt td.c { text-align: center; } .pt td.r, .pt .r { color: var(--paper-red); }
 .pt .reserva { background: #9900ff; color: #fff; } .pt .he { background: #93c47d; } .pt .bh { background: #f1c232; } .pt .troca { background: #d2ecea; }
 .pt .rondas-p { background: #ffff00; font-size: 9px; } .pt .furo-p { color: var(--paper-red); }
@@ -401,6 +403,30 @@ table.quadro tr.em-grupo th.posto { box-shadow: inset 4px 0 0 var(--accent); }
 .ed-modo label { display: flex; gap: .35rem; align-items: center; cursor: pointer; }
 .brasoes-aj { align-items: center; } .bras-prev { height: 48px; width: auto; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
 .ajustes textarea { font: inherit; padding: .4rem .5rem; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); color: var(--ink); max-width: 100%; }
+
+/* aba padrões */
+.desde { display: flex; gap: .4rem; align-items: center; font-size: .88rem; color: var(--muted); }
+.desde input { padding: .35rem .5rem; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); }
+.abas-pad { display: flex; gap: .3rem; flex-wrap: wrap; }
+.abas-pad button { border: 1px solid var(--line-strong); background: var(--surface); border-radius: 8px; padding: .45rem .8rem; font-weight: 600; cursor: pointer; color: var(--muted); }
+.abas-pad button[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+table.quadro.padrao { min-width: 720px; }
+table.quadro.padrao td { vertical-align: top; }
+table.quadro.padrao td.dif { box-shadow: inset 0 0 0 2px var(--furo); }
+.pgm { display: flex; flex-wrap: wrap; gap: .1rem .4rem; align-items: baseline; width: 100%; text-align: left; border: 1px solid transparent; background: none; border-radius: 5px; padding: .2rem .35rem; cursor: pointer; font: 600 .9rem var(--f-grid); color: var(--ink); }
+.pgm:hover, .pgm:focus-visible { border-color: var(--accent); background: var(--surface); }
+.pgm small { font: 600 .66rem var(--f-ui); color: var(--muted); }
+.pgm .num { margin-left: auto; font: 400 .74rem var(--f-num); color: var(--muted); }
+.pgm.he { background: var(--he-bg); color: var(--he-txt); }
+.pgm.sem { opacity: .9; }
+.dif-txt { display: block; font-size: .72rem; font-weight: 700; color: var(--furo); padding: .1rem .35rem; }
+.vaga-ref { display: block; border: 1px dashed var(--furo); color: var(--furo); background: var(--furo-bg); border-radius: 5px; padding: .2rem .4rem; font: 600 .78rem var(--f-grid); margin: .15rem 0; }
+table.lanc.pad-sem td { vertical-align: middle; }
+/* formulário de horário fixo */
+.form-hf .cresce { flex: 1 1 200px; }
+.form-hf .cresce input { width: 100%; }
+.dias-sem { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.dia-chk { display: inline-flex !important; align-items: center; gap: .2rem; border: 1px solid var(--line-strong); border-radius: 5px; padding: .15rem .4rem; font-weight: 700; color: var(--ink) !important; cursor: pointer; }
 
 /* modo colar (como o pincel do Excel) */
 .colando { position: fixed; z-index: 65; left: 50%; transform: translateX(-50%); top: calc(env(safe-area-inset-top, 0px) + 8px); display: flex; gap: 1rem; align-items: center; background: var(--accent); color: var(--accent-ink); padding: .5rem .9rem; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.25); max-width: calc(100% - 32px); }
@@ -563,6 +589,7 @@ td.m-furo button:hover { outline: 2px solid var(--ink); }
   <nav class="abas" aria-label="Seções">
     <a href="#pendencias" data-nav="pendencias">Semana</a>
     <a href="#quadro" data-nav="quadro">Quadro do dia</a>
+    <a href="#padroes" data-nav="padroes">Padrões</a>
     <a href="#lancamentos" data-nav="lancamentos">Lançamentos</a>
     <a href="#mes" data-nav="mes">Mês e horas</a>
     <a href="#folha" data-nav="folha">Folha</a>

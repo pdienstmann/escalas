@@ -227,6 +227,18 @@ test("remanejamento parcial: só o trecho escolhido muda de posto", () => {
   assert.equal(livroMes(data, "2026-11").get("a").he, 0);
 });
 
+test("REQ e observação gravados no remanejamento aparecem no trecho remanejado", () => {
+  const data = base();
+  const d = diaDe(data, "D1");
+  data.ocorrencias.push({ id: "r", tipo: "REMANEJ", gm: "a", de: d, ate: d, posto: "hosp", ini: "13:00", fim: "19:00", req: "777", obs: "pedido da SMS" }); data._versao++;
+  const x = calcularDia(data, d).designacoes.filter((y) => y.gm === "a");
+  const rem = x.find((y) => y.posto === "hosp");
+  assert.equal(rem.req, "777"); assert.equal(rem.obs, "pedido da SMS"); assert.equal(rem.remanej, "r");
+  assert.equal(x.find((y) => y.posto === "vtr").req || "", "");
+  data.ocorrencias[data.ocorrencias.length - 1].obs = "Da reserva técnica"; data._versao++;
+  assert.ok(!calcularDia(data, d).designacoes.find((y) => y.posto === "hosp" && y.gm === "a").obs);
+});
+
 test("horário que alterna conforme o padrão do dia", () => {
   const data = base();
   const h = data.gms.find((g) => g.id === "h");
@@ -277,4 +289,23 @@ test("sugestão de HE: escala oposta do posto, depois quem está no posto no per
   const s = sugerir(data, d, "vtr", 1140, 1500).he.map((x) => x.gm.id); // furo à noite no posto vtr
   assert.equal(s[0], "c"); // lotado no vtr, de folga hoje
   assert.equal(s[1], "b"); // está no vtr hoje de dia: pode estender
+});
+
+test("horário fixo: faixas + horas de HE fixa viram segmentos como no padrão, e voltam", async () => {
+  const { montarSegmentos, lerFaixas, descreverSegmentos } = await import("./engine.js");
+  const segs = montarSegmentos(lerFaixas("07-12 13-19"), 180);
+  assert.deepEqual(segs, [{ ini: "07:00", fim: "12:00", tipo: "normal" }, { ini: "13:00", fim: "16:00", tipo: "normal" }, { ini: "16:00", fim: "19:00", tipo: "he" }]);
+  assert.deepEqual(descreverSegmentos(segs), { faixas: "07:00-12:00 13:00-19:00", heMin: 180 });
+  assert.deepEqual(montarSegmentos(lerFaixas("18h às 0h e 0h às 7h"), 60).map((s) => s.ini + "-" + s.fim + s.tipo), ["18:00-06:00normal", "06:00-07:00he"]);
+  assert.equal(lerFaixas("7-12 13"), null);
+});
+
+test("HE fixa estendida no dia continua HE fixa (3HE → 4HE) e pode ser removida no dia", () => {
+  const data = base();
+  const d = "2026-11-02";
+  data.ocorrencias.push({ id: "x", tipo: "HORARIO", gm: "h", de: d, alvo: "960-1080", ini: "16:00", fim: "19:00", semHE: true }); data._versao++;
+  const he = calcularDia(data, d).designacoes.filter((x) => x.gm === "h" && x.fixa);
+  assert.deepEqual(he.map((x) => [x.ini, x.fim, x.nat]), [[960, 1140, "he"]]);
+  data.ocorrencias[0] = { id: "x", tipo: "HORARIO", gm: "h", de: d, alvo: "960-1080", ini: "16:00", fim: "17:00", remover: true }; data._versao++;
+  assert.equal(calcularDia(data, d).designacoes.filter((x) => x.gm === "h" && x.fixa).length, 0);
 });
