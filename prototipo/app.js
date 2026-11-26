@@ -1,7 +1,7 @@
 import {
   TURNOS, TIPOS, AFASTAMENTOS, calcularDia, sugerir, livroMes, resumoMes, saldoBH, somaDias, diaSemana, diasDoMes,
   mesDe, mesSeguinte, fmtHm, fmtHoras, intervalo, sobrepoe, trabalhaNoDia, hm, planejarCobertura, vigente, TIPOS_REQ, montarSegmentos, lerFaixas, descreverSegmentos,
-  limitarExtensao, horarioEja, horarioProposto, pendencias, diaFinalizado, afastamentoNoDia, heDoDia, diasEmAberto, controleMes, previstaMes,
+  limitarExtensao, cargoProprio, horarioEja, horarioProposto, pendencias, diaFinalizado, afastamentoNoDia, heDoDia, diasEmAberto, controleMes, previstaMes,
 } from "./engine.js";
 import { criarExemplo } from "./seed.js";
 import { interpretar, norm } from "./comando.js";
@@ -999,6 +999,7 @@ function popPosto(s) {
       <label>Seção <select id="ps-secao">${data.secoes.map((x) => `<option value="${x.id}" ${x.id === p.secao ? "selected" : ""}>${esc(x.nome)}</option>`).join("")}</select></label>
       <b>Quantos GMs por turno</b>${stepper("ps-v", p.vagas)}
       <label class="toggle"><input type="checkbox" id="ps-rondas" ${p.rondas ? "checked" : ""}> Quando ninguém estiver aqui, mostrar "VTR/RONDAS FREQUENTES"</label>
+      <label class="toggle"><input type="checkbox" id="ps-cargo" ${cargoProprio(p) ? "checked" : ""}> Outro cargo (ex.: operadores do videomonitoramento): quem é lotado aqui só faz HE aqui</label>
       <div class="pop-acoes"><button class="btn pri grande" data-act="posto-salvar">Salvar</button>
         <button class="btn" data-act="posto-mover" data-d="-1" ${pos <= 0 ? "disabled" : ""}>↑ Subir</button><button class="btn" data-act="posto-mover" data-d="1" ${pos >= idxs.length - 1 ? "disabled" : ""}>↓ Descer</button></div>
       <p class="dica">Vale para todos os dias. Para mudar só um dia, use a aba "Só em ${ddmm(ui.dia)}".</p>
@@ -2373,7 +2374,7 @@ document.addEventListener("click", (e) => {
     case "posto-salvar": {
       const p = postoPorId(ui.pop.posto), nome = $("#ps-nome").value.trim().toUpperCase();
       if (!nome) { toast("O nome não pode ficar vazio."); return; }
-      const novo = { nome, sub: $("#ps-sub").value.trim().toUpperCase(), tipo: $("#ps-tipo").value, secao: $("#ps-secao").value, vagas: lerStepper("ps-v"), rondas: $("#ps-rondas").checked, dias: $("#ps-dias").value ? [1, 2, 3, 4, 5] : undefined };
+      const novo = { nome, sub: $("#ps-sub").value.trim().toUpperCase(), tipo: $("#ps-tipo").value, secao: $("#ps-secao").value, vagas: lerStepper("ps-v"), rondas: $("#ps-rondas").checked, cargoProprio: $("#ps-cargo").checked, dias: $("#ps-dias").value ? [1, 2, 3, 4, 5] : undefined };
       fecharPop();
       mudar(`${nome} atualizado para todos os dias`, () => { Object.assign(p, novo); if (!novo.sub) delete p.sub; if (!novo.dias) delete p.dias; if (novo.tipo === "posto") delete p.tipo; });
       return;

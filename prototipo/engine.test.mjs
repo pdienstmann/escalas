@@ -374,3 +374,16 @@ test("função no dia e inspetor da escala mensal", () => {
   data.ocorrencias.push({ id: "in", tipo: "INSPETOR", equipe: "D1", de: d, ate: d, nome: "DO DIA" }); data._versao++;
   assert.equal(calcularDia(data, d).inspetores.get("D1"), "DO DIA");
 });
+
+test("operador do videomonitoramento só faz HE lá; guarda pode cobrir o videomonitoramento", () => {
+  const data = base();
+  data.postos.push({ id: "video", nome: "VIDEOMONITORAMENTO", vagas: { t2: 1, t3: 1 } });
+  data.equipes.push({ id: "D3", tipo: "alternado", paridade: 1, periodo: "dia" });
+  data.gms.push({ id: "op", nome: "OP", equipe: "D3", lotacao: { posto: "video", segmentos: [{ ini: "07:00", fim: "19:00" }] } });
+  data._versao++;
+  const d = diaDe(data, "D1");
+  assert.ok(!sugerir(data, d, "vtr", 420, 1140).he.some((x) => x.gm.id === "op"));
+  const v = sugerir(data, d, "video", 420, 1140).he.map((x) => x.gm.id);
+  assert.ok(v.includes("op") && v.includes("c"));
+  assert.ok(!planejarCobertura(data, [d]).some((x) => x.gm === "op" && x.posto !== "video"));
+});

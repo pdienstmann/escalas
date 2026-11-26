@@ -337,6 +337,14 @@ const compararPrioridade = (teto) => (a, b) => {
   for (let i = 0; i < pa.length; i++) if (pa[i] !== pb[i]) return pa[i] - pb[i];
   return a.gm.nome.localeCompare(b.gm.nome);
 };
+// Posto de outro cargo (ex.: videomonitoramento, operadores que não são guardas): quem é lotado ali só faz HE ali.
+// Guardas podem cobrir esse posto normalmente.
+export const cargoProprio = (p) => !!p && (p.cargoProprio ?? /VIDEOMONITORAMENTO/i.test(p.nome || ""));
+export function podeCobrir(data, gm, dia, postoId) {
+  const lot = vigente(gm, dia).lotacao?.posto;
+  if (lot === postoId) return true;
+  return !cargoProprio(data.postos.find((x) => x.id === lot));
+}
 // Duas saídas: remanejar quem está na reserva técnica / à disposição (sem custo) ou chamar HE.
 export function sugerir(data, dia, postoId, ini, fim) {
   const mes = mesDe(dia);
@@ -350,6 +358,7 @@ export function sugerir(data, dia, postoId, ini, fim) {
   for (const gm of data.gms) {
     if (gm.ativo === false) continue;
     if (afastados.has(gm.id)) continue;
+    if (!podeCobrir(data, gm, dia, postoId)) continue;
     const minhas = cd.designacoes.filter((d) => d.gm === gm.id);
     const l = livro.get(gm.id) || { he: 0, transporte: 0 };
     const lotPosto = vigente(gm, dia).lotacao?.posto;
@@ -552,7 +561,7 @@ export function planejarCobertura(data, dias) {
       const mes = mesDe(dia);
       let melhor = null;
       for (const gm of data.gms) {
-        if (gm.ativo === false || gm.naoFazHE || afast.has(gm.id)) continue;
+        if (gm.ativo === false || gm.naoFazHE || afast.has(gm.id) || !podeCobrir(data, gm, dia, p.posto)) continue;
         if ((ocup.get(gm.id) || []).some(([a, b]) => sobrepoe(a, b, p.ini, p.fim) > 0)) continue;
         const l = livro.get(gm.id) || { he: 0, transporte: 0 };
         const x = { gm, heMes: l.he + (heExtra.get(gm.id + mes) || 0), transporte: l.transporte, mesmoPosto: vigente(gm, dia).lotacao?.posto === p.posto,
