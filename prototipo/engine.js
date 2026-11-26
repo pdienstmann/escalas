@@ -234,7 +234,7 @@ export function calcularDia(data, dia) {
   // 6. Viatura fora de atividade: guarnição vai para "à disposição"
   const fa = new Map();
   for (const oc of ocs.filter((o) => o.tipo === "FA" || o.tipo === "FECHADO")) fa.set(oc.posto, oc);
-  for (const p of data.postos) if (p.ativo === false || (p.so && p.so !== dia)) fa.set(p.id, { tipo: "INATIVO", posto: p.id, de: dia }); // "so": posto/viatura extra de um dia só
+  for (const p of data.postos) if (!postoAtivoEm(p, dia)) fa.set(p.id, { tipo: "INATIVO", posto: p.id, de: dia }); // extras de um dia ("so") e de operação (de/ate)
   // ajustes do dia em postos: viatura substituta e vagas diferentes
   const ajustesPosto = new Map();
   for (const oc of ocs.filter((o) => o.tipo === "PREFIXO" || o.tipo === "VAGAS" || o.tipo === "AREA")) {
@@ -348,6 +348,10 @@ export function podeCobrir(data, gm, dia, postoId) {
   if (lot === postoId) return true;
   return !cargoProprio(data.postos.find((x) => x.id === lot));
 }
+// Posto existe neste dia? (desativado, extra de um dia só, ou equipe de operação com período)
+export const postoAtivoEm = (p, dia) => p.ativo !== false && (!p.so || p.so === dia) && (!p.de || p.de <= dia) && (!p.ate || dia <= p.ate);
+// Seção de operação (anexa à escala, com período e horário próprios)
+export const secaoOperacao = (data, postoId) => { const p = data.postos.find((x) => x.id === postoId); return p ? (data.secoes || []).find((s) => s.id === p.secao && s.operacao) : null; };
 // Duas saídas: remanejar quem está na reserva técnica / à disposição (sem custo) ou chamar HE.
 export function sugerir(data, dia, postoId, ini, fim) {
   const mes = mesDe(dia);
@@ -355,6 +359,9 @@ export function sugerir(data, dia, postoId, ini, fim) {
   const cd = calcularDia(data, dia);
   const reserva = new Set(data.postos.filter((p) => p.tipo === "reserva").map((p) => p.id));
   const livreParaRemanejar = (d) => d.nat !== "he" && d.nat !== "bh" && (d.posto === null || reserva.has(d.posto));
+  // numa operação dá para puxar gente da própria escala do dia (o posto de origem fica com vaga)
+  const op = secaoOperacao(data, postoId);
+  const daEscala = (d) => op && d.nat !== "he" && d.nat !== "bh" && d.posto && d.posto !== postoId && !secaoOperacao(data, d.posto);
   const remanejar = [], he = [];
   const afastados = new Set(data.ocorrencias.filter((o) => (["FERIAS", "LICENCA", "ATESTADO", "CURSO"].includes(o.tipo) && ocorrenciaCobre(o, dia)) || (DE_UM_DIA.includes(o.tipo) && o.de === dia)).map((o) => o.gm));
   const ontemNoite = calcularDia(data, somaDias(dia, -1)).designacoes.filter((d) => d.fim - 1440 > ini && d.ini - 1440 < fim).map((d) => d.gm);
@@ -372,6 +379,9 @@ export function sugerir(data, dia, postoId, ini, fim) {
       if (sobre.every(livreParaRemanejar)) {
         const d = sobre[0];
         remanejar.push({ ...base, origem: d.posto === null ? "À disposição" : data.postos.find((p) => p.id === d.posto)?.nome, ini: d.ini, fim: d.fim });
+      } else if (sobre.every(daEscala)) {
+        const d = sobre[0];
+        remanejar.push({ ...base, origem: data.postos.find((p) => p.id === d.posto)?.nome, ini: d.ini, fim: d.fim, daEscala: true });
       }
       continue;
     }
@@ -392,7 +402,7 @@ export function sugerir(data, dia, postoId, ini, fim) {
     he.push({ ...base, notas, bloqueado: !!gm.naoFazHE });
   }
   he.sort(compararPrioridade((data.config?.tetoHE ?? 60) * 60));
-  remanejar.sort((a, b) => (a.origem === "À disposição" ? 0 : 1) - (b.origem === "À disposição" ? 0 : 1) || a.gm.nome.localeCompare(b.gm.nome));
+  remanejar.sort((a, b) => (a.daEscala ? 1 : 0) - (b.daEscala ? 1 : 0) || (a.origem === "À disposição" ? 0 : 1) - (b.origem === "À disposição" ? 0 : 1) || a.gm.nome.localeCompare(b.gm.nome));
   return { remanejar, he };
 }
 

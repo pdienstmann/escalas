@@ -665,6 +665,16 @@ h2 .n { font-size: .8rem; color: var(--muted); font-weight: 600; margin-left: .3
 .ed-nat { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; margin: .15rem 0 .3rem; }
 .ed-chip.on.bh { background: var(--bh-bg); color: var(--bh-txt); border-color: var(--bh); }
 .ed-req { margin-left: auto; font: .78rem var(--f-num); padding: .15rem .3rem; border: 1px solid var(--line-strong); border-radius: 4px; width: 7rem; background: var(--surface); color: inherit; }
+/* operações */
+:root { --op: #d9480f; --op-bg: #fff0e6; }
+.btn.op-btn { border-color: var(--op); color: var(--op); font-weight: 700; }
+table.quadro tr.secao.operacao th { background: linear-gradient(90deg, var(--op-bg), transparent 80%); border-left: 6px solid var(--op); }
+.op-selo { background: var(--op); color: #fff; font: 800 .65rem var(--f-ui); letter-spacing: .1em; padding: .12rem .4rem; border-radius: 3px; margin-right: .2rem; }
+.op-info { font: 600 .78rem var(--f-ui); color: var(--op); margin-left: .6rem; letter-spacing: 0; text-transform: none; }
+.op-eq { list-style: none; padding: 0; margin: 0 0 .4rem; } .op-eq li { display: flex; gap: .4rem; align-items: baseline; padding: .2rem 0; border-bottom: 1px solid var(--line); } .op-eq .link { margin-left: auto; }
+.op-nova { display: flex; gap: .6rem; align-items: center; padding: .35rem .5rem; background: var(--op-bg); border-radius: 6px; } .op-nova label { display: flex; align-items: center; gap: .3rem; margin-left: auto; } .op-nova input { width: 3.5rem; }
+.aviso-mini { font-size: .72rem; color: var(--warn); font-weight: 600; }
+.pt tr.sec.op th { background: #ffd8bf; }
 /* finalizar escala e controle de HE */
 .btn.fin { border-color: var(--accent); color: var(--accent); font-weight: 600; padding: .2rem .6rem; }
 .fin-ok { color: var(--ok, #2e7d32); font-weight: 600; } .fin-ok .link { font-weight: 400; margin-left: .3rem; }

@@ -1,7 +1,7 @@
 import {
   TURNOS, TIPOS, AFASTAMENTOS, calcularDia, sugerir, livroMes, resumoMes, saldoBH, somaDias, diaSemana, diasDoMes,
   mesDe, mesSeguinte, fmtHm, fmtHoras, intervalo, sobrepoe, trabalhaNoDia, hm, planejarCobertura, vigente, TIPOS_REQ, montarSegmentos, lerFaixas, descreverSegmentos,
-  limitarExtensao, cargoProprio, parseData, horarioEja, horarioProposto, pendencias, diaFinalizado, afastamentoNoDia, heDoDia, diasEmAberto, controleMes, previstaMes,
+  limitarExtensao, cargoProprio, parseData, postoAtivoEm, secaoOperacao, horarioEja, horarioProposto, pendencias, diaFinalizado, afastamentoNoDia, heDoDia, diasEmAberto, controleMes, previstaMes,
 } from "./engine.js";
 import { criarExemplo } from "./seed.js";
 import { interpretar, norm } from "./comando.js";
@@ -174,6 +174,7 @@ function vQuadro() {
   const faPostos = new Map(cd.fa.map((o) => [o.posto, o]));
   let linhas = "";
   for (const s of data.secoes) {
+    if (!opNoDia(s, ui.dia)) continue;
     const postos = data.postos.filter((p) => p.secao === s.id && postoDoDia(p, ui.dia));
     let corpo = "";
     for (const p of postos) {
@@ -205,6 +206,7 @@ function vQuadro() {
     }
     const vazioGrupo = s.grupamento && !cd.designacoes.some((d) => postos.some((p) => p.id === d.posto));
     if (vazioGrupo) continue; // grupamento sem ninguém escalado no dia não aparece
+    if (s.operacao && (corpo || !ui.soFuros)) { linhas += `<tr class="secao operacao"><th colspan="5" scope="rowgroup"><button class="secao-btn" data-act="op-editar" data-secao="${s.id}" title="Editar a operação · botão direito: mais opções"><span class="op-selo">OPERAÇÃO</span> ${esc(s.nome)} <span class="lapis" aria-hidden="true">✎</span></button><span class="op-info">${esc(textoOp(s.operacao))}${s.operacao.obs ? ` · ${esc(s.operacao.obs)}` : ""}</span><button class="link add-sec" data-act="op-editar" data-secao="${s.id}">+ equipe / viatura</button></th></tr>${corpo}`; continue; }
     if (corpo || !ui.soFuros) linhas += `<tr class="secao ${s.grupamento ? "grupo" : ""}"><th colspan="5" scope="rowgroup"><button class="secao-btn" data-act="secao-nome" data-secao="${s.id}" title="Clique para renomear · botão direito: mais opções">${s.grupamento ? ICONES.grupo : ""}${esc(s.nome)} <span class="lapis" aria-hidden="true">✎</span></button>${s.grupamento ? `<span class="selo-grupo">GRUPAMENTO</span>` : ""}<button class="link add-sec" data-act="pad-novo" data-secao="${s.id}">+ posto/viatura</button></th></tr>${corpo}`;
   }
 
@@ -236,6 +238,7 @@ function vQuadro() {
     <span class="${furosTotal ? "ruim" : "bom"}"><b>${furosTotal}</b> ${furosTotal === 1 ? "vaga descoberta" : "vagas descobertas"}</span>
     <span><b>${fmtHoras(heHoje)}</b> de HE</span>
     <button class="btn" data-act="pad-novo" title="Adicionar posto, viatura, seção ou grupamento">+ Posto / viatura</button>
+    <button class="btn op-btn" data-act="op-nova" title="Operação anexa à escala (eventos, reforço especial)">+ Operação</button>
     ${(() => { const a = alteracoesDoDia(ui.dia); return a.ocs.length + a.extras.length ? `<button class="link" data-act="rst-abrir" title="Voltar a escala deste dia para o padrão">Desfazer alterações do dia…</button>` : ""; })()}
     ${diaFinalizado(data, ui.dia) ? `<span class="fin-ok">✓ Escala finalizada <button class="link" data-act="fin-reabrir">reabrir</button></span>` : `<button class="btn fin" data-act="fin-abrir" title="Confirmar as horas extras deste dia e lançar no controle do mês">Finalizar escala…</button>`}
     <span><b>${new Set(cd.designacoes.filter((d) => d.posto).map((d) => d.gm)).size}</b> GMs escalados</span>
@@ -264,8 +267,42 @@ function vDrawer() {
   if (d.tipo === "controle") return drawerControle(d);
   if (d.tipo === "gmnovo") return drawerGmNovo(d);
   if (d.tipo === "resetdia") return drawerResetDia(d);
+  if (d.tipo === "operacao") return drawerOperacao(d);
   if (d.tipo === "folgasmud") return drawerFolgasMud();
   return "";
+}
+// ---------- OPERAÇÕES (seção anexa à escala) ----------
+// Uma operação é uma seção com período e horário próprios; cada equipe é um posto (viatura da frota, viatura nova ou equipe a pé)
+// que só existe nesses dias. O efetivo vem da escala do dia (remanejado no horário da operação), de HE, BH+ ou troca.
+const ehMoto = (modelo) => /XRE|NX|MOTO|CG|BROS|TITAN/i.test(modelo || "");
+function vagasDoHorario(ini, fim, n) {
+  const [a, b] = intervalo(ini, fim), v = {};
+  for (const t of TURNOS) v[t.id] = sobrepoe(a, b, t.ini, t.fim) >= 60 ? n : 0;
+  return v;
+}
+function drawerOperacao(d) {
+  const s = d.secao ? data.secoes.find((x) => x.id === d.secao) : null, o = s?.operacao || {}, cd = calcularDia(data, ui.dia);
+  const existentes = s ? data.postos.filter((p) => p.secao === s.id && p.ativo !== false) : [];
+  const usoNaEscala = (pref) => data.postos.find((p) => p.ativo !== false && !secaoOperacao(data, p.id) && numeroDe(nomeNoDia(p, cd)) === String(pref) && cd.designacoes.some((x) => x.posto === p.id));
+  const livres = (data.frota || []).filter((v) => v.situacao === "QAP").sort((a, b) => !!usoNaEscala(a.prefixo) - !!usoNaEscala(b.prefixo) || String(a.prefixo).localeCompare(String(b.prefixo)));
+  const novas = d.novas || [];
+  return `<div class="dw-head"><div><p class="eyebrow">Anexo da escala</p><h2>${s ? `Operação ${esc(s.nome)}` : "Nova operação"}</h2>
+    <p class="meta">Aparece no quadro e na folha só nos dias dela. Depois de criada, use "+ pôr GM" em cada equipe: dá para tirar GMs da escala do dia (no horário da operação), chamar em HE ou BH+, ou lançar troca.</p></div>
+    <button class="ic" data-act="fechar" aria-label="Fechar">×</button></div>
+  <div class="dw-body"><div class="form-lanc">
+    <label>Nome <input id="op-nome" value="${esc(s?.nome || "")}" placeholder="ex.: VERÃO 2027, JOGO NO ESTÁDIO"></label>
+    <label>Local <input id="op-local" value="${esc(o.local || "")}" placeholder="opcional"></label>
+    <div class="linha"><label>De <input type="date" id="op-de" value="${o.de || ui.dia}"></label><label>Até <input type="date" id="op-ate" value="${o.ate || ui.dia}"></label></div>
+    <div class="linha"><label>Início <input type="time" id="op-ini" value="${o.ini || "19:00"}"></label><label>Fim <input type="time" id="op-fim" value="${o.fim || "03:00"}"></label></div>
+    <label>Observação <input id="op-obs" value="${esc(o.obs || "")}" placeholder="ex.: briefing às 18h na sede"></label>
+    <h3>Equipes e viaturas</h3>
+    ${existentes.length ? `<ul class="op-eq">${existentes.map((p) => `<li><b>${esc(p.nome)}</b>${p.sub ? ` <span class="meta">${esc(p.sub)}</span>` : ""} <span class="meta">· ${Math.max(...Object.values(p.vagas || { a: 0 }))} GM</span><button class="link" data-act="op-tirar" data-posto="${p.id}">tirar</button></li>`).join("")}</ul>` : ""}
+    ${novas.map((n, i) => `<div class="op-nova"><b>${esc(n.nome)}</b>${n.uso ? ` <span class="aviso-mini">está na escala em ${esc(n.uso)}</span>` : ""}<label>GMs <input type="number" min="1" max="9" value="${n.n}" data-opn="${i}" size="3"></label><button class="link" data-act="op-nova-tirar" data-i="${i}">tirar</button></div>`).join("")}
+    <div class="linha op-add"><label class="cresce">Viatura da frota <select id="op-frota"><option value="">escolha…</option>${livres.map((v) => { const u = usoNaEscala(v.prefixo); return `<option value="${esc(v.prefixo)}">${esc(v.prefixo)} · ${esc(v.modelo)}${u ? ` (na escala: ${esc(u.nome)})` : " (livre)"}</option>`; }).join("")}</select></label><button class="btn" data-act="op-add-frota">Adicionar</button></div>
+    <div class="linha op-add"><label class="cresce">Outra viatura ou equipe <input id="op-outra" placeholder="ex.: VTR 1399, MOTO 651, EQUIPE A PÉ 1"></label><button class="btn" data-act="op-add-outra">Adicionar</button></div>
+    <button class="btn pri largo" data-act="op-salvar">${s ? "Salvar operação" : "Criar operação"}</button>
+    ${s ? `<p class="dica">Para excluir a operação, clique com o botão direito no nome dela no quadro › Excluir seção.</p>` : ""}
+  </div></div>`;
 }
 // ---------- RESET DAS ALTERAÇÕES DO DIA ----------
 // Só o que foi mexido no próprio dia (HE, BH+, horário, remanejamento, função, ajustes do posto, inspetor, extras).
@@ -899,13 +936,14 @@ function vFolha() {
   };
   let corpo = "", corpoVerso = "";
   for (const s of data.secoes) {
+    if (!opNoDia(s, ui.dia)) continue;
     const ps = data.postos.filter((p) => p.secao === s.id && postoDoDia(p, ui.dia) && faPostos.get(p.id)?.tipo !== "FA" // viatura em FA não sai na folha
       && (p.rondas || faPostos.has(p.id) || cd.designacoes.some((d) => d.posto === p.id) || cd.furos.some((f) => f.posto === p.id))); // nem posto vazio sem vaga
     if (!ps.length) continue;
     const verso = ps.every((p) => p.tipo === "reserva");
     if (s.grupamento && !cd.designacoes.some((d) => ps.some((p) => p.id === d.posto))) continue;
     let html = "";
-    html += `<tr class="sec ${s.grupamento ? "grupo" : ""}"><th>${esc(s.nome)}</th>${TURNOS.map((t) => `<th>${t.nome.split(" ")[0]}</th><th>TURNO</th>`).join("")}</tr>`;
+    html += `<tr class="sec ${s.grupamento ? "grupo" : ""} ${s.operacao ? "op" : ""}"><th>${s.operacao ? `ANEXO · OPERAÇÃO ${esc(s.nome)}<br><span class="sub">${esc(textoOp(s.operacao))}</span>` : esc(s.nome)}</th>${TURNOS.map((t) => `<th>${t.nome.split(" ")[0]}</th><th>TURNO</th>`).join("")}</tr>`;
     html += ps.map((p) => `<tr><th class="p">${esc(nomeNoDia(p, cd))}${subNoDia(p, cd) && p.tipo !== "reserva" ? `<br><span class="sub">${esc(subNoDia(p, cd))}</span>` : ""}${p.obs ? `<br><span class="sub">(${esc(p.obs)})</span>` : ""}</th>${TURNOS.map((t) => cel(p, t)).join("")}</tr>`).join("");
     if (verso) corpoVerso += html; else corpo += html;
   }
@@ -1023,7 +1061,7 @@ function vPendencias() {
   const naReserva = porDia[0].cd.designacoes.filter((x) => postoPorId(x.posto)?.tipo === "reserva").length;
 
   // mapa da semana
-  const postos = data.postos.filter((p) => p.ativo !== false && !p.so && p.vagas && Object.values(p.vagas).some(Boolean));
+  const postos = data.postos.filter((p) => p.ativo !== false && !p.so && !p.de && p.vagas && Object.values(p.vagas).some(Boolean));
   const linhas = data.secoes.map((s) => {
     const ps = postos.filter((p) => p.secao === s.id);
     if (!ps.length) return "";
@@ -1313,7 +1351,9 @@ function popNovo(s) {
 }
 // complemento (área / finalidade) do posto naquele dia: o do dia, se houver, senão o do cadastro
 const subNoDia = (p, cd) => { const a = cd?.ajustesPosto?.get(p.id)?.area; return a ? a.sub : p.sub || ""; };
-const postoDoDia = (p, dia) => p.ativo !== false && (!p.so || p.so === dia);
+const postoDoDia = (p, dia) => postoAtivoEm(p, dia);
+const opNoDia = (s, dia) => !s.operacao || (s.operacao.de <= dia && dia <= s.operacao.ate);
+const textoOp = (o) => `${o.local ? `${o.local} · ` : ""}${o.de === o.ate ? ddmm(o.de) : `${ddmm(o.de)} a ${ddmm(o.ate)}`} · ${o.ini}–${o.fim}`;
 function nomeNoDia(p, cd) {
   const pre = cd?.ajustesPosto?.get(p.id)?.prefixo;
   return pre ? `${pre.nome} (no lugar da ${p.nome.replace(/^(NOITE )?(VTR|MT) /, "")})` : p.nome;
@@ -1983,7 +2023,7 @@ function atualizarLista() {
   ed.lista = todos.slice(0, 25); // mais opções, com rolagem (as mesmas informações de cada uma)
   if (ed.sel >= ed.lista.length) ed.sel = 0;
   $("#ed-lista").innerHTML = ed.lista.length ? ed.lista.map((x, i) => `<li role="option" id="ed-op-${i}" aria-selected="${i === ed.sel}" aria-disabled="${!!x.bloqueado}" data-i="${i}" class="${x.bloqueado ? "bloq" : ""}">
-    <b>${esc(x.gm.nome)}</b><span>${x.via === "pad" ? esc(x.notas[0]) : x.via === "rem" ? `${esc(x.origem.toLowerCase())} · remanejar` : `${x.notas?.length ? esc(x.notas[0]) + " · " : ""}${fmtHoras(x.heMes + x.transporte)} HE no mês`}</span></li>`).join("")
+    <b>${esc(x.gm.nome)}</b><span>${x.via === "pad" ? esc(x.notas[0]) : x.via === "rem" ? `${esc(x.origem.toLowerCase())} · ${x.daEscala ? "tirar da escala (abre vaga lá)" : "remanejar"}` : `${x.notas?.length ? esc(x.notas[0]) + " · " : ""}${fmtHoras(x.heMes + x.transporte)} HE no mês`}</span></li>`).join("")
     + (todos.length > 25 ? `<li class="ed-resto" aria-hidden="true">+ ${todos.length - 25} — continue digitando</li>` : "")
     : `<li class="ed-resto">Ninguém livre com esse nome nesse horário</li>`;
   $("#ed-in").setAttribute("aria-activedescendant", ed.lista.length ? `ed-op-${ed.sel}` : "");
@@ -2005,8 +2045,10 @@ function escolherEditor(i) {
   if (modo === "padrao") { colocarNoPadrao(x.gm, ctx.posto, ctx.per); return; }
   if (modo === "add") {
     const [vi, vf] = ctx.ini != null ? [ctx.ini, ctx.fim] : intervaloVaga(ctx.posto, ctx.turno), pn = postoPorId(ctx.posto).nome;
-    if (x.via === "rem") mudar(`${nomeGm(X)} remanejado para ${pn}`, () => data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: X, de: ui.dia, ate: ui.dia, posto: ctx.posto }));
-    else lancarHE(X, vi, vf, ctx.posto, ctx.nat, reqEd);
+    if (x.via === "rem") {
+      const op = secaoOperacao(data, ctx.posto), parcial = op ? { ini: fmtHm(Math.max(vi, x.ini)), fim: fmtHm(Math.min(vf, x.fim)) } : {};
+      mudar(`${nomeGm(X)} remanejado para ${pn}${op ? ` (${parcial.ini}–${parcial.fim})` : ""}${x.daEscala ? ` · abre vaga em ${x.origem}` : ""}`, () => data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: X, de: ui.dia, ate: ui.dia, posto: ctx.posto, ...parcial }));
+    } else lancarHE(X, vi, vf, ctx.posto, ctx.nat, reqEd);
     return;
   }
   if (ehHeLancada(d)) { mudar(`Hora extra passou para ${nomeGm(X)}`, () => { data.ocorrencias.find((o) => o.id === d.origem).gm = X; }); return; }
@@ -2325,8 +2367,8 @@ function vPadroes() {
     const eqs = pd.aba === "impar" ? eqImp : eqPar, outros = pd.aba === "impar" ? eqPar : eqImp;
     const pessoa = ({ g, v }, extra = "") => `<button class="pgm ${extra}" data-act="pad-gm" data-gm="${g.id}" title="Clique ou botão direito para editar">${v.lotacao?.funcao && (emVtr(v.lotacao.posto) || !ICO_FUNCAO[v.lotacao.funcao]) ? `<small title="${esc(v.lotacao.funcao)}">${icoFuncao(v.lotacao.funcao) || esc(v.lotacao.funcao)}</small> ` : ""}${esc(g.nome)}${extra === "sem" ? ` <span class="tag rem">seg–sex</span>` : ""}<span class="num">${textoHorario(v.lotacao?.segmentos)}</span></button>`;
     const periodoDe = (segs) => { const [a] = segs?.length ? intervalo(segs[0].ini, segs[0].fim) : [420]; return a >= 900 || a < 300 ? "noite" : "dia"; };
-    corpo = data.secoes.map((s) => {
-      const linhas = data.postos.filter((p) => p.secao === s.id && p.ativo !== false && !p.so).map((p) => {
+    corpo = data.secoes.filter((s) => !s.operacao).map((s) => {
+      const linhas = data.postos.filter((p) => p.secao === s.id && p.ativo !== false && !p.so && !p.de && !s.operacao).map((p) => {
         let tem = 0;
         const cel = (per) => {
           const aqui = ativos.filter(({ v }) => eqs.includes(v.equipe) && equipe(v.equipe).periodo === per && v.lotacao?.posto === p.id);
@@ -2801,6 +2843,44 @@ document.addEventListener("click", (e) => {
       if (imp.competencia) { syncFolgas.mudancas = syncFolgas.mudancas.filter((x) => x.mes !== imp.competencia.mes); syncFolgas.prontos = syncFolgas.prontos.filter((m) => m !== imp.competencia.mes); try { localStorage.removeItem("folgas-cache2"); } catch { /* ignora */ } mostrarSeloFolgas(); }
       return;
     }
+    case "op-nova": ui.drawer = { tipo: "operacao", novas: [] }; render(); $("#op-nome")?.focus(); return;
+    case "op-editar": ui.drawer = { tipo: "operacao", secao: el.dataset.secao, novas: [] }; render(); return;
+    case "op-add-frota": case "op-add-outra": {
+      const d = ui.drawer, campos = ["op-nome", "op-local", "op-de", "op-ate", "op-ini", "op-fim", "op-obs"].map((id) => [id, $("#" + id).value]);
+      let item;
+      if (el.dataset.act === "op-add-frota") {
+        const pref = $("#op-frota").value; if (!pref) { toast("Escolha a viatura."); return; }
+        const v = data.frota.find((x) => String(x.prefixo) === pref), cd = calcularDia(data, ui.dia);
+        const u = data.postos.find((p) => p.ativo !== false && !secaoOperacao(data, p.id) && numeroDe(nomeNoDia(p, cd)) === pref && cd.designacoes.some((x) => x.posto === p.id));
+        item = { nome: `${ehMoto(v?.modelo) ? "MT" : "VTR"} ${pref}`, tipo: ehMoto(v?.modelo) ? "moto" : "vtr", n: ehMoto(v?.modelo) ? 1 : 2, uso: u?.nome || "" };
+      } else {
+        const t = $("#op-outra").value.trim().toUpperCase(); if (!t) { toast("Escreva a viatura ou equipe."); return; }
+        item = { nome: t, tipo: /^(VTR|VIATURA)/.test(t) ? "vtr" : /^(MT|MOTO)/.test(t) ? "moto" : "posto", n: /^(MT|MOTO)/.test(t) ? 1 : 2 };
+      }
+      d.novas = [...(d.novas || []), item]; render();
+      for (const [id, v] of campos) if ($("#" + id)) $("#" + id).value = v;
+      return;
+    }
+    case "op-nova-tirar": { const d = ui.drawer, campos = ["op-nome", "op-local", "op-de", "op-ate", "op-ini", "op-fim", "op-obs"].map((id) => [id, $("#" + id).value]); d.novas.splice(Number(el.dataset.i), 1); render(); for (const [id, v] of campos) $("#" + id).value = v; return; }
+    case "op-tirar": { const p = postoPorId(el.dataset.posto); mudar(`${p.nome} saiu da operação`, () => { p.ativo = false; }); return; }
+    case "op-salvar": {
+      const d = ui.drawer, nome = $("#op-nome").value.trim().toUpperCase(), de = $("#op-de").value, ate = $("#op-ate").value || de, ini = $("#op-ini").value, fim = $("#op-fim").value;
+      if (!nome) { toast("Dê um nome à operação."); $("#op-nome").focus(); return; }
+      if (!de || ate < de) { toast("Confira as datas."); return; }
+      if (!ini || !fim) { toast("Informe o horário."); return; }
+      const meta = { de, ate, ini, fim, local: $("#op-local").value.trim(), obs: $("#op-obs").value.trim() };
+      const s0 = d.secao ? data.secoes.find((x) => x.id === d.secao) : null;
+      if (!s0 && !(d.novas || []).length) { toast("Adicione pelo menos uma viatura ou equipe."); return; }
+      mudar(`Operação ${nome}${s0 ? " atualizada" : " criada"}: ${textoOp(meta)}`, () => {
+        const s = s0 || { id: "s" + novoId(), nome, operacao: meta };
+        if (!s0) data.secoes.push(s); else { s.nome = nome; s.operacao = meta; }
+        for (const p of data.postos.filter((x) => x.secao === s.id)) { const n = Math.max(1, ...Object.values(p.vagas || {})); Object.assign(p, { de, ate, reforco: { ini, fim }, vagas: vagasDoHorario(ini, fim, n) }); }
+        for (const n of d.novas || []) data.postos.push({ id: "p" + novoId(), secao: s.id, nome: n.nome, ...(n.tipo !== "posto" ? { tipo: n.tipo } : {}), vagas: vagasDoHorario(ini, fim, Number(n.n) || 1), reforco: { ini, fim }, de, ate, ...(meta.local ? { sub: meta.local.toUpperCase() } : {}) });
+        ui.drawer = null;
+        if (ui.dia < de || ui.dia > ate) ui.dia = de;
+      });
+      return;
+    }
     case "rst-abrir": ui.drawer = { tipo: "resetdia", fora: [] }; render(); return;
     case "rst-ok": {
       const fora = new Set(ui.drawer.fora || []), { ocs, extras } = alteracoesDoDia(ui.dia);
@@ -3174,6 +3254,7 @@ document.addEventListener("change", (e) => {
     });
     return;
   }
+  if (e.target.dataset?.opn) { ui.drawer.novas[Number(e.target.dataset.opn)].n = Number(v) || 1; return; }
   if (e.target.dataset?.rst) {
     const f = new Set(ui.drawer.fora || []); if (e.target.checked) f.delete(e.target.dataset.rst); else f.add(e.target.dataset.rst); ui.drawer.fora = [...f];
     const n = document.querySelectorAll("[data-rst]:checked").length; $("[data-act=rst-ok]").textContent = `Desfazer ${n} alteraç${n === 1 ? "ão" : "ões"}`; return;
