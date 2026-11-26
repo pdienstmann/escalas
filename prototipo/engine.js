@@ -471,6 +471,8 @@ export function diasEmAberto(data, mes, ate) {
 // HE confirmada no controle, com o teto e o que passa para o mês seguinte (mesma regra de livroMes)
 export function controleMes(data, mes) {
   const teto = (data.config?.tetoHE ?? 60) * 60, ctl = (data.controle || []).filter((c) => c.tipo === "HE");
+  // valores digitados à mão no mês (o controle é só uma referência; o RH é quem fecha)
+  const fixo = (tipo, mes, gm) => (data.controle || []).find((c) => c.tipo === tipo && c.mes === mes && c.gm === gm);
   let m = data.config?.mesInicial || mes;
   if (mes < m) m = mes;
   const transporte = new Map(Object.entries(data.config?.transporteInicial || {}).map(([k, v]) => [k, v * 60]));
@@ -480,8 +482,10 @@ export function controleMes(data, mes) {
     for (const c of ctl) if (c.dia.startsWith(m)) { he.set(c.gm, (he.get(c.gm) || 0) + Number(c.min || 0)); if (c.fixa) fixa.set(c.gm, (fixa.get(c.gm) || 0) + Number(c.min || 0)); }
     livro = new Map();
     for (const gm of data.gms) {
-      const anterior = transporte.get(gm.id) || 0, x = he.get(gm.id) || 0, total = anterior + x, paga = Math.max(0, Math.min(teto, total));
-      livro.set(gm.id, { he: x, heFixa: fixa.get(gm.id) || 0, transporte: anterior, total, paga, proximo: Math.max(0, total - paga) });
+      const ft = fixo("TRANSPORTE", m, gm.id), fp = fixo("PAGA", m, gm.id);
+      const anterior = ft ? Number(ft.min) : transporte.get(gm.id) || 0, x = he.get(gm.id) || 0, total = anterior + x;
+      const paga = fp ? Math.max(0, Number(fp.min)) : Math.max(0, Math.min(teto, total));
+      livro.set(gm.id, { he: x, heFixa: fixa.get(gm.id) || 0, transporte: anterior, total, paga, proximo: Math.max(0, total - paga), manual: { transporte: !!ft, paga: !!fp } });
     }
     if (m >= mes) break;
     for (const [id, l] of livro) transporte.set(id, l.proximo);

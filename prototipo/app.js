@@ -305,6 +305,36 @@ function drawerControle(d) {
       <button class="btn" data-act="ctl-add">Incluir ajuste</button></div>
   </div>`;
 }
+// Células editáveis do Mês e horas: digitar o número já corrige o controle
+const ajusteDoMes = (gm, mes) => (data.controle || []).find((c) => c.tipo === "HE" && c.ajusteMes === mes && c.gm === gm);
+const hhmm = (min) => (min ? `${Math.floor(Math.abs(min) / 60) * Math.sign(min)}:${String(Math.abs(min) % 60).padStart(2, "0")}` : "");
+function celHoras(gm, campo, min, manual) {
+  const tit = { he: "HE no controle", transporte: "Veio do mês anterior", paga: "A pagar" }[campo];
+  return `<input class="cel-h ${manual ? "manual" : ""}" data-cgm="${gm}" data-ccampo="${campo}" value="${hhmm(min)}" placeholder="—" inputmode="numeric" aria-label="${tit}" title="${tit}${manual ? " · ajustado à mão (apague para voltar ao calculado)" : " · digite para ajustar"}">`;
+}
+function salvarCelHoras(el) {
+  const gm = el.dataset.cgm, campo = el.dataset.ccampo, m = ui.mes, txt = el.value.trim(), g = gmPorId(gm);
+  const atual = controleMes(data, m).get(gm) || {};
+  if (campo === "he") {
+    const aj = ajusteDoMes(gm, m), semAjuste = (atual.he || 0) - (aj ? Number(aj.min) : 0);
+    const novo = txt ? lerHoras(txt) : semAjuste;
+    if (novo === null) { toast("Horas inválidas. Use, por exemplo, 62 ou 62:30."); render(); return; }
+    if (novo === atual.he) return;
+    mudar(`${g.nome}: HE no controle de ${MESES[Number(m.slice(5)) - 1]} = ${fmtHoras(novo)}`, () => {
+      const delta = novo - semAjuste;
+      data.controle = (data.controle || []).filter((c) => c !== aj);
+      if (delta) data.controle.push({ id: aj?.id || novoId(), tipo: "HE", manual: true, ajusteMes: m, dia: `${m}-01`, gm, min: delta, obs: "ajuste do total no Mês e horas", editado: true });
+    });
+    return;
+  }
+  const tipo = campo === "transporte" ? "TRANSPORTE" : "PAGA", ex = (data.controle || []).find((c) => c.tipo === tipo && c.mes === m && c.gm === gm);
+  if (!txt) { if (ex) mudar(`${g.nome}: ${campo === "paga" ? "a pagar" : "transporte"} volta ao calculado`, () => { data.controle = data.controle.filter((c) => c !== ex); }); return; }
+  const novo = lerHoras(txt);
+  if (novo === null || novo < 0) { toast("Horas inválidas. Use, por exemplo, 8 ou 8:30."); render(); return; }
+  mudar(`${g.nome}: ${campo === "paga" ? "a pagar" : "veio do mês anterior"} = ${fmtHoras(novo)}`, () => {
+    if (ex) ex.min = novo; else (data.controle ||= []).push({ id: novoId(), tipo, mes: m, gm, min: novo });
+  });
+}
 // "6", "6h", "6:30", "6,5", "-6" → minutos
 function lerHoras(txt) {
   const t = String(txt || "").trim().replace(/h$/i, "").replace(",", ".");
@@ -488,14 +518,15 @@ function vMes() {
     <div class="kpi ${folgaPend ? "atencao" : ""}"><span class="v">${folgaPend}</span><span class="l">GMs 12x36 com menos de 2 folgas</span></div>
   </div>
   <div class="legenda"><span><i class="lg s"></i>Serviço</span><span><i class="lg tr"></i>Troca</span><span><i class="dot he"></i>HE</span><span><i class="dot bh"></i>BH+</span><span><i class="lg f"></i>Folga</span><span><i class="lg fe"></i>Férias</span><span><i class="lg l"></i>Licença/atestado/curso</span><span><i class="lg bhc"></i>Compensação</span></div>
-  <div class="tabela-wrap"><table class="mes"><thead><tr><th class="gmcol">GM</th><th>Eq.</th><th title="Serviços realizados / previstos pela escala">Serv.</th><th>Folgas</th><th title="HE confirmada ao finalizar a escala. Clique para corrigir.">HE controle</th><th title="HE prevista pela escala nos dias ainda não finalizados">Prevista</th><th title="Horas que excederam o teto no mês anterior">Transp.</th><th>Paga</th><th>Próx. mês</th><th title="Parte da HE entre 22h e 5h — informativo para o RH">22–05h</th><th>BH</th>
+  <div class="tabela-wrap"><table class="mes"><thead><tr><th class="gmcol">GM</th><th>Eq.</th><th title="Serviços realizados / previstos pela escala">Serv.</th><th>Folgas</th><th title="HE confirmada ao finalizar a escala. Digite para ajustar o total; ⋯ mostra dia a dia.">HE controle</th><th title="HE prevista pela escala nos dias ainda não finalizados">Prevista</th><th title="Horas que excederam o teto no mês anterior">Transp.</th><th>Paga</th><th>Próx. mês</th><th title="Parte da HE entre 22h e 5h — informativo para o RH">22–05h</th><th>BH</th>
     ${dias.map((d) => `<th class="d ${[0, 6].includes(diaSemana(d)) ? "fds" : ""}">${Number(d.slice(8))}<small>${SEMANA[diaSemana(d)][0]}</small></th>`).join("")}</tr></thead><tbody>
     ${gms.map((g) => { const l = L(g); const alt = equipe(g.equipe)?.tipo === "alternado"; return `<tr data-nome="${esc(g.nome.toLowerCase())}">
       <th class="gmcol" scope="row"><button class="link" data-act="abrir-ficha" data-gm="${g.id}">${esc(g.nome)}</button>${g.naoFazHE ? ` <span class="tag furo" title="Não realiza HE">sem HE</span>` : ""}</th><td>${g.equipe}</td>
       <td class="num">${l.servicos || 0}<small>/${l.servicosBase || 0}</small></td>
       <td class="num ${alt && (l.folgas || 0) !== 2 ? "alerta" : ""}">${alt ? `${l.folgas || 0}/2` : "—"}</td>
-      <td class="num forte"><button class="link ctl-link" data-act="abrir-controle" data-gm="${g.id}" title="Ver e corrigir o controle de HE">${l.he ? fmtHoras(l.he) : "—"}</button></td><td class="num previsto">${l.prevista ? fmtHoras(l.prevista) : "—"}</td><td class="num">${l.transporte ? fmtHoras(l.transporte) : "—"}</td>
-      <td class="num">${l.paga ? fmtHoras(l.paga) : "—"}</td><td class="num ${l.proximo ? "alerta" : ""}">${l.proximo ? fmtHoras(l.proximo) : "—"}</td>
+      <td class="num forte ctl-td">${celHoras(g.id, "he", l.he, ajusteDoMes(g.id, m))}<button class="ic ctl-mais" data-act="abrir-controle" data-gm="${g.id}" title="Ver dia a dia e corrigir" aria-label="Detalhes do controle de ${esc(g.nome)}">⋯</button></td><td class="num previsto">${l.prevista ? fmtHoras(l.prevista) : "—"}</td>
+      <td class="num">${celHoras(g.id, "transporte", l.transporte, l.manual?.transporte)}</td>
+      <td class="num">${celHoras(g.id, "paga", l.paga, l.manual?.paga)}</td><td class="num ${l.proximo ? "alerta" : ""}">${l.proximo ? fmtHoras(l.proximo) : "—"}</td>
       <td class="num">${l.heNoturna ? fmtHoras(l.heNoturna) : "—"}</td><td class="num">${(() => { const s = saldoBH(data, g.id, m); return s ? fmtHoras(s) : "—"; })()}</td>
       ${dias.map((d) => celulaDia(l.dias?.[d])).join("")}</tr>`; }).join("")}
   </tbody></table></div>`;
@@ -2645,6 +2676,7 @@ document.addEventListener("change", (e) => {
   const id = e.target.id, v = e.target.value;
   if (id === "pad-desde" && v) { ui.padrao.desde = v; ui.padrao.mes = mesDe(v); render(); return; }
   if (e.target.closest?.(".form-hf")) { previaHorarioFixo(); return; }
+  if (e.target.dataset?.cgm) { salvarCelHoras(e.target); return; }
   if (e.target.dataset?.fr && e.target.dataset.campo) {
     const x = data.frota.find((y) => y.id === e.target.dataset.fr), campo = e.target.dataset.campo, val = campo === "prefixo" ? v.trim() : v.trim();
     if (!x || (x[campo] || "") === val) return;
