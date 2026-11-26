@@ -11,4 +11,4 @@ fallthrough = true
 [[d1_databases]]
 binding = "DB"
 database_name = "escala-gm-piloto"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "4507567d-e1fb-4845-8401-0fafea48be37"
