@@ -146,7 +146,7 @@ function chip(d, t, junto) {
   if (d.req && !d.fixa) extras.push(`<span class="req">REQ ${esc(d.req)}</span>`);
   const reserva = postoPorId(d.posto)?.tipo === "reserva" ? "reserva" : "";
   return `<button class="chip ${cls || ""} ${reserva} ${d.conflito ? "conflito" : ""} ${d.alterado && ultimo ? "alterado" : ""}" data-act="card" data-des="${d.id}" title="Clique para mudar horário, REQ, observação ou trocar o GM">
-    <span class="nm">${esc(g?.nome)}</span>${d.funcao ? `<span class="fn${ICO_FUNCAO[d.funcao] ? " fn-ico" : ""}" title="${esc(d.funcao)} · botão direito › Função para mudar">${ICO_FUNCAO[d.funcao] || esc(d.funcao.slice(0, 3).toUpperCase())}</span>` : ""}
+    <span class="nm">${esc(g?.nome)}</span>${d.funcao && (emVtr(d.posto) || !ICO_FUNCAO[d.funcao]) ? `<span class="fn${ICO_FUNCAO[d.funcao] ? " fn-ico" : ""}" title="${esc(d.funcao)} · botão direito › Função para mudar">${ICO_FUNCAO[d.funcao] || esc(d.funcao.slice(0, 3).toUpperCase())}</span>` : ""}
     <span class="hr" ${junto ? `data-junto="${junto.he.id}"` : ""}>${junto ? `${textoCelula(d, t).split("/")[0]}/${fmtHm(junto.he.fim)}` : textoCelula(d, t)}</span>${junto ? `<span class="he-num" title="${fmtHoras(junto.total)} de hora extra fixa">${fmtHE(junto.total)}</span>` : ""}${extras.join("")}${d.obs && ultimo ? `<span class="obs" title="${esc(d.obs)}">${esc(d.obs.length > 34 ? d.obs.slice(0, 33) + "…" : d.obs)}</span>` : ""}</button>`;
 }
 function vQuadro() {
@@ -745,7 +745,9 @@ const ICO_FUNCAO = {
   Patrulheiro: `<svg class="ico-fn" viewBox="0 0 24 24" aria-label="Patrulheiro" role="img"><path d="M12 2l8 3v6c0 5-3.4 9.3-8 11-4.6-1.7-8-6-8-11V5z" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M12 7.5l1.3 2.7 3 .4-2.2 2.1.5 3L12 14.3l-2.6 1.4.5-3-2.2-2.1 3-.4z"/></svg>`,
 };
 const icoFuncao = (f) => ICO_FUNCAO[f] || "";
-const funcaoFolha = (d) => (ICO_FUNCAO[d.funcao] ? `${ICO_FUNCAO[d.funcao]} ` : "");
+// motorista / patrulheiro só faz sentido em viatura
+const emVtr = (postoId) => postoPorId(postoId)?.tipo === "vtr";
+const funcaoFolha = (d) => (emVtr(d.posto) && ICO_FUNCAO[d.funcao] ? `${ICO_FUNCAO[d.funcao]} ` : "");
 function vAjustes() {
   const c = data.config;
   const anc = c.ancora || { data: ui.dia, equipes: [] };
@@ -1225,7 +1227,7 @@ function itensGm(d, turnoId) {
   return [
     { t: "Editar horário, REQ e observação…", act: "mn-card", padrao: true },
     { t: "Trocar o GM…", act: "mn-trocar" },
-    ...(ehHeLancada(d) || d.fixa ? [] : [{ t: `Função${d.funcao ? ` (${d.funcao.toLowerCase()})` : ""}`, sub: [
+    ...(ehHeLancada(d) || d.fixa || !emVtr(d.posto) ? [] : [{ t: `Função${d.funcao ? ` (${d.funcao.toLowerCase()})` : ""}`, sub: [
       ...[["Motorista", "Motorista"], ["Patrulheiro", "Patrulheiro"], ["", "Sem função"]].map(([f, t]) => ({ t: `${d.funcao === f ? "✓ " : ""}${t} · só hoje`, act: "mn-funcao", d: { f, escopo: "dia" } })),
       { sep: true },
       ...[["Motorista", "Motorista"], ["Patrulheiro", "Patrulheiro"]].map(([f, t]) => ({ t: `${t} · sempre (no padrão)`, act: "mn-funcao", d: { f, escopo: "sempre" } })),
@@ -1953,7 +1955,7 @@ function vPadroes() {
       </tbody></table></div>`;
   } else {
     const eqs = pd.aba === "impar" ? eqImp : eqPar, outros = pd.aba === "impar" ? eqPar : eqImp;
-    const pessoa = ({ g, v }, extra = "") => `<button class="pgm ${extra}" data-act="pad-gm" data-gm="${g.id}" title="Clique ou botão direito para editar">${v.lotacao?.funcao ? `<small title="${esc(v.lotacao.funcao)}">${icoFuncao(v.lotacao.funcao) || esc(v.lotacao.funcao)}</small> ` : ""}${esc(g.nome)}${extra === "sem" ? ` <span class="tag rem">seg–sex</span>` : ""}<span class="num">${textoHorario(v.lotacao?.segmentos)}</span></button>`;
+    const pessoa = ({ g, v }, extra = "") => `<button class="pgm ${extra}" data-act="pad-gm" data-gm="${g.id}" title="Clique ou botão direito para editar">${v.lotacao?.funcao && (emVtr(v.lotacao.posto) || !ICO_FUNCAO[v.lotacao.funcao]) ? `<small title="${esc(v.lotacao.funcao)}">${icoFuncao(v.lotacao.funcao) || esc(v.lotacao.funcao)}</small> ` : ""}${esc(g.nome)}${extra === "sem" ? ` <span class="tag rem">seg–sex</span>` : ""}<span class="num">${textoHorario(v.lotacao?.segmentos)}</span></button>`;
     const periodoDe = (segs) => { const [a] = segs?.length ? intervalo(segs[0].ini, segs[0].fim) : [420]; return a >= 900 || a < 300 ? "noite" : "dia"; };
     corpo = data.secoes.map((s) => {
       const linhas = data.postos.filter((p) => p.secao === s.id && p.ativo !== false).map((p) => {
@@ -2030,7 +2032,7 @@ function itensPadraoGm(g) {
   const outro = eq?.tipo === "alternado" ? data.equipes.find((e) => e.tipo === "alternado" && e.periodo === eq.periodo && e.id !== eq.id) : null;
   return [
     { t: "Lotação e horário fixo…", act: "pad-editar", d: { gm: g.id }, padrao: true },
-    { t: `Função${v.lotacao?.funcao ? ` (${v.lotacao.funcao.toLowerCase()})` : ""}`, sub: [["Motorista", "Motorista"], ["Patrulheiro", "Patrulheiro"], ["", "Sem função"]].map(([f, t]) => ({ t: `${(v.lotacao?.funcao || "") === f ? "✓ " : ""}${t}`, act: "pad-funcao", d: { gm: g.id, f } })) },
+    ...(!emVtr(v.lotacao?.posto) ? [] : [{ t: `Função${v.lotacao?.funcao ? ` (${v.lotacao.funcao.toLowerCase()})` : ""}`, sub: [["Motorista", "Motorista"], ["Patrulheiro", "Patrulheiro"], ["", "Sem função"]].map(([f, t]) => ({ t: `${(v.lotacao?.funcao || "") === f ? "✓ " : ""}${t}`, act: "pad-funcao", d: { gm: g.id, f } })) }]),
     ...(outro ? [{ t: `Passar para o padrão ${padraoNoMes(outro.id, ui.padrao.mes + "-01")} (${eq.periodo})`, act: "pad-trocar", d: { gm: g.id, eq: outro.id } }] : []),
     ...(eq?.tipo === "alternado" ? [{ t: `Passar para a ${eq.periodo === "dia" ? "noite" : "dia"} (mesmo padrão)`, act: "pad-trocar", d: { gm: g.id, eq: data.equipes.find((e) => e.tipo === "alternado" && e.periodo !== eq.periodo && padraoNoMes(e.id, ui.padrao.mes + "-01") === padraoNoMes(eq.id, ui.padrao.mes + "-01"))?.id } }] : []),
     { sep: true },
