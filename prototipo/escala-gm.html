@@ -4265,7 +4265,7 @@ document.addEventListener("click", (e) => {
       mudar(`Sistema de Folgas: ${nF} folgas de ${ok.length} GMs${nH ? ` e ${nH} disponibilidades para HE` : ""}`, () => {
         data.ocorrencias = data.ocorrencias.filter((o) => !(o.origem === "folgas-gmnh" && meses.has(o.de.slice(0, 7))));
         for (const x of ok) {
-          for (const d of x.folgas) data.ocorrencias.push({ id: novoId(), tipo: "FOLGA", gm: x.gm, de: d, origem: "folgas-gmnh", ...(x.protocolo ? { req: x.protocolo } : {}) });
+          for (const d of x.folgas) if (!data.ocorrencias.some((o) => o.tipo === "FOLGA" && o.gm === x.gm && o.de === d)) data.ocorrencias.push({ id: novoId(), tipo: "FOLGA", gm: x.gm, de: d, origem: "folgas-gmnh", ...(x.protocolo ? { req: x.protocolo } : {}) });
           for (const d of x.he) data.ocorrencias.push({ id: novoId(), tipo: "DISP_HE", gm: x.gm, de: d, origem: "folgas-gmnh" });
           if (x.ferias && x.folgas[0]) data.ocorrencias.push({ id: novoId(), tipo: "DISP_FERIAS", gm: x.gm, de: x.folgas[0].slice(0, 7) + "-01", origem: "folgas-gmnh" });
         }
