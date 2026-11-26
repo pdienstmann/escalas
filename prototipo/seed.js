@@ -1,5 +1,5 @@
 // Dados de exemplo — nomes fictícios, estrutura inspirada nas escalas reais.
-import { calcularDia, diasDoMes, somaDias, trabalhaNoDia, afastamentoNoDia, intervalo, sobrepoe, TURNOS, mesDe } from "./engine.js";
+import { indiceDia, calcularDia, diasDoMes, somaDias, trabalhaNoDia, afastamentoNoDia, intervalo, sobrepoe, TURNOS, mesDe } from "./engine.js";
 
 function rng(seed) { let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
 
@@ -26,6 +26,7 @@ export function criarExemplo() {
     { id: "za", nome: "ZA PATRULHAMENTO A PÉ" },
     { id: "motos", nome: "MOTOS · ÁREA CENTRAL" },
     { id: "vtrn", nome: "VTR NOITE" },
+    { id: "reserva", nome: "RESERVA TÉCNICA" },
     { id: "monit", nome: "MONITORAMENTO" },
   ];
 
@@ -71,15 +72,16 @@ export function criarExemplo() {
     { id: "n1317", secao: "vtrn", nome: "NOITE VTR 1317", sub: "NOITE SANTO AFONSO", tipo: "vtr", vagas: T(0, 0, 2, 2) },
     { id: "n1320", secao: "vtrn", nome: "NOITE VTR 1320", sub: "NOITE CENTRO 2", tipo: "vtr", vagas: T(0, 0, 2, 2) },
     { id: "monit", secao: "monit", nome: "VIDEOMONITORAMENTO", obs: "SEG A SEX" },
+    { id: "reserva", secao: "reserva", nome: "RESERVA TÉCNICA", sub: "cobre faltas · não ocupa posto", tipo: "reserva" },
   ];
 
   const DIA = [{ ini: "07:00", fim: "19:00", tipo: "normal" }];
   const NOITE = [{ ini: "19:00", fim: "07:00", tipo: "normal" }];
   const vagasDia = ["sala", "sala", "sala", "arm", "guarita", "acesso", "juventude", "ceu", "parcao", "parcao", "rodov", "cer", "lar", "upac", "upacan",
     ...["v1319", "v1317", "v1320", "v1321", "v1281", "v1301", "v1272"].flatMap((v) => [[v, "Motorista"], [v, "Patrulheiro"]]),
-    "mt638", "mt631", "mt639", "mt646"];
+    "mt638", "mt631", "mt639", "mt646", "reserva"];
   const vagasNoite = ["sala", "sala", "arm", "guarita", "acesso", "juventude", "ceu", "parcao", "parcao", "cer", "lar", "upac", "upacan", "bombas",
-    ...["n1319", "n1318", "n1321", "n1317", "n1320"].flatMap((v) => [[v, "Motorista"], [v, "Patrulheiro"]])];
+    ...["n1319", "n1318", "n1321", "n1317", "n1320"].flatMap((v) => [[v, "Motorista"], [v, "Patrulheiro"]]), "reserva"];
 
   const nomes = [...NOMES];
   const gms = [];
@@ -107,8 +109,9 @@ export function criarExemplo() {
   gms[7].naoFazHE = true; gms[7].obs = "Não realiza HE (restrição médica)";
   gms[40].naoFazHE = true;
 
+  const ref = "2026-11-26";
   const data = {
-    config: { tetoHE: 60, mesInicial: "2026-10", cabecalho: "GUARDA MUNICIPAL · SEÇÃO DE ESCALA", transporteInicial: {} },
+    config: { ancora: { data: ref, equipes: equipes.filter((e) => e.tipo === "alternado" && ((indiceDia(ref) % 2) + 2) % 2 === e.paridade).map((e) => e.id) }, tetoHE: 60, mesInicial: "2026-10", cabecalho: "GUARDA MUNICIPAL · SEÇÃO DE ESCALA", transporteInicial: {} },
     equipes, secoes, postos, gms, ocorrencias: [], _versao: 0,
   };
   let oid = 0;
@@ -173,7 +176,18 @@ export function criarExemplo() {
     for (const x of ontem.designacoes) if (x.fim > 1440) marca(x.gm, x.ini - 1440, x.fim - 1440);
     const afastHoje = new Set(gms.filter((g) => afastamentoNoDia(data, g.id, d)).map((g) => g.id));
     const pedidos = [];
-    for (const f of cd.furos) for (let k = 0; k < f.faltam; k++) pedidos.push(f);
+    for (const f of cd.furos) for (let k = 0; k < f.faltam; k++) pedidos.push({ ...f });
+    // primeiro a reserva técnica: remaneja para o posto descoberto, sem HE
+    for (const rv of cd.designacoes.filter((x) => x.posto === "reserva")) {
+      if (r() < (d >= "2026-11-26" ? 0.7 : 0.2)) continue;
+      const turnos = rv.ini < 1140 ? ["t2", "t3"] : ["t4", "t1"];
+      const p = pedidos.find((x) => !x.usado && x.turno === turnos[0]);
+      if (!p) continue;
+      p.usado = true;
+      const p2 = pedidos.find((x) => !x.usado && x.posto === p.posto && x.turno === turnos[1]);
+      if (p2) p2.usado = true;
+      add({ tipo: "REMANEJ", gm: rv.gm, de: d, ate: d, posto: p.posto, obs: "Da reserva técnica" });
+    }
     // junta 2º+3º e 4º+1º do mesmo posto em serviços de 12h quando sorteado
     const vistos = new Set();
     for (const f of pedidos) {

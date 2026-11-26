@@ -95,15 +95,30 @@ test("viatura em FA manda a guarnição para à disposição", () => {
   assert.ok(!cd.furos.some((f) => f.posto === "vtr"));
 });
 
-test("sugestão exclui quem está ocupado e avisa descanso curto", () => {
+test("sugestão: reserva técnica primeiro (remanejar), depois HE por menos horas", () => {
   const data = base();
+  data.postos.push({ id: "res", nome: "RESERVA TÉCNICA", tipo: "reserva" });
+  data.gms.push({ id: "r", nome: "R", equipe: "D1", lotacao: { posto: "res", segmentos: [{ ini: "07:00", fim: "19:00" }] } });
   const d = diaDe(data, "D1");
   data.ocorrencias.push({ id: "f", tipo: "FOLGA", gm: "a", de: d }); data._versao++;
+  assert.ok(!calcularDia(data, d).furos.some((f) => f.posto === "res"), "reserva não gera furo");
   const s = sugerir(data, d, "vtr", 420, 780);
-  assert.ok(!s.some((x) => x.gm.id === "b" || x.gm.id === "a"));
-  assert.equal(s[0].gm.id, "c"); // mesmo posto, outra equipe
-  const nn = s.find((x) => x.gm.id === "n");
-  assert.ok(nn.descansoCurto); // saiu às 07:00 do serviço noturno
+  assert.deepEqual(s.remanejar.map((x) => x.gm.id), ["r"]);
+  assert.ok(!s.he.some((x) => ["a", "b", "r"].includes(x.gm.id)));
+  assert.equal(s.he[0].gm.id, "c"); // mesmo posto, outra equipe
+  data.ocorrencias.push({ id: "rm", tipo: "REMANEJ", gm: "r", de: d, ate: d, posto: "vtr" }); data._versao++;
+  assert.ok(!calcularDia(data, d).furos.some((f) => f.posto === "vtr"));
+  assert.equal(livroMes(data, "2026-11").get("r").he, 0);
+});
+
+test("alternância definida por um único dia de referência", () => {
+  const data = base();
+  const d = diaDe(data, "D1");
+  data.config.ancora = { data: d, equipes: ["D2"] }; data._versao++;
+  const eq = calcularDia(data, d).designacoes.map((x) => data.gms.find((g) => g.id === x.gm).equipe);
+  assert.ok(eq.includes("D2") && !eq.includes("D1"));
+  const amanha = calcularDia(data, d.slice(0, 8) + String(Number(d.slice(8)) + 1).padStart(2, "0")).designacoes.map((x) => data.gms.find((g) => g.id === x.gm).equipe);
+  assert.ok(amanha.includes("D1") && !amanha.includes("D2"));
 });
 
 test("banco de horas: crédito menos compensação", () => {

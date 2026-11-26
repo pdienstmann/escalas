@@ -249,7 +249,62 @@ table.hist tr.atual td { font-weight: 600; background: var(--accent-soft); }
 .quebra { height: 14px; }
 .nao-imprimir code { font-family: var(--f-num); font-size: .85em; }
 
+/* lançamento rápido */
+.cmd { position: relative; display: flex; align-items: center; gap: .4rem; flex: 1 1 320px; max-width: 560px; min-width: 0; }
+.cmd-rot { font: 600 .74rem var(--f-ui); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+.cmd input { flex: 1; min-width: 0; padding: .45rem .65rem; border: 1.5px solid var(--accent); border-radius: 8px; background: var(--surface); font-family: var(--f-num); font-size: .86rem; }
+.cmd kbd { font: .72rem var(--f-num); color: var(--muted); border: 1px solid var(--line-strong); border-radius: 4px; padding: 0 .3rem; }
+.cmd-prev { position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 35; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 10px; padding: .6rem .7rem; box-shadow: 0 12px 30px rgba(0,0,0,.16); display: grid; gap: .45rem; }
+.cmd-prev p { margin: 0; }
+.exs { display: flex; flex-wrap: wrap; gap: .3rem; }
+.ex { border: 1px dashed var(--line-strong); background: var(--bg); border-radius: 6px; padding: .2rem .45rem; font: .78rem var(--f-num); cursor: pointer; text-align: left; }
+.ex:hover { border-color: var(--accent); }
+.cps { display: flex; flex-wrap: wrap; gap: .35rem; }
+.cp { display: grid; border: 1px solid var(--line); border-radius: 6px; padding: .15rem .5rem; font-weight: 600; font-family: var(--f-grid); }
+.cp small { font: 500 .62rem var(--f-ui); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.cp.falta { border-color: var(--furo); color: var(--furo); background: var(--furo-bg); }
+.falta-txt { color: var(--furo) !important; }
+.ok-linha { display: flex; align-items: center; gap: .5rem; }
+
+/* semana */
+.cols-pend { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: .9rem; align-items: start; }
+.mapa-wrap { border: 0; }
+table.mapa { font-family: var(--f-grid); font-size: .8rem; border-collapse: separate; border-spacing: 2px; width: auto; }
+table.mapa thead th { font-size: .72rem; color: var(--muted); font-weight: 600; text-align: center; white-space: nowrap; padding: 0 .15rem; }
+table.mapa thead th.hoje { color: var(--accent); }
+table.mapa thead th.sub { font-size: .62rem; }
+table.mapa tbody th { text-align: left; font-weight: 600; white-space: nowrap; padding-right: .5rem; max-width: 190px; overflow: hidden; text-overflow: ellipsis; }
+table.mapa tr.secao th { font-size: .66rem; letter-spacing: .1em; color: var(--accent); padding-top: .5rem; }
+table.mapa td { width: 1.5rem; height: 1.4rem; text-align: center; border-radius: 4px; padding: 0; }
+table.mapa td.dia { } table.mapa td.noite { }
+td.m-na { background: transparent; }
+td.m-ok { background: var(--accent-soft); color: var(--ok); font-size: .55rem; }
+td.m-fa { background: var(--line); color: var(--muted); font-size: .6rem; font-weight: 700; }
+td.m-furo button { width: 100%; height: 100%; border: 0; border-radius: 4px; background: var(--furo); color: var(--surface); font: 700 .75rem var(--f-num); cursor: pointer; }
+td.m-furo button:hover { outline: 2px solid var(--ink); }
+.fila { gap: .8rem; }
+.pdia header { display: flex; align-items: baseline; gap: .5rem; border-bottom: 1px solid var(--line-strong); padding-bottom: .25rem; }
+.pdia header h3 { font: 500 .95rem var(--f-grid); text-transform: capitalize; letter-spacing: 0; color: var(--ink); }
+.pdia header .link { margin-left: auto; font-size: .82rem; }
+.pdia ul { list-style: none; margin: 0; padding: 0; }
+.pdia li { display: grid; gap: .35rem; padding: .5rem 0; border-bottom: 1px solid var(--line); }
+.pinfo b { font-family: var(--f-grid); }
+.pacoes { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+.pacoes .btn { display: grid; text-align: left; line-height: 1.2; padding: .3rem .6rem; }
+.pacoes .btn small { font-weight: 400; color: var(--muted); font-size: .72rem; }
+.btn.rem { border-color: var(--troca); background: var(--troca-bg); }
+.btn.hebtn { border-color: var(--he); background: var(--he-bg); }
+.tudo-ok { padding: 1.5rem; text-align: center; color: var(--ok); font-weight: 600; }
+.bloco-rem { background: var(--troca-bg); border-radius: 8px; padding: .5rem .7rem; }
+.ajustes { max-width: 760px; }
+.ajustes label { display: grid; gap: .15rem; font-size: .8rem; color: var(--muted); }
+.ajustes input, .ajustes select { padding: .38rem .5rem; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); max-width: 100%; }
+.ajustes h2 { margin-top: .6rem; }
+
+@media (max-width: 1100px) { .cols-pend { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 860px) {
+  .cmd { order: 4; flex-basis: 100%; max-width: none; }
+  .cmd kbd { display: none; }
   .cols-lanc, .cols-ficha { grid-template-columns: minmax(0, 1fr); }
   #drawer { top: auto; height: 82%; width: 100%; border-left: 0; border-top: 1px solid var(--line-strong); border-radius: 14px 14px 0 0; padding-left: env(safe-area-inset-left, 0px); }
   .mini { grid-template-columns: 1fr 1fr; }
@@ -259,11 +314,14 @@ table.hist tr.atual td { font-weight: 600; background: var(--accent-soft); }
 }
 @media (prefers-reduced-motion: no-preference) { .chip, .furo, .btn { transition: background-color .12s, border-color .12s; } }
 @media print {
-  @page { size: A4 portrait; margin: 8mm; }
+  @page { size: 216mm 330mm; margin: 7mm; }
   body { background: #fff; }
   body::before, header.app, .nao-imprimir, #drawer, #veu, #toast { display: none !important; }
   main { padding: 0; }
-  .papel { width: auto; box-shadow: none; padding: 0; }
+  .papel { width: auto; box-shadow: none; padding: 0; font-size: 9px; line-height: 1.15; }
+  .pt th, .pt td { padding: 0 3px; }
+  .pt th.p, .pt tr.sec th { font-size: 8.5px; } .pt .sub { font-size: 7.5px; }
+  .pcab { padding: 3px 6px; margin-bottom: 3px; }
   .quebra { break-after: page; height: 0; }
   .pt tr { break-inside: avoid; }
   .pt .he, .pt .bh, .pt .troca, .pt .rondas-p, .pt tr.sec th { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -273,12 +331,20 @@ table.hist tr.atual td { font-weight: 600; background: var(--accent-soft); }
 <header class="app">
   <div class="marca">Escala GM <span>protótipo</span></div>
   <nav class="abas" aria-label="Seções">
+    <a href="#pendencias" data-nav="pendencias">Semana</a>
     <a href="#quadro" data-nav="quadro">Quadro do dia</a>
     <a href="#lancamentos" data-nav="lancamentos">Lançamentos</a>
     <a href="#mes" data-nav="mes">Mês e horas</a>
     <a href="#ficha" data-nav="ficha">Ficha do GM</a>
     <a href="#folha" data-nav="folha">Folha</a>
+    <a href="#ajustes" data-nav="ajustes">Ajustes</a>
   </nav>
+  <div class="cmd">
+    <label for="cmd" class="cmd-rot">Lançar</label>
+    <input id="cmd" type="text" autocomplete="off" spellcheck="false" placeholder="folga kraemer 28/11 · he couto hoje 19-01 vtr 1317" aria-describedby="cmd-prev">
+    <kbd>/</kbd>
+    <div id="cmd-prev" class="cmd-prev" hidden></div>
+  </div>
   <div class="exemplo">Nomes e dados fictícios · <button id="restaurar" class="link" data-act="restaurar">Restaurar exemplo</button></div>
 </header>
 <main id="main"><p class="dica">Carregando a escala…</p></main>

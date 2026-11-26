@@ -5,13 +5,16 @@ Nada é copiado para os dias; a escala de cada data, os furos e o livro de horas
 
 - `engine.js`: motor (regimes 12x36 e semanal, folgas, afastamentos, HE, BH, trocas, remanejamentos, FA de viatura, furos, sugestão de GM, livro de HE com teto de 60h e transporte para o mês seguinte).
 - `engine.test.mjs`: testes com casos reais (noite que atravessa a data, HE fixa da escala semanal, teto de 60h, troca, FA...).
+- `comando.js` + `comando.test.mjs`: lançamento rápido por texto ("folga kraemer 28/11", "he couto hoje 19-01 vtr 1317 req 1504").
 - `seed.js`: dados de exemplo com nomes fictícios.
-- `app.js` + `index.html`: telas (quadro do dia, lançamentos, mês e horas, ficha do GM, folha para impressão).
+- `app.js` + `index.html`: telas (semana com cobertura e pendências, quadro do dia, lançamentos, mês e horas, ficha do GM, folha em ofício, ajustes).
+
+Regras: reserva técnica é um posto que não gera furo e é a primeira opção para cobrir faltas (remanejar, sem HE); a alternância 12x36 vem de um único dia de referência configurável em Ajustes.
 
 ```bash
-node --test prototipo/engine.test.mjs   # testes do motor
+node --test prototipo/engine.test.mjs prototipo/comando.test.mjs   # testes
 node prototipo/build.mjs                # gera prototipo/escala-gm.html (arquivo único)
 ```
 
 Abra `prototipo/escala-gm.html` direto no Chrome. Os lançamentos ficam salvos no navegador (localStorage).
-Na aba **Folha**, use Ctrl+P para gerar o PDF.
+Na aba **Folha**, use Ctrl+P para gerar o PDF (papel ofício, frente e verso).

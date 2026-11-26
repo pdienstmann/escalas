@@ -74,12 +74,22 @@ export function minutosNoturnos(a, b) {
 export function trabalhaNoDia(data, gm, dia) {
   const eq = data.equipes.find((e) => e.id === gm.equipe);
   if (!eq || gm.ativo === false) return false;
-  if (eq.tipo === "alternado") return ((indiceDia(dia) % 2) + 2) % 2 === eq.paridade;
+  if (eq.tipo === "alternado") return trabalhaAlternado(data, eq, dia);
   if (eq.tipo === "semanal") return (gm.dias || [1, 2, 3, 4, 5]).includes(diaSemana(dia));
   return false;
 }
+// Alternância 12x36: basta um dia de referência dizendo quais equipes trabalham nele.
+// As equipes listadas trabalham nos dias pares a partir da referência; as demais, nos ímpares.
+function trabalhaAlternado(data, eq, dia) {
+  const a = data.config?.ancora;
+  if (a?.data && a.equipes?.length) {
+    const par = (((indiceDia(dia) - indiceDia(a.data)) % 2) + 2) % 2 === 0;
+    return a.equipes.includes(eq.id) === par;
+  }
+  return ((indiceDia(dia) % 2) + 2) % 2 === eq.paridade;
+}
 export function equipesDoDia(data, dia) {
-  return data.equipes.filter((e) => e.tipo === "alternado" && ((indiceDia(dia) % 2) + 2) % 2 === e.paridade).map((e) => e.id);
+  return data.equipes.filter((e) => e.tipo === "alternado" && trabalhaAlternado(data, e, dia)).map((e) => e.id);
 }
 
 function ocorrenciaCobre(oc, dia) { return oc.de <= dia && dia <= (oc.ate || oc.de); }
@@ -198,33 +208,39 @@ export function afastamentoNoDia(data, gmId, dia) {
 }
 
 // ---------- sugestão para cobrir furo ----------
+// Duas saídas: remanejar quem está na reserva técnica / à disposição (sem custo) ou chamar HE.
 export function sugerir(data, dia, postoId, ini, fim) {
   const mes = mesDe(dia);
   const livro = livroMes(data, mes);
-  const out = [];
+  const cd = calcularDia(data, dia);
+  const reserva = new Set(data.postos.filter((p) => p.tipo === "reserva").map((p) => p.id));
+  const livreParaRemanejar = (d) => d.nat !== "he" && d.nat !== "bh" && (d.posto === null || reserva.has(d.posto));
+  const remanejar = [], he = [];
+  const afastados = new Set(data.ocorrencias.filter((o) => (["FERIAS", "LICENCA", "ATESTADO", "CURSO"].includes(o.tipo) && ocorrenciaCobre(o, dia)) || ((o.tipo === "FOLGA" || o.tipo === "BH_COMP") && o.de === dia)).map((o) => o.gm));
+  const ontemNoite = calcularDia(data, somaDias(dia, -1)).designacoes.filter((d) => d.fim - 1440 > ini && d.ini - 1440 < fim).map((d) => d.gm);
   for (const gm of data.gms) {
     if (gm.ativo === false) continue;
-    const motivoAfast = afastamentoNoDia(data, gm.id, dia);
-    if (motivoAfast) continue;
-    const ocup = ocupacao(data, gm.id, dia);
-    if (ocup.some(([a, b]) => sobrepoe(a, b, ini, fim) > 0)) continue;
-    // descanso: menor distância até outro serviço
-    let folgaAntes = Infinity, folgaDepois = Infinity;
-    for (const [a, b] of ocup) { if (b <= ini) folgaAntes = Math.min(folgaAntes, ini - b); if (a >= fim) folgaDepois = Math.min(folgaDepois, a - fim); }
+    if (afastados.has(gm.id)) continue;
+    const minhas = cd.designacoes.filter((d) => d.gm === gm.id);
     const l = livro.get(gm.id) || { he: 0, transporte: 0 };
-    const mesmoPosto = gm.lotacao?.posto === postoId;
+    const base = { gm, heMes: l.he, transporte: l.transporte, mesmoPosto: gm.lotacao?.posto === postoId };
+    const sobre = minhas.filter((d) => sobrepoe(d.ini, d.fim, ini, fim) > 0);
+    if (sobre.length) {
+      if (sobre.every(livreParaRemanejar)) {
+        const d = sobre[0];
+        remanejar.push({ ...base, origem: d.posto === null ? "À disposição" : data.postos.find((p) => p.id === d.posto)?.nome, ini: d.ini, fim: d.fim });
+      }
+      continue;
+    }
+    if (ontemNoite.includes(gm.id)) continue;
     const notas = [];
-    if (mesmoPosto) notas.push("conhece o posto");
-    if (folgaAntes === 0) notas.push("emenda com serviço anterior");
-    else if (folgaAntes < 11 * 60) notas.push(`saiu há ${fmtHoras(folgaAntes)}`);
-    if (folgaDepois === 0) notas.push("emenda com serviço seguinte");
-    else if (folgaDepois < 11 * 60) notas.push(`entra em ${fmtHoras(folgaDepois)}`);
+    if (base.mesmoPosto) notas.push("conhece o posto");
     if (gm.naoFazHE) notas.push("não realiza HE");
-    out.push({ gm, heMes: l.he, transporte: l.transporte, mesmoPosto, notas, bloqueado: !!gm.naoFazHE,
-      descansoCurto: Math.min(folgaAntes, folgaDepois) < 11 * 60 });
+    he.push({ ...base, notas, bloqueado: !!gm.naoFazHE });
   }
-  out.sort((a, b) => (a.bloqueado - b.bloqueado) || (b.mesmoPosto - a.mesmoPosto) || (a.descansoCurto - b.descansoCurto) || (a.heMes + a.transporte - b.heMes - b.transporte) || a.gm.nome.localeCompare(b.gm.nome));
-  return out;
+  he.sort((a, b) => (a.bloqueado - b.bloqueado) || (b.mesmoPosto - a.mesmoPosto) || (a.heMes + a.transporte - b.heMes - b.transporte) || a.gm.nome.localeCompare(b.gm.nome));
+  remanejar.sort((a, b) => (a.origem === "À disposição" ? 0 : 1) - (b.origem === "À disposição" ? 0 : 1) || a.gm.nome.localeCompare(b.gm.nome));
+  return { remanejar, he };
 }
 
 // ---------- livro de horas ----------

@@ -3,17 +3,18 @@ import {
   mesDe, mesSeguinte, fmtHm, fmtHoras, intervalo, sobrepoe, trabalhaNoDia, hm,
 } from "./engine.js";
 import { criarExemplo } from "./seed.js";
+import { interpretar, norm } from "./comando.js";
 
-const CHAVE = "escala-gm-prototipo-v1";
+const CHAVE = "escala-gm-prototipo-v2";
 const SEMANA = ["DOMINGO", "SEGUNDA", "TERÇA", "QUARTA", "QUINTA", "SEXTA", "SÁBADO"];
 const MESES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
-const VIEWS = ["quadro", "lancamentos", "mes", "ficha", "folha"];
+const VIEWS = ["pendencias", "quadro", "lancamentos", "mes", "ficha", "folha", "ajustes"];
 
 // ---------- estado ----------
 let data = carregar();
 const hojeReal = new Date().toISOString().slice(0, 10);
 const ui = {
-  view: VIEWS.includes(location.hash.slice(1)) ? location.hash.slice(1) : "quadro",
+  view: VIEWS.includes(location.hash.slice(1)) ? location.hash.slice(1) : "pendencias",
   dia: hojeReal >= "2026-10-01" && hojeReal <= "2026-12-31" ? hojeReal : "2026-11-26",
   mes: null, gm: null, drawer: null, soFuros: false,
   filtroMes: { equipe: "", ordem: "he" }, filtroLanc: { tipo: "", mes: null },
@@ -68,7 +69,7 @@ const BADGE = { he: ["HE+", "he"], bh: ["BH+", "bh"], troca: ["TROCA", "troca"] 
 function render() {
   document.querySelectorAll("[data-nav]").forEach((a) => a.setAttribute("aria-current", a.dataset.nav === ui.view ? "page" : "false"));
   const main = $("#main");
-  const html = { quadro: vQuadro, lancamentos: vLancamentos, mes: vMes, ficha: vFicha, folha: vFolha }[ui.view]();
+  const html = { pendencias: vPendencias, ajustes: vAjustes, quadro: vQuadro, lancamentos: vLancamentos, mes: vMes, ficha: vFicha, folha: vFolha }[ui.view]();
   main.innerHTML = html;
   $("#drawer").innerHTML = ui.drawer ? vDrawer() : "";
   $("#drawer").hidden = !ui.drawer;
@@ -191,7 +192,7 @@ function vDrawer() {
 function drawerFuro(d) {
   const p = postoPorId(d.posto), t = TURNOS.find((x) => x.id === d.turno);
   const [ini, fim] = intervalo(d.ini, d.fim);
-  const lista = sugerir(data, ui.dia, d.posto, ini, fim);
+  const { remanejar, he } = sugerir(data, ui.dia, d.posto, ini, fim);
   const opcoes = [[fmtHm(t.ini), fmtHm(t.fim), `Só o ${t.nome.toLowerCase()}`]];
   const par = { t2: "t3", t4: "t1" }[t.id];
   if (par) opcoes.push([fmtHm(t.ini), fmtHm(TURNOS.find((x) => x.id === par).fim), "12 horas"]);
@@ -199,22 +200,27 @@ function drawerFuro(d) {
   return `<div class="dw-head"><div><p class="eyebrow">Cobrir vaga · ${SEMANA[diaSemana(ui.dia)].toLowerCase()} ${ddmm(ui.dia)}</p>
     <h2>${esc(p.nome)}</h2><p class="meta">${esc(p.sub || "")} ${t.nome}</p></div><button class="ic" data-act="fechar" aria-label="Fechar">×</button></div>
   <div class="dw-body">
+    <section class="bloco-rem"><h3>1 · Sem custo: remanejar</h3>
+    ${remanejar.length ? `<ul class="sug">${remanejar.map((s) => `<li><div class="sg"><b>${esc(s.gm.nome)}</b> <span class="meta">${s.gm.equipe} · está em ${esc(s.origem)} ${fmtHm(s.ini)}–${fmtHm(s.fim)}</span></div><span></span>
+      <button class="btn pri" data-act="remanejar" data-gm="${s.gm.id}">Remanejar</button></li>`).join("")}</ul>`
+      : `<p class="dica">Ninguém na reserva técnica ou à disposição nesse horário.</p>`}</section>
+    <section><h3>2 · Hora extra</h3>
     <fieldset class="horario"><legend>Horário</legend>
       <div class="opts">${opcoes.map(([a, b, l]) => `<button class="opt ${a === d.ini && b === d.fim ? "on" : ""}" data-act="furo-hora" data-ini="${a}" data-fim="${b}">${l}<small>${a}–${b}</small></button>`).join("")}</div>
       <div class="linha"><label>Início <input type="time" id="f-ini" value="${d.ini}"></label><label>Fim <input type="time" id="f-fim" value="${d.fim}"></label>
       <label>Tipo <select id="f-nat"><option value="HE" ${d.nat === "HE" ? "selected" : ""}>Hora extra</option><option value="BH_MAIS" ${d.nat === "BH_MAIS" ? "selected" : ""}>Banco de horas</option></select></label>
       <label>REQ <input id="f-req" value="${esc(d.req || "")}" placeholder="nº" size="6"></label></div>
       <p class="dica">${fmtHoras(fim - ini)} · ${d.nat === "HE" ? "conta no livro de HE do mês" : "crédito no banco de horas"}</p>
-    </fieldset>
+    </fieldset></section>
     <div class="busca"><input type="search" id="f-busca" placeholder="Buscar GM" aria-label="Buscar GM"></div>
-    <p class="dica">Ordem: quem já trabalha neste posto, depois descanso adequado, depois menos HE no mês (somando o que veio do mês anterior).</p>
-    <ul class="sug">${lista.map((s, i) => `<li data-nome="${esc(s.gm.nome.toLowerCase())}" ${i >= 15 ? 'class="mais" hidden' : ""}>
+    <p class="dica">Ordem: quem já trabalha neste posto, depois quem tem menos HE no mês (somando o que veio do mês anterior).</p>
+    <ul class="sug">${he.map((s, i) => `<li data-nome="${esc(s.gm.nome.toLowerCase())}" ${i >= 15 ? 'class="mais" hidden' : ""}>
       <div class="sg"><b>${esc(s.gm.nome)}</b> <span class="meta">${s.gm.equipe} · ${esc(postoPorId(s.gm.lotacao?.posto)?.nome || "")}</span>
-      <div class="notas">${s.notas.map((n) => `<span class="nota ${/emenda|não realiza|saiu|entra/.test(n) ? "atencao" : ""}">${esc(n)}</span>`).join("")}</div></div>
+      <div class="notas">${s.notas.map((n) => `<span class="nota ${/não realiza/.test(n) ? "atencao" : ""}">${esc(n)}</span>`).join("")}</div></div>
       <div class="sh"><span class="num">${fmtHoras(s.heMes)}</span><span class="meta">HE no mês${s.transporte ? ` +${fmtHoras(s.transporte)} transp.` : ""}</span></div>
       <button class="btn ${s.bloqueado ? "" : "pri"}" data-act="escalar" data-gm="${s.gm.id}" ${s.bloqueado ? "disabled" : ""}>Escalar</button></li>`).join("")}</ul>
-    ${lista.length > 15 ? `<button class="link" data-act="ver-todos">Ver todos os ${lista.length} disponíveis</button>` : ""}
-    ${!lista.length ? `<p class="dica">Ninguém disponível nesse horário.</p>` : ""}
+    ${he.length > 15 ? `<button class="link" data-act="ver-todos">Ver todos os ${he.length} disponíveis</button>` : ""}
+    ${!he.length ? `<p class="dica">Ninguém disponível nesse horário.</p>` : ""}
   </div>`;
 }
 function drawerGm(d) {
@@ -415,11 +421,14 @@ function vFolha() {
     return `<td class="gn">${aqui.map((d) => `<div class="${d.nat}">${esc(nomeGm(d.gm))}${d.nat === "he" ? (d.fixa ? "" : " HE+") : d.nat === "bh" ? " BH+" : ""}${d.req && !d.fixa ? ` <span class="r">${esc(d.req)}</span>` : ""}</div>`).join("")}</td>
       <td class="gh">${aqui.map((d) => `<div class="${d.nat}">(${textoCelula(d, t)})</div>`).join("")}</td>`;
   };
-  let corpo = "";
+  let corpo = "", corpoVerso = "";
   for (const s of data.secoes) {
     const ps = data.postos.filter((p) => p.secao === s.id);
-    corpo += `<tr class="sec"><th>${esc(s.nome)}</th>${TURNOS.map((t) => `<th colspan="2">${t.nome}</th>`).join("")}</tr>`;
-    corpo += ps.map((p) => `<tr><th class="p">${esc(p.nome)}${p.sub ? `<br><span class="sub">${esc(p.sub)}</span>` : ""}${p.obs ? `<br><span class="sub">(${esc(p.obs)})</span>` : ""}</th>${TURNOS.map((t) => cel(p, t)).join("")}</tr>`).join("");
+    const verso = ps.length && ps.every((p) => p.tipo === "reserva");
+    let html = "";
+    html += `<tr class="sec"><th>${esc(s.nome)}</th>${TURNOS.map((t) => `<th colspan="2">${t.nome}</th>`).join("")}</tr>`;
+    html += ps.map((p) => `<tr><th class="p">${esc(p.nome)}${p.sub && p.tipo !== "reserva" ? `<br><span class="sub">${esc(p.sub)}</span>` : ""}${p.obs ? `<br><span class="sub">(${esc(p.obs)})</span>` : ""}</th>${TURNOS.map((t) => cel(p, t)).join("")}</tr>`).join("");
+    if (verso) corpoVerso += html; else corpo += html;
   }
   const grupo = (tipos, titulo, colRet) => {
     const g = cd.afastados.filter((a) => tipos.includes(a.tipo));
@@ -436,6 +445,7 @@ function vFolha() {
     <table class="pt">${corpo}</table>
     <div class="quebra"></div>
     <table class="pt verso">
+      ${corpoVerso}
       ${grupo(["BH_COMP"], "BANCO DE HORAS / COMPENSAÇÃO", "REQ.")}
       ${grupo(["FOLGA"], "FOLGAS", "DATA")}
       ${grupo(["TROCA"], "TROCAS DE SERVIÇO", "SITUAÇÃO")}
@@ -443,6 +453,137 @@ function vFolha() {
       ${grupo(["FERIAS"], "FÉRIAS", "PERÍODO")}
     </table>
   </article></div>`;
+}
+
+
+// ---------- PENDÊNCIAS (semana) ----------
+const PERIODOS = [["dia", ["t2", "t3"], "Dia"], ["noite", ["t4", "t1"], "Noite"]];
+function pendenciasDoDia(dia) {
+  const cd = calcularDia(data, dia);
+  const out = [];
+  for (const p of data.postos) for (const [per, ts] of PERIODOS) {
+    const fs = cd.furos.filter((f) => f.posto === p.id && ts.includes(f.turno));
+    if (!fs.length) continue;
+    const t0 = TURNOS.find((x) => x.id === fs[0].turno), t1 = TURNOS.find((x) => x.id === fs[fs.length - 1].turno);
+    out.push({ dia, posto: p, per, turnos: fs.map((f) => f.turno), faltam: Math.max(...fs.map((f) => f.faltam)), ini: t0.ini, fim: t1.fim });
+  }
+  return out;
+}
+function vPendencias() {
+  const dias = Array.from({ length: 7 }, (_, i) => somaDias(ui.dia, i));
+  const porDia = dias.map((d) => ({ d, cd: calcularDia(data, d), pend: pendenciasDoDia(d) }));
+  let vagas = 0, cobertas = 0, heSemana = 0;
+  for (const { cd, d } of porDia) {
+    for (const p of data.postos) if (p.vagas && !cd.fa.some((o) => o.posto === p.id) && !(p.dias && !p.dias.includes(diaSemana(d))))
+      for (const t of TURNOS) vagas += p.vagas[t.id] || 0;
+    cobertas -= cd.furos.reduce((t, f) => t + f.faltam, 0);
+    heSemana += cd.designacoes.filter((x) => x.nat === "he" && !x.fixa).reduce((t, x) => t + x.fim - x.ini, 0);
+  }
+  cobertas += vagas;
+  const totalFuros = porDia.reduce((t, x) => t + x.pend.length, 0);
+  const livro = livroMes(data, mesDe(ui.dia));
+  const acima = [...livro.values()].filter((l) => l.total > data.config.tetoHE * 60).length;
+  const naReserva = porDia[0].cd.designacoes.filter((x) => postoPorId(x.posto)?.tipo === "reserva").length;
+
+  // mapa da semana
+  const postos = data.postos.filter((p) => p.vagas && Object.values(p.vagas).some(Boolean));
+  const linhas = data.secoes.map((s) => {
+    const ps = postos.filter((p) => p.secao === s.id);
+    if (!ps.length) return "";
+    return `<tr class="secao"><th colspan="${1 + dias.length * 2}">${esc(s.nome)}</th></tr>` + ps.map((p) => `<tr><th scope="row">${esc(p.nome)}</th>${porDia.map(({ d, cd }) => PERIODOS.map(([per, ts]) => {
+      const precisa = ts.some((t) => p.vagas[t]) && !(p.dias && !p.dias.includes(diaSemana(d)));
+      if (!precisa) return `<td class="m-na ${per}"></td>`;
+      if (cd.fa.some((o) => o.posto === p.id)) return `<td class="m-fa ${per}" title="Fora de atividade">FA</td>`;
+      const f = cd.furos.filter((x) => x.posto === p.id && ts.includes(x.turno));
+      if (!f.length) return `<td class="m-ok ${per}" title="${esc(p.nome)} · ${per} ${ddmm(d)} · coberto"><span aria-label="coberto">●</span></td>`;
+      const n = Math.max(...f.map((x) => x.faltam));
+      return `<td class="m-furo ${per}"><button data-act="pend-abrir" data-dia="${d}" data-posto="${p.id}" data-turno="${f[0].turno}" title="${esc(p.nome)} · ${per} ${ddmm(d)} · falta ${n}">${n}</button></td>`;
+    }).join("")).join("")}</tr>`).join("");
+  }).join("");
+
+  const cards = porDia.filter((x) => x.pend.length).map(({ d, pend }) => `<section class="pdia"><header><h3>${SEMANA[diaSemana(d)].toLowerCase()} <b>${ddmm(d)}</b></h3>
+      <span class="n">${pend.length}</span><button class="link" data-act="ir-dia" data-dia="${d}">Abrir quadro do dia →</button></header>
+      <ul>${pend.map((x) => {
+        const { remanejar, he } = sugerir(data, d, x.posto.id, x.ini, x.fim);
+        const r = remanejar[0], h = he.find((s) => !s.bloqueado);
+        return `<li><div class="pinfo"><b>${esc(x.posto.nome)}</b> <span class="meta">${x.per === "dia" ? "Dia" : "Noite"} ${fmtHm(x.ini)}–${fmtHm(x.fim)}${x.faltam > 1 ? ` · faltam ${x.faltam}` : ""}</span></div>
+          <div class="pacoes">${r ? `<button class="btn rem" data-act="pend-rem" data-dia="${d}" data-posto="${x.posto.id}" data-gm="${r.gm.id}" title="Remanejar ${esc(r.gm.nome)} da ${esc(r.origem)}">Remanejar <b>${esc(r.gm.nome)}</b><small>${esc(r.origem)} · sem custo</small></button>` : ""}
+          ${h ? `<button class="btn hebtn" data-act="pend-he" data-dia="${d}" data-posto="${x.posto.id}" data-gm="${h.gm.id}" data-ini="${fmtHm(x.ini)}" data-fim="${fmtHm(x.fim)}">HE <b>${esc(h.gm.nome)}</b><small>${fmtHoras(x.fim - x.ini)} · tem ${fmtHoras(h.heMes)} no mês</small></button>` : ""}
+          <button class="link" data-act="pend-abrir" data-dia="${d}" data-posto="${x.posto.id}" data-turno="${x.turnos[0]}">Outras opções</button></div></li>`;
+      }).join("")}</ul></section>`).join("");
+
+  return `<div class="barra"><div class="datas"><button class="ic" data-act="dia" data-n="-7" aria-label="Semana anterior">‹</button>
+    <h2 class="titulo-mes">Semana de ${ddmm(dias[0])} a ${ddmm(dias[6])}</h2><button class="ic" data-act="dia" data-n="7" aria-label="Próxima semana">›</button>
+    ${ui.dia !== hojeBase() ? `<button class="link" data-act="ir-hoje">Voltar para hoje</button>` : ""}</div></div>
+  <div class="resumo">
+    <div class="kpi ${totalFuros ? "ruim" : "bom"}"><span class="v">${totalFuros}</span><span class="l">furos para resolver em 7 dias</span></div>
+    <div class="kpi"><span class="v">${vagas ? Math.round((cobertas / vagas) * 100) : 100}%</span><span class="l">das vagas cobertas na semana</span></div>
+    <div class="kpi"><span class="v">${naReserva}</span><span class="l">na reserva técnica em ${ddmm(dias[0])}</span></div>
+    <div class="kpi"><span class="v">${fmtHoras(heSemana)}</span><span class="l">de HE lançada na semana</span></div>
+    <div class="kpi ${acima ? "atencao" : ""}"><span class="v">${acima}</span><span class="l">GM${acima === 1 ? "" : "s"} acima de ${data.config.tetoHE}h no mês</span></div>
+  </div>
+  <div class="cols-pend">
+    <section class="painel"><h3>Cobertura da semana</h3><p class="dica">Cada bolinha é um posto coberto. Número vermelho = vagas descobertas; clique para resolver.</p>
+      <div class="tabela-wrap mapa-wrap"><table class="mapa"><thead><tr><th></th>${dias.map((d) => `<th colspan="2" class="${d === ui.dia ? "hoje" : ""}">${SEMANA[diaSemana(d)].slice(0, 3)} ${ddmm(d)}</th>`).join("")}</tr>
+      <tr><th></th>${dias.map(() => `<th class="sub dia">D</th><th class="sub noite">N</th>`).join("")}</tr></thead><tbody>${linhas}</tbody></table></div></section>
+    <section class="painel fila"><h3>O que falta resolver</h3>
+      <p class="dica">Primeiro a sugestão sem custo (reserva técnica ou à disposição); depois a HE para quem tem menos horas no mês. Um clique lança.</p>
+      ${cards || `<p class="tudo-ok">Semana coberta. Nada pendente.</p>`}</section>
+  </div>`;
+}
+const hojeBase = () => (hojeReal >= "2026-10-01" && hojeReal <= "2026-12-31" ? hojeReal : "2026-11-26");
+
+// ---------- AJUSTES ----------
+function vAjustes() {
+  const c = data.config;
+  const anc = c.ancora || { data: ui.dia, equipes: [] };
+  const alt = (per) => data.equipes.filter((e) => e.tipo === "alternado" && e.periodo === per);
+  const sel = (per) => `<select id="aj-${per}">${alt(per).map((e) => `<option value="${e.id}" ${anc.equipes.includes(e.id) ? "selected" : ""}>${esc(e.nome)} (${e.id})</option>`).join("")}</select>`;
+  const prox = Array.from({ length: 6 }, (_, i) => somaDias(anc.data, i));
+  return `<section class="painel ajustes"><h2>Alternância das equipes 12x36</h2>
+    <p class="dica">Informe um dia qualquer e quais equipes trabalham nele. O sistema alterna dia sim, dia não a partir daí, para frente e para trás.</p>
+    <div class="linha"><label>Dia de referência <input type="date" id="aj-data" value="${anc.data}"></label>
+      <label>Equipe do dia ${sel("dia")}</label><label>Equipe da noite ${sel("noite")}</label></div>
+    <p class="dica">Próximos dias: ${prox.map((d) => `${ddmm(d)} ${calcularDia(data, d).equipes.join("/")}`).join(" · ")}</p>
+    <h2>Horas extras</h2>
+    <div class="linha"><label>Teto de HE paga por mês (horas) <input type="number" id="aj-teto" min="1" max="300" value="${c.tetoHE}"></label></div>
+    <p class="dica">O que passar do teto vai para o mês seguinte.</p>
+    <h2>Folha</h2>
+    <label>Cabeçalho <input id="aj-cab" value="${esc(c.cabecalho)}" size="50"></label>
+    <div><button class="btn pri" data-act="salvar-ajustes">Salvar ajustes</button></div></section>`;
+}
+
+// ---------- LANÇAMENTO RÁPIDO ----------
+const EXEMPLOS = ["folga {A} 28/11", "férias {A} 1/12 a 30/12 req 1402", "he {A} hoje 19-01 vtr 1317 req 1504", "troca {A} por {B} 29/11", "remanejar {A} parcão amanhã", "fa vtr 1281 26/11 a 30/11"];
+function previaComando(txt) {
+  const box = $("#cmd-prev");
+  if (!box) return;
+  if (!txt.trim()) {
+    const [A, B] = [data.gms[5]?.nome || "", data.gms[60]?.nome || ""];
+    box.innerHTML = `<p class="dica">Escreva como falaria. Exemplos (clique para usar):</p><div class="exs">${EXEMPLOS.map((e) => { const x = e.replace("{A}", A.toLowerCase()).replace("{B}", B.toLowerCase()); return `<button class="ex" data-act="cmd-ex" data-txt="${esc(x)}">${esc(x)}</button>`; }).join("")}</div>`;
+    return;
+  }
+  const r = interpretar(txt, data, ui.dia);
+  const campo = (rot, val, ok = true) => `<span class="cp ${ok ? "" : "falta"}"><small>${rot}</small>${val}</span>`;
+  const partes = [campo("Tipo", r.tipo ? esc(TIPOS[r.tipo]) : "?", !!r.tipo)];
+  if (r.tipo !== "FA") partes.push(campo("GM", r.gm ? esc(nomeGm(r.gm)) : "?", !!r.gm));
+  if (r.tipo === "TROCA") partes.push(campo("Quem assume", r.substituto ? esc(nomeGm(r.substituto)) : "?", !!r.substituto));
+  partes.push(campo(r.ate && r.ate !== r.de ? "Período" : "Data", `${SEMANA[diaSemana(r.de)].slice(0, 3).toLowerCase()} ${ddmm(r.de)}${r.ate && r.ate !== r.de ? ` a ${ddmm(r.ate)}` : ""}${r.dataPresumida ? " (dia aberto)" : ""}`));
+  if (r.ini || r.tipo === "HE" || r.tipo === "BH_MAIS") partes.push(campo("Horário", r.ini ? `${r.ini}–${r.fim}` : "?", !!r.ini));
+  if (r.posto || ["HE", "BH_MAIS", "REMANEJ", "FA"].includes(r.tipo)) partes.push(campo(r.tipo === "FA" ? "Viatura" : "Posto", r.posto ? esc(postoPorId(r.posto).nome) : "?", !!r.posto));
+  if (r.req) partes.push(campo("REQ", esc(r.req)));
+  box.innerHTML = `<div class="cps">${partes.join("")}</div>
+    ${r.ambiguo ? `<p class="dica">"${esc(r.ambiguo.termo)}" pode ser: ${r.ambiguo.opcoes.map(esc).join(", ")}</p>` : ""}
+    ${r.completo ? `<p class="ok-linha"><button class="btn pri" data-act="cmd-lancar">Lançar</button> <span class="dica">ou tecle Enter</span></p>` : `<p class="dica falta-txt">Falta: ${r.faltando.join(", ")}</p>`}`;
+}
+function lancarComando() {
+  const inp = $("#cmd");
+  const r = interpretar(inp.value, data, ui.dia);
+  if (!r.completo) { previaComando(inp.value); return; }
+  const o = { id: novoId(), tipo: r.tipo, de: r.de };
+  for (const k of ["gm", "substituto", "ate", "ini", "fim", "posto", "req"]) if (r[k]) o[k] = r[k];
+  mudar(`Lançado: ${TIPOS[r.tipo]}${o.gm ? " · " + nomeGm(o.gm) : ""} · ${ddmm(o.de)}${o.ate && o.ate !== o.de ? " a " + ddmm(o.ate) : ""}`, () => data.ocorrencias.push(o));
+  inp.value = ""; previaComando("");
 }
 
 // ---------- eventos ----------
@@ -463,6 +604,21 @@ document.addEventListener("click", (e) => {
     case "mes": ui.mes = Number(el.dataset.n) > 0 ? mesSeguinte(ui.mes) : mesAnterior(ui.mes); render(); break;
     case "lmes": ui.filtroLanc.mes = Number(el.dataset.n) > 0 ? mesSeguinte(ui.filtroLanc.mes) : mesAnterior(ui.filtroLanc.mes); render(); break;
     case "furo": abrirFuro(el.dataset.posto, el.dataset.turno); break;
+    case "remanejar": mudar(`${nomeGm(el.dataset.gm)} remanejado para ${postoPorId(d.posto).nome}`, () => { data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: el.dataset.gm, de: ui.dia, ate: ui.dia, posto: d.posto, obs: "Da reserva técnica" }); ui.drawer = null; }); break;
+    case "pend-rem": mudar(`${nomeGm(el.dataset.gm)} remanejado para ${postoPorId(el.dataset.posto).nome} em ${ddmm(el.dataset.dia)}`, () => data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: el.dataset.gm, de: el.dataset.dia, ate: el.dataset.dia, posto: el.dataset.posto, obs: "Da reserva técnica" })); break;
+    case "pend-he": mudar(`HE: ${nomeGm(el.dataset.gm)} ${el.dataset.ini}–${el.dataset.fim} em ${postoPorId(el.dataset.posto).nome} (${ddmm(el.dataset.dia)})`, () => data.ocorrencias.push({ id: novoId(), tipo: "HE", gm: el.dataset.gm, de: el.dataset.dia, ini: el.dataset.ini, fim: el.dataset.fim, posto: el.dataset.posto, req: "" })); break;
+    case "pend-abrir": ui.dia = el.dataset.dia; ui.mes = mesDe(ui.dia); ui.view = "quadro"; location.hash = "quadro"; abrirFuro(el.dataset.posto, el.dataset.turno); break;
+    case "ir-hoje": ui.dia = hojeBase(); ui.mes = mesDe(ui.dia); render(); break;
+    case "cmd-ex": $("#cmd").value = el.dataset.txt; $("#cmd").focus(); previaComando(el.dataset.txt); return;
+    case "cmd-lancar": lancarComando(); return;
+    case "salvar-ajustes": {
+      const teto = Number($("#aj-teto").value);
+      if (!(teto > 0)) { toast("Informe um teto de HE válido."); break; }
+      data.config.ancora = { data: $("#aj-data").value, equipes: [$("#aj-dia").value, $("#aj-noite").value] };
+      data.config.tetoHE = teto; data.config.cabecalho = $("#aj-cab").value;
+      data._versao++; salvar(); render(); toast("Ajustes salvos. A escala foi recalculada.");
+      break;
+    }
     case "furo-hora": d.ini = el.dataset.ini; d.fim = el.dataset.fim; render(); break;
     case "ver-todos": document.querySelectorAll(".sug li.mais").forEach((li) => (li.hidden = false)); el.hidden = true; break;
     case "escalar": {
@@ -533,15 +689,23 @@ document.addEventListener("change", (e) => {
   else if (id === "fi-semhe") { const g = gmPorId(ui.gm); g.naoFazHE = e.target.checked; data._versao++; salvar(); render(); toast(g.naoFazHE ? `${g.nome} não aparece mais nas sugestões de HE` : `${g.nome} volta às sugestões de HE`); }
 });
 document.addEventListener("input", (e) => {
+  if (e.target.id === "cmd") { previaComando(e.target.value); return; }
   const map = { "f-busca": ".sug li", "m-busca": "table.mes tbody tr", "lf-busca": "table.lanc tbody tr" };
   const sel = map[e.target.id];
   if (!sel) return;
   const q = e.target.value.trim().toLowerCase();
   document.querySelectorAll(sel).forEach((el) => { el.hidden = q ? !el.dataset.nome.includes(q) : el.classList.contains("mais"); });
 });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape" && ui.drawer) { ui.drawer = null; render(); } });
+document.addEventListener("keydown", (e) => {
+  if (e.target.id === "cmd" && e.key === "Enter") { e.preventDefault(); lancarComando(); return; }
+  if (e.target.id === "cmd" && e.key === "Escape") { e.target.blur(); return; }
+  if (e.key === "/" && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName || "")) { e.preventDefault(); $("#cmd").focus(); return; }
+  if (e.key === "Escape" && ui.drawer) { ui.drawer = null; render(); }
+});
+document.addEventListener("focusin", (e) => { if (e.target.id === "cmd") { $("#cmd-prev").hidden = false; previaComando(e.target.value); } });
+document.addEventListener("focusout", (e) => { if (e.target.id === "cmd") setTimeout(() => { if (!document.querySelector(".cmd")?.contains(document.activeElement)) $("#cmd-prev").hidden = true; }, 150); });
 $("#veu").addEventListener("click", () => { ui.drawer = null; render(); });
 window.addEventListener("hashchange", () => { const h = location.hash.slice(1); if (VIEWS.includes(h) && h !== ui.view) { ui.view = h; ui.drawer = null; render(); } });
 
-void hm; void trabalhaNoDia; void resumoMes;
+void hm; void trabalhaNoDia; void resumoMes; void norm;
 render();
