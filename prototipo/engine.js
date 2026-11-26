@@ -18,8 +18,11 @@ export const AFASTAMENTOS = {
   LICENCA: "Licença",
   ATESTADO: "Atestado",
   CURSO: "Curso",
+  FALTA: "Falta",
   BH_COMP: "Banco de horas (compensação)",
 };
+// Afastamentos de um dia só (valem apenas se o GM estaria de serviço)
+export const DE_UM_DIA = ["FOLGA", "FALTA", "BH_COMP"];
 
 export const TIPOS = {
   ...AFASTAMENTOS,
@@ -28,6 +31,7 @@ export const TIPOS = {
   TROCA: "Troca de serviço",
   REMANEJ: "Remanejamento",
   FA: "Viatura fora de atividade",
+  HORARIO: "Horário alterado",
 };
 
 // ---------- datas ----------
@@ -122,6 +126,20 @@ export function calcularDia(data, dia) {
     }
   }
 
+  // 1b. Horário alterado no dia: o que ficar fora do horário normal vira HE automaticamente
+  for (const oc of ocs.filter((o) => o.tipo === "HORARIO" && o.de === dia)) {
+    const idx = base.findIndex((d) => d.gm === oc.gm && `${d.ini}-${d.fim}` === oc.alvo);
+    if (idx < 0) continue;
+    const d = base[idx];
+    const [a, b] = intervalo(oc.ini, oc.fim);
+    const marca = { alvo: oc.alvo, ajuste: oc.id };
+    const partes = [];
+    if (a < d.ini) partes.push({ ...d, ...marca, id: d.id + "a", ini: a, fim: Math.min(b, d.ini), nat: "he", fixa: false, req: oc.req || "", extensao: true });
+    if (Math.min(b, d.fim) > Math.max(a, d.ini)) partes.push({ ...d, ...marca, ini: Math.max(a, d.ini), fim: Math.min(b, d.fim) });
+    if (b > d.fim) partes.push({ ...d, ...marca, id: d.id + "z", ini: Math.max(a, d.fim), fim: b, nat: "he", fixa: false, req: oc.req || "", extensao: true });
+    base.splice(idx, 1, ...partes);
+  }
+
   // 2. Afastamentos retiram o GM do dia
   const afastados = [];
   const afastadoHoje = new Map();
@@ -131,7 +149,7 @@ export function calcularDia(data, dia) {
     if (!gm) continue;
     // Folga e compensação só fazem sentido em dia de serviço; afastamentos longos aparecem sempre.
     const escalado = trabalhaNoDia(data, gm, dia);
-    if ((oc.tipo === "FOLGA" || oc.tipo === "BH_COMP") && !escalado) continue;
+    if (DE_UM_DIA.includes(oc.tipo) && !escalado) continue;
     if (!escalado && !["FERIAS", "LICENCA", "ATESTADO", "CURSO"].includes(oc.tipo)) continue;
     afastadoHoje.set(gm.id, oc);
     if (escalado) afastados.push({ gm: gm.id, tipo: oc.tipo, oc, minutos: base.filter((d) => d.gm === gm.id && d.nat === "normal").reduce((t, d) => t + d.fim - d.ini, 0) });
@@ -204,7 +222,7 @@ export function ocupacao(data, gmId, dia) {
 }
 export function afastamentoNoDia(data, gmId, dia) {
   return data.ocorrencias.find((o) => o.gm === gmId && ["FERIAS", "LICENCA", "ATESTADO", "CURSO"].includes(o.tipo) && ocorrenciaCobre(o, dia))
-    || data.ocorrencias.find((o) => o.gm === gmId && (o.tipo === "FOLGA" || o.tipo === "BH_COMP") && o.de === dia);
+    || data.ocorrencias.find((o) => o.gm === gmId && DE_UM_DIA.includes(o.tipo) && o.de === dia);
 }
 
 // ---------- sugestão para cobrir furo ----------
@@ -216,7 +234,7 @@ export function sugerir(data, dia, postoId, ini, fim) {
   const reserva = new Set(data.postos.filter((p) => p.tipo === "reserva").map((p) => p.id));
   const livreParaRemanejar = (d) => d.nat !== "he" && d.nat !== "bh" && (d.posto === null || reserva.has(d.posto));
   const remanejar = [], he = [];
-  const afastados = new Set(data.ocorrencias.filter((o) => (["FERIAS", "LICENCA", "ATESTADO", "CURSO"].includes(o.tipo) && ocorrenciaCobre(o, dia)) || ((o.tipo === "FOLGA" || o.tipo === "BH_COMP") && o.de === dia)).map((o) => o.gm));
+  const afastados = new Set(data.ocorrencias.filter((o) => (["FERIAS", "LICENCA", "ATESTADO", "CURSO"].includes(o.tipo) && ocorrenciaCobre(o, dia)) || (DE_UM_DIA.includes(o.tipo) && o.de === dia)).map((o) => o.gm));
   const ontemNoite = calcularDia(data, somaDias(dia, -1)).designacoes.filter((d) => d.fim - 1440 > ini && d.ini - 1440 < fim).map((d) => d.gm);
   for (const gm of data.gms) {
     if (gm.ativo === false) continue;
@@ -315,4 +333,60 @@ export function saldoBH(data, gmId, mes) {
     m = mesSeguinte(m);
   }
   return s;
+}
+
+// ---------- pendências e preenchimento automático ----------
+const PERIODOS_P = [["dia", ["t2", "t3"]], ["noite", ["t4", "t1"]]];
+export function pendencias(data, dia) {
+  const cd = calcularDia(data, dia);
+  const out = [];
+  for (const p of data.postos) for (const [per, ts] of PERIODOS_P) {
+    const fs = cd.furos.filter((f) => f.posto === p.id && ts.includes(f.turno));
+    if (!fs.length) continue;
+    const t0 = TURNOS.find((x) => x.id === fs[0].turno), t1 = TURNOS.find((x) => x.id === fs[fs.length - 1].turno);
+    out.push({ dia, posto: p.id, per, turnos: fs.map((f) => f.turno), faltam: Math.max(...fs.map((f) => f.faltam)), ini: t0.ini, fim: t1.fim });
+  }
+  return out;
+}
+
+// Propõe como cobrir todos os furos dos dias informados, sem gravar nada:
+// 1º quem está na reserva técnica / à disposição (remanejar), 2º HE para quem conhece o posto e tem menos horas no mês.
+export function planejarCobertura(data, dias) {
+  const plano = [];
+  const heExtra = new Map();
+  const reserva = new Set(data.postos.filter((p) => p.tipo === "reserva").map((p) => p.id));
+  for (const dia of dias) {
+    const cd = calcularDia(data, dia);
+    const livro = livroMes(data, mesDe(dia));
+    const afast = new Set(data.ocorrencias.filter((o) => (["FERIAS", "LICENCA", "ATESTADO", "CURSO"].includes(o.tipo) && ocorrenciaCobre(o, dia)) || (DE_UM_DIA.includes(o.tipo) && o.de === dia)).map((o) => o.gm));
+    const ocup = new Map();
+    const marca = (g, a, b) => { if (!ocup.has(g)) ocup.set(g, []); ocup.get(g).push([a, b]); };
+    for (const d of cd.designacoes) marca(d.gm, d.ini, d.fim);
+    for (const d of calcularDia(data, somaDias(dia, -1)).designacoes) if (d.fim > 1440) marca(d.gm, d.ini - 1440, d.fim - 1440);
+    const livres = cd.designacoes.filter((d) => d.nat === "normal" && (d.posto === null || reserva.has(d.posto)));
+    const usados = new Set();
+    for (const p of pendencias(data, dia)) for (let k = 0; k < p.faltam; k++) {
+      const rv = livres.find((d) => !usados.has(d.gm) && sobrepoe(d.ini, d.fim, p.ini, p.fim) >= Math.min(360, p.fim - p.ini));
+      if (rv) {
+        usados.add(rv.gm);
+        plano.push({ dia, posto: p.posto, tipo: "REMANEJ", gm: rv.gm, ini: rv.ini, fim: rv.fim, de: rv.posto === null ? "à disposição" : "reserva técnica" });
+        continue;
+      }
+      const mes = mesDe(dia);
+      let melhor = null;
+      for (const gm of data.gms) {
+        if (gm.ativo === false || gm.naoFazHE || afast.has(gm.id)) continue;
+        if ((ocup.get(gm.id) || []).some(([a, b]) => sobrepoe(a, b, p.ini, p.fim) > 0)) continue;
+        const l = livro.get(gm.id) || { he: 0, transporte: 0 };
+        const horas = l.he + l.transporte + (heExtra.get(gm.id + mes) || 0);
+        const mesmo = gm.lotacao?.posto === p.posto ? 1 : 0;
+        if (!melhor || mesmo > melhor.mesmo || (mesmo === melhor.mesmo && horas < melhor.horas) || (mesmo === melhor.mesmo && horas === melhor.horas && gm.nome < melhor.gm.nome)) melhor = { gm, horas, mesmo };
+      }
+      if (!melhor) { plano.push({ dia, posto: p.posto, tipo: null, ini: p.ini, fim: p.fim }); continue; }
+      marca(melhor.gm.id, p.ini, p.fim);
+      heExtra.set(melhor.gm.id + mes, (heExtra.get(melhor.gm.id + mes) || 0) + p.fim - p.ini);
+      plano.push({ dia, posto: p.posto, tipo: "HE", gm: melhor.gm.id, ini: p.ini, fim: p.fim, horasNoMes: melhor.horas, conhecePosto: !!melhor.mesmo });
+    }
+  }
+  return plano;
 }

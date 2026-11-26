@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { calcularDia, livroMes, resumoMes, intervalo, sugerir, saldoBH, minutosNoturnos } from "./engine.js";
+import { calcularDia, livroMes, resumoMes, intervalo, sugerir, saldoBH, minutosNoturnos, planejarCobertura } from "./engine.js";
 import { criarExemplo } from "./seed.js";
 
 const base = () => ({
@@ -139,4 +139,28 @@ test("dados de exemplo geram escala consistente", () => {
   const acima = [...livro.values()].filter((l) => l.total > 3600);
   assert.ok(acima.length >= 1, "algum GM passa do teto");
   console.log(`seed ${ms}ms, ${data.gms.length} GMs, ${data.ocorrencias.length} ocorrências, furos 26/11: ${cd.furos.length}, alertas: ${cd.alertas.length}`);
+});
+
+test("horário alterado: o que passa do normal vira HE sozinho", () => {
+  const data = base();
+  const d = diaDe(data, "D1");
+  data.ocorrencias.push({ id: "h1", tipo: "HORARIO", gm: "a", de: d, alvo: "420-1140", ini: "07:00", fim: "21:00" }); data._versao++;
+  const des = calcularDia(data, d).designacoes.filter((x) => x.gm === "a");
+  assert.deepEqual(des.map((x) => [x.ini, x.fim, x.nat]), [[420, 1140, "normal"], [1140, 1260, "he"]]);
+  assert.equal(livroMes(data, "2026-11").get("a").he, 120);
+  data.ocorrencias[0].ini = "09:00"; data.ocorrencias[0].fim = "19:00"; data._versao++;
+  const r = calcularDia(data, d).designacoes.filter((x) => x.gm === "a");
+  assert.deepEqual(r.map((x) => [x.ini, x.fim, x.nat]), [[540, 1140, "normal"]]);
+});
+
+test("falta retira o GM e o planejador cobre a semana sem repetir pessoas", () => {
+  const data = base();
+  data.postos.push({ id: "res", nome: "RESERVA", tipo: "reserva" });
+  data.gms.push({ id: "r", nome: "R", equipe: "D1", lotacao: { posto: "res", segmentos: [{ ini: "07:00", fim: "19:00" }] } });
+  const d = diaDe(data, "D1");
+  data.ocorrencias.push({ id: "f1", tipo: "FALTA", gm: "a", de: d }, { id: "f2", tipo: "FOLGA", gm: "b", de: d }); data._versao++;
+  const plano = planejarCobertura(data, [d]).filter((x) => x.posto === "vtr");
+  assert.equal(plano.length, 2);
+  assert.equal(plano[0].tipo, "REMANEJ"); assert.equal(plano[0].gm, "r");
+  assert.equal(plano[1].tipo, "HE"); assert.equal(plano[1].gm, "c");
 });

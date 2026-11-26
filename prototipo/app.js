@@ -1,6 +1,6 @@
 import {
   TURNOS, TIPOS, AFASTAMENTOS, calcularDia, sugerir, livroMes, resumoMes, saldoBH, somaDias, diaSemana, diasDoMes,
-  mesDe, mesSeguinte, fmtHm, fmtHoras, intervalo, sobrepoe, trabalhaNoDia, hm,
+  mesDe, mesSeguinte, fmtHm, fmtHoras, intervalo, sobrepoe, trabalhaNoDia, hm, planejarCobertura,
 } from "./engine.js";
 import { criarExemplo } from "./seed.js";
 import { interpretar, norm } from "./comando.js";
@@ -74,6 +74,8 @@ function render() {
   $("#drawer").innerHTML = ui.drawer ? vDrawer() : "";
   $("#drawer").hidden = !ui.drawer;
   $("#veu").hidden = !ui.drawer;
+  $("#btn-desfazer").disabled = !desfazer.length;
+  if (ui.pop) desenharPop(); else fecharPop();
 }
 
 let toastTimer;
@@ -97,15 +99,19 @@ function chip(d, t) {
   const [txt, cls] = BADGE[d.nat] || [];
   const extras = [];
   if (d.fixa) extras.push(`<span class="tag he">HE fixa</span>`);
+  else if (d.extensao) extras.push(`<span class="tag he">HE+ extensão</span>`);
   else if (txt) extras.push(`<span class="tag ${cls}">${txt}</span>`);
   if (d.remanejado) extras.push(`<span class="tag rem">REMANEJ.</span>`);
+  if (d.ajuste && !d.extensao) extras.push(`<span class="tag rem">horário alterado</span>`);
   if (d.req && !d.fixa) extras.push(`<span class="req">REQ ${esc(d.req)}</span>`);
-  return `<button class="chip ${cls || ""} ${d.conflito ? "conflito" : ""}" data-act="gm" data-gm="${d.gm}" data-des="${d.id}" title="${esc(rotuloLotacao(g))}">
-    <span class="nm">${esc(g?.nome)}</span>${d.funcao ? `<span class="fn">${esc(d.funcao[0])}</span>` : ""}
-    <span class="hr">${textoCelula(d, t)}</span>${extras.join("")}</button>`;
+  return `<div class="chip ${cls || ""} ${d.conflito ? "conflito" : ""}">
+    <button class="nm" data-act="pop-gm" data-des="${d.id}" title="Clique para trocar o GM">${esc(g?.nome)}</button>${d.funcao ? `<span class="fn" title="${esc(d.funcao)}">${esc(d.funcao[0])}</span>` : ""}
+    <button class="hr" data-act="pop-hora" data-des="${d.id}" title="Clique para mudar o horário">${textoCelula(d, t)}</button>${extras.join("")}
+    <button class="mais" data-act="gm" data-gm="${d.gm}" aria-label="Mais opções de ${esc(g?.nome)}" title="Folga, afastamento, ficha…">⋯</button></div>`;
 }
 function vQuadro() {
   const cd = calcularDia(data, ui.dia);
+  ui.desMap = new Map(cd.designacoes.map((d) => [d.id, d]));
   const amanha = somaDias(ui.dia, 1);
   const eqDia = cd.equipes.filter((e) => equipe(e).periodo === "dia"), eqNoite = cd.equipes.filter((e) => equipe(e).periodo === "noite");
   const heHoje = cd.designacoes.filter((d) => d.nat === "he").reduce((t, d) => t + d.fim - d.ini, 0);
@@ -129,8 +135,9 @@ function vQuadro() {
           const aqui = desP.filter((d) => sobrepoe(d.ini, d.fim, t.ini, t.fim) > 0).sort((a, b) => a.ini - b.ini);
           const furo = furosP.find((f) => f.turno === t.id);
           let h = aqui.map((d) => chip(d, t)).join("");
-          if (furo) h += `<button class="furo" data-act="furo" data-posto="${p.id}" data-turno="${t.id}">Cobrir · falta ${furo.faltam}</button>`;
-          if (!aqui.length && !furo) h = p.rondas ? `<span class="rondas">VTR/RONDAS FREQUENTES</span>` : naoHoje && p.vagas ? `<span class="vazio">não funciona hoje</span>` : `<span class="vazio">—</span>`;
+          if (furo) h += `<button class="furo" data-act="pop-add" data-posto="${p.id}" data-turno="${t.id}">Cobrir · falta ${furo.faltam}</button>`;
+          if (!aqui.length && !furo) h = p.rondas ? `<span class="rondas">VTR/RONDAS FREQUENTES</span>` : naoHoje && p.vagas ? `<span class="vazio">não funciona hoje</span>` : "";
+          if (!furo) h += `<button class="add" data-act="pop-add" data-posto="${p.id}" data-turno="${t.id}" aria-label="Pôr GM em ${esc(p.nome)}, ${t.nome}">+ pôr GM</button>`;
           return `<td class="${t.id === "t2" || t.id === "t3" ? "dia" : "noite"}">${h}</td>`;
         }).join("");
       }
@@ -142,7 +149,7 @@ function vQuadro() {
   // efetivo fora da escala
   const grupos = {};
   for (const a of cd.afastados) (grupos[a.tipo] ||= []).push(a);
-  const blocosFora = ["FOLGA", "FERIAS", "LICENCA", "ATESTADO", "CURSO", "BH_COMP", "TROCA"].filter((k) => grupos[k]).map((k) => `
+  const blocosFora = ["FOLGA", "FALTA", "FERIAS", "LICENCA", "ATESTADO", "CURSO", "BH_COMP", "TROCA"].filter((k) => grupos[k]).map((k) => `
     <section class="fora-g"><h4>${k === "TROCA" ? "Trocas (titular fora)" : TIPOS[k]} <span class="n">${grupos[k].length}</span></h4><ul>
     ${grupos[k].map((a) => `<li><button class="link" data-act="gm" data-gm="${a.gm}">${esc(nomeGm(a.gm))}</button>
       <span class="meta">${equipe(gmPorId(a.gm)?.equipe)?.id || ""}${a.oc.ate && a.oc.ate !== a.oc.de ? ` · volta ${ddmm(somaDias(a.oc.ate, 1))}` : ""}${a.tipo === "TROCA" ? ` · coberto por ${esc(nomeGm(a.oc.substituto))}` : ""}${a.oc.req ? ` · REQ ${esc(a.oc.req)}` : ""}</span></li>`).join("")}</ul></section>`).join("");
@@ -169,8 +176,11 @@ function vQuadro() {
     <div class="kpi"><span class="v">${fmtHoras(heHoje)}</span><span class="l">de HE neste serviço</span></div>
     <div class="kpi"><span class="v">${new Set(cd.designacoes.filter((d) => d.posto).map((d) => d.gm)).size}</span><span class="l">GMs escalados</span></div>
     <div class="kpi"><span class="v">${cd.afastados.length}</span><span class="l">fora da escala hoje</span></div>
-    <label class="toggle"><input type="checkbox" id="q-sofuros" ${ui.soFuros ? "checked" : ""}> Só postos com furo</label>
+    <div class="kpi-acoes">${furosTotal ? `<button class="btn pri grande" data-act="auto" data-dias="1">Preencher furos sozinho</button>` : ""}
+    <label class="toggle"><input type="checkbox" id="q-sofuros" ${ui.soFuros ? "checked" : ""}> Só postos com furo</label></div>
   </div>
+  <p class="dica como">Clique no <b>nome</b> para trocar o GM, no <b>horário</b> para mudar a hora, em <b>+ pôr GM</b> para colocar alguém. Hora além do horário normal vira hora extra sozinha.</p>
+  ${painelPlano()}
   ${cd.alertas.length ? `<div class="alertas">${cd.alertas.map((a) => `<p class="${a.nivel}">${esc(a.texto)}</p>`).join("")}</div>` : ""}
   ${disp}
   <div class="tabela-wrap"><table class="quadro">
@@ -278,7 +288,7 @@ function camposForm(tipo) {
   if (tipo === "TROCA") return `${gmSel}<label>Substituto <select id="l-sub">${opcoesGm(f.substituto)}</select></label><label>Data <input type="date" id="l-de" value="${f.de || ui.dia}"></label>`;
   if (tipo === "REMANEJ") return `${gmSel}<label>Novo posto <select id="l-posto">${opcoesPosto(f.posto)}</select></label>
     <div class="linha"><label>De <input type="date" id="l-de" value="${f.de || ui.dia}"></label><label>Até <input type="date" id="l-ate" value="${f.ate || ui.dia}"></label></div>`;
-  const umDia = tipo === "FOLGA" || tipo === "BH_COMP";
+  const umDia = ["FOLGA", "FALTA", "BH_COMP"].includes(tipo);
   return `${gmSel}<div class="linha"><label>${umDia ? "Data" : "De"} <input type="date" id="l-de" value="${f.de || ui.dia}"></label>${umDia ? "" : `<label>Até <input type="date" id="l-ate" value="${f.ate || ui.dia}"></label>`}</div>`;
 }
 function descreveOc(o) {
@@ -526,9 +536,9 @@ function vPendencias() {
     <section class="painel"><h3>Cobertura da semana</h3><p class="dica">Cada bolinha é um posto coberto. Número vermelho = vagas descobertas; clique para resolver.</p>
       <div class="tabela-wrap mapa-wrap"><table class="mapa"><thead><tr><th></th>${dias.map((d) => `<th colspan="2" class="${d === ui.dia ? "hoje" : ""}">${SEMANA[diaSemana(d)].slice(0, 3)} ${ddmm(d)}</th>`).join("")}</tr>
       <tr><th></th>${dias.map(() => `<th class="sub dia">D</th><th class="sub noite">N</th>`).join("")}</tr></thead><tbody>${linhas}</tbody></table></div></section>
-    <section class="painel fila"><h3>O que falta resolver</h3>
-      <p class="dica">Primeiro a sugestão sem custo (reserva técnica ou à disposição); depois a HE para quem tem menos horas no mês. Um clique lança.</p>
-      ${cards || `<p class="tudo-ok">Semana coberta. Nada pendente.</p>`}</section>
+    <section class="painel fila"><div class="fila-cab"><h3>O que falta resolver</h3>${totalFuros ? `<button class="btn pri grande" data-act="auto" data-dias="7">Preencher a semana sozinho</button>` : ""}</div>
+      ${ui.plano ? painelPlano() : `<p class="dica">Primeiro a sugestão sem custo (reserva técnica ou à disposição); depois a HE para quem tem menos horas no mês. Um clique lança.</p>
+      ${cards || `<p class="tudo-ok">Semana coberta. Nada pendente.</p>`}`}</section>
   </div>`;
 }
 const hojeBase = () => (hojeReal >= "2026-10-01" && hojeReal <= "2026-12-31" ? hojeReal : "2026-11-26");
@@ -586,6 +596,122 @@ function lancarComando() {
   inp.value = ""; previaComando("");
 }
 
+// ---------- PREENCHER SOZINHO ----------
+function painelPlano() {
+  if (!ui.plano) return "";
+  const p = ui.plano;
+  const ok = p.filter((x) => x.ok);
+  const he = ok.filter((x) => x.tipo === "HE"), rem = ok.filter((x) => x.tipo === "REMANEJ");
+  const semNinguem = p.filter((x) => !x.tipo).length;
+  const porDia = {};
+  p.forEach((x, i) => (porDia[x.dia] ||= []).push([x, i]));
+  return `<section class="plano" aria-live="polite"><h3>Proposta do sistema</h3>
+    <p>Para cobrir ${p.length} ${p.length === 1 ? "vaga" : "vagas"}: <b>${rem.length}</b> remanejamento${rem.length === 1 ? "" : "s"} sem custo e <b>${he.length}</b> hora${he.length === 1 ? "" : "s"} extra${he.length === 1 ? "" : "s"} (${fmtHoras(he.reduce((t, x) => t + x.fim - x.ini, 0))}).${semNinguem ? ` ${semNinguem} sem ninguém disponível.` : ""}
+    Desmarque o que não quiser e confirme.</p>
+    <div class="plano-lista">${Object.entries(porDia).map(([d, itens]) => `<h4>${SEMANA[diaSemana(d)].toLowerCase()} ${ddmm(d)}</h4><ul>${itens.map(([x, i]) => `<li class="${x.tipo ? "" : "sem"}">
+      ${x.tipo ? `<input type="checkbox" class="plano-ck" id="pl-${i}" data-i="${i}" ${x.ok ? "checked" : ""}>` : `<span class="x">!</span>`}
+      <label for="pl-${i}"><b>${esc(postoPorId(x.posto).nome)}</b> <span class="hr">${fmtHm(x.ini)}–${fmtHm(x.fim)}</span> →
+      ${x.tipo === "REMANEJ" ? `<span class="tag troca">REMANEJAR</span> <b>${esc(nomeGm(x.gm))}</b> <span class="meta">da ${esc(x.de)}, sem custo</span>`
+        : x.tipo === "HE" ? `<span class="tag he">HE</span> <b>${esc(nomeGm(x.gm))}</b> <span class="meta">${fmtHoras(x.fim - x.ini)} · tinha ${fmtHoras(x.horasNoMes)} no mês${x.conhecePosto ? " · conhece o posto" : ""}</span>`
+        : `<span class="meta">ninguém disponível — resolver à mão</span>`}</label></li>`).join("")}</ul>`).join("")}</div>
+    <div class="plano-acoes"><button class="btn pri grande" data-act="plano-aplicar">Confirmar ${ok.length} ${ok.length === 1 ? "lançamento" : "lançamentos"}</button><button class="btn" data-act="plano-cancelar">Cancelar</button></div></section>`;
+}
+
+// ---------- EDIÇÃO NA PRÓPRIA CÉLULA ----------
+const PRESETS = {
+  dia: [["07:00", "13:00"], ["13:00", "19:00"], ["07:00", "19:00"], ["07:00", "21:00"], ["13:00", "01:00"]],
+  noite: [["19:00", "01:00"], ["01:00", "07:00"], ["19:00", "07:00"], ["17:00", "07:00"]],
+};
+const periodoDe = (ini) => (ini >= 1140 || ini < 420 ? "noite" : "dia");
+function abrirPop(modo, el, extra) {
+  const r = el.getBoundingClientRect();
+  ui.pop = { modo, anc: { x: r.left, y: r.top, w: r.width, h: r.height }, ...extra };
+  desenharPop();
+}
+function fecharPop() { ui.pop = null; const p = $("#pop"); if (p) { p.hidden = true; p.innerHTML = ""; } }
+function desenharPop() {
+  const p = $("#pop"), s = ui.pop;
+  p.innerHTML = { hora: popHora, gm: popGm, add: popGm, motivo: popMotivo }[s.modo](s);
+  p.hidden = false;
+  const W = Math.min(380, innerWidth - 24);
+  p.style.width = W + "px";
+  if (innerWidth < 600) { p.classList.add("embaixo"); p.style.left = ""; p.style.top = ""; }
+  else {
+    p.classList.remove("embaixo");
+    const h = p.offsetHeight;
+    const x = Math.min(Math.max(12, s.anc.x), innerWidth - W - 12);
+    let y = s.anc.y + s.anc.h + 6;
+    if (y + h > innerHeight - 12) y = Math.max(12, s.anc.y - h - 6);
+    p.style.left = x + "px"; p.style.top = y + "px";
+  }
+  const foco = p.querySelector("#p-busca, #p-ini");
+  if (foco && innerWidth >= 600) foco.focus();
+  if (s.modo === "hora") previaHora();
+}
+const cabPop = (t, sub) => `<div class="pop-cab"><div><b>${t}</b>${sub ? `<span class="meta">${sub}</span>` : ""}</div><button class="ic" data-act="pop-fechar" aria-label="Fechar">×</button></div>`;
+function ehHeLancada(d) { return (d.nat === "he" || d.nat === "bh") && !d.fixa && !d.ajuste && d.origem !== "base"; }
+function popHora(s) {
+  const d = s.des;
+  let ini = fmtHm(d.ini), fim = fmtHm(d.fim);
+  if (ehHeLancada(d)) { const o = data.ocorrencias.find((x) => x.id === d.origem); ini = o.ini; fim = o.fim; }
+  else if (d.ajuste) { const o = data.ocorrencias.find((x) => x.id === d.ajuste); ini = o.ini; fim = o.fim; }
+  return `${cabPop(`Horário de ${esc(nomeGm(d.gm))}`, `${esc(postoPorId(d.posto)?.nome || "À disposição")} · ${SEMANA[diaSemana(ui.dia)].toLowerCase()} ${ddmm(ui.dia)}`)}
+    <div class="pop-corpo"><div class="presets">${PRESETS[periodoDe(d.ini)].map(([a, b]) => `<button class="opt" data-act="pop-preset" data-ini="${a}" data-fim="${b}">${a}–${b}</button>`).join("")}</div>
+    <div class="linha grande"><label>Entra <input type="time" id="p-ini" value="${ini}"></label><label>Sai <input type="time" id="p-fim" value="${fim}"></label></div>
+    <p id="p-prev" class="previa"></p>
+    <div class="pop-acoes"><button class="btn pri grande" data-act="pop-salvar-hora">Salvar horário</button><button class="btn" data-act="pop-fechar">Cancelar</button>
+    ${d.ajuste ? `<button class="link" data-act="pop-hora-reset">Voltar ao horário normal</button>` : ""}</div></div>`;
+}
+function previaHora() {
+  const d = ui.pop?.des, el = $("#p-prev");
+  if (!d || !el) return;
+  const ini = $("#p-ini").value, fim = $("#p-fim").value;
+  if (!ini || !fim) { el.textContent = "Informe a entrada e a saída."; return; }
+  const [a, b] = intervalo(ini, fim);
+  if (ehHeLancada(d)) { el.innerHTML = `Hora extra de <b>${fmtHoras(b - a)}</b>.`; return; }
+  const [a0, b0] = (d.alvo || `${d.ini}-${d.fim}`).split("-").map(Number);
+  const normal = sobrepoe(a, b, a0, b0), extra = b - a - normal, falta = b0 - a0 - normal;
+  el.innerHTML = `Horário normal: <b>${fmtHm(Math.max(a, a0))}–${fmtHm(Math.min(b, b0))}</b>` +
+    (extra > 0 ? `<br><span class="he-txt">+ ${fmtHoras(extra)} de hora extra (lançada sozinha)</span>` : "") +
+    (falta > 0 ? `<br><span class="meta">${fmtHoras(falta)} a menos que o horário normal (${fmtHm(a0)}–${fmtHm(b0)})</span>` : "");
+}
+function popGm(s) {
+  let ini, fim, posto, titulo, sub, topo = "";
+  if (s.modo === "gm") {
+    const d = s.des; ini = d.ini; fim = d.fim; posto = d.posto;
+    titulo = `Trocar ${esc(nomeGm(d.gm))}`;
+    sub = `${esc(postoPorId(posto)?.nome || "À disposição")} · ${fmtHm(ini)}–${fmtHm(fim)} · escolha quem fica no lugar`;
+  } else {
+    posto = s.posto; [ini, fim] = intervalo(s.ini, s.fim);
+    const t = TURNOS.find((x) => x.id === s.turno);
+    titulo = `Pôr alguém em ${esc(postoPorId(posto).nome)}`;
+    sub = `${SEMANA[diaSemana(ui.dia)].toLowerCase()} ${ddmm(ui.dia)} · ${t.nome.toLowerCase()}`;
+    const per = ["t2", "t3"].includes(s.turno) ? "dia" : "noite";
+    topo = `<div class="presets">${[[fmtHm(t.ini), fmtHm(t.fim)], ...PRESETS[per].filter(([a, b]) => { const [x, y] = intervalo(a, b); return sobrepoe(x, y, t.ini, t.fim) > 0 && !(a === fmtHm(t.ini) && b === fmtHm(t.fim)); })]
+      .map(([a, b]) => `<button class="opt ${a === s.ini && b === s.fim ? "on" : ""}" data-act="pop-add-hora" data-ini="${a}" data-fim="${b}">${a}–${b}</button>`).join("")}</div>`;
+  }
+  const { remanejar, he } = sugerir(data, ui.dia, posto, ini, fim);
+  const linhaHe = (x, i) => `<li data-nome="${esc(norm(x.gm.nome))}" ${i >= 6 ? 'class="mais" hidden' : ""}><button class="pessoa" data-act="pop-escolher" data-gm="${x.gm.id}" data-via="he" ${x.bloqueado ? "disabled" : ""}>
+    <b>${esc(x.gm.nome)}</b><small>${x.gm.equipe} · ${fmtHoras(x.heMes)} de HE no mês${x.mesmoPosto ? " · conhece o posto" : ""}${x.bloqueado ? " · não realiza HE" : ""}</small><span class="via he">hora extra</span></button></li>`;
+  return `${cabPop(titulo, sub)}<div class="pop-corpo">${topo}
+    ${remanejar.length ? `<p class="grupo">Sem custo</p><ul class="pessoas">${remanejar.map((x) => `<li data-nome="${esc(norm(x.gm.nome))}"><button class="pessoa" data-act="pop-escolher" data-gm="${x.gm.id}" data-via="rem" data-origem="${esc(x.origem.toLowerCase())}">
+      <b>${esc(x.gm.nome)}</b><small>está na ${esc(x.origem.toLowerCase())}</small><span class="via rem">remanejar</span></button></li>`).join("")}</ul>` : ""}
+    <p class="grupo">Livres nesse horário · ${fmtHoras(fim - ini)} de hora extra</p>
+    <input type="search" id="p-busca" placeholder="Digite o nome" aria-label="Buscar GM">
+    <ul class="pessoas" id="p-lista">${he.map(linhaHe).join("")}</ul>
+    ${!he.length ? `<p class="dica">Ninguém livre nesse horário.</p>` : ""}
+    ${s.modo === "add" ? `<button class="link" data-act="pop-drawer">Mais opções (banco de horas, REQ…)</button>` : ""}</div>`;
+}
+function popMotivo(s) {
+  const d = s.des, X = nomeGm(s.escolhido), T = nomeGm(d.gm);
+  const como = s.via === "rem" ? `${esc(X)} sai de ${esc(s.origem)} (sem custo).` : `${esc(X)} entra com ${fmtHoras(d.fim - d.ini)} de hora extra.`;
+  const op = (m, t, sub) => `<button class="pessoa motivo" data-act="pop-motivo" data-m="${m}"><b>${t}</b>${sub ? `<small>${sub}</small>` : ""}</button>`;
+  return `${cabPop(`${esc(X)} no lugar de ${esc(T)}`, "O que aconteceu?")}<div class="pop-corpo">
+    <div class="motivos">${op("TROCA", "Trocaram de serviço", `sem hora extra · ${esc(T)} paga o serviço depois`)}
+    ${op("FOLGA", `${esc(T)} está de folga`, como)}${op("FALTA", `${esc(T)} faltou`, como)}${op("ATESTADO", `${esc(T)} apresentou atestado`, como)}${op("BH_COMP", `${esc(T)} compensou banco de horas`, como)}</div>
+    <button class="link" data-act="pop-voltar">← escolher outro GM</button></div>`;
+}
+
 // ---------- eventos ----------
 function abrirFuro(posto, turno) {
   const t = TURNOS.find((x) => x.id === turno);
@@ -593,17 +719,80 @@ function abrirFuro(posto, turno) {
   render();
 }
 document.addEventListener("click", (e) => {
+  if (ui.pop && !e.target.closest("#pop")) fecharPop();
   const el = e.target.closest("[data-act],[data-nav]");
   if (!el) return;
-  if (el.dataset.nav) { ui.view = el.dataset.nav; ui.drawer = null; location.hash = ui.view; render(); return; }
+  if (el.dataset.nav) { ui.view = el.dataset.nav; ui.drawer = null; ui.plano = null; location.hash = ui.view; render(); return; }
   const a = el.dataset.act;
   const d = ui.drawer;
   if (a !== "apagar" && a !== "pre-apagar") ui.confirmar = null;
   switch (a) {
-    case "dia": ui.dia = somaDias(ui.dia, Number(el.dataset.n)); ui.mes = mesDe(ui.dia); ui.drawer = null; render(); break;
+    case "dia": ui.dia = somaDias(ui.dia, Number(el.dataset.n)); ui.mes = mesDe(ui.dia); ui.drawer = null; ui.plano = null; render(); break;
     case "mes": ui.mes = Number(el.dataset.n) > 0 ? mesSeguinte(ui.mes) : mesAnterior(ui.mes); render(); break;
     case "lmes": ui.filtroLanc.mes = Number(el.dataset.n) > 0 ? mesSeguinte(ui.filtroLanc.mes) : mesAnterior(ui.filtroLanc.mes); render(); break;
     case "furo": abrirFuro(el.dataset.posto, el.dataset.turno); break;
+    case "pop-hora": abrirPop("hora", el, { des: ui.desMap.get(el.dataset.des) }); return;
+    case "pop-gm": abrirPop("gm", el, { des: ui.desMap.get(el.dataset.des) }); return;
+    case "pop-add": { const t = TURNOS.find((x) => x.id === el.dataset.turno); abrirPop("add", el, { posto: el.dataset.posto, turno: t.id, ini: fmtHm(t.ini), fim: fmtHm(t.fim) }); return; }
+    case "pop-fechar": fecharPop(); return;
+    case "pop-preset": $("#p-ini").value = el.dataset.ini; $("#p-fim").value = el.dataset.fim; previaHora(); return;
+    case "pop-add-hora": ui.pop.ini = el.dataset.ini; ui.pop.fim = el.dataset.fim; desenharPop(); return;
+    case "pop-voltar": ui.pop.modo = "gm"; desenharPop(); return;
+    case "pop-drawer": { const s = ui.pop; fecharPop(); ui.drawer = { tipo: "furo", posto: s.posto, turno: s.turno, ini: s.ini, fim: s.fim, nat: "HE", req: "" }; render(); return; }
+    case "pop-salvar-hora": {
+      const d = ui.pop.des, ini = $("#p-ini").value, fim = $("#p-fim").value;
+      if (!ini || !fim) { toast("Informe a entrada e a saída."); return; }
+      const [a, b] = intervalo(ini, fim);
+      fecharPop();
+      if (ehHeLancada(d)) { mudar(`Horário da hora extra de ${nomeGm(d.gm)}: ${ini}–${fim}`, () => { const o = data.ocorrencias.find((x) => x.id === d.origem); o.ini = ini; o.fim = fim; }); return; }
+      const alvo = d.alvo || `${d.ini}-${d.fim}`, [a0, b0] = alvo.split("-").map(Number), quem = d.titular || d.gm;
+      const atual = data.ocorrencias.find((o) => o.tipo === "HORARIO" && o.gm === quem && o.de === ui.dia && o.alvo === alvo);
+      const extra = b - a - sobrepoe(a, b, a0, b0);
+      mudar(`${nomeGm(d.gm)}: ${ini}–${fim}${extra > 0 ? ` (${fmtHoras(extra)} de hora extra)` : ""}`, () => {
+        if (a === a0 && b === b0) { if (atual) data.ocorrencias = data.ocorrencias.filter((o) => o !== atual); }
+        else if (atual) { atual.ini = ini; atual.fim = fim; }
+        else data.ocorrencias.push({ id: novoId(), tipo: "HORARIO", gm: quem, de: ui.dia, alvo, ini, fim });
+      });
+      return;
+    }
+    case "pop-hora-reset": { const d = ui.pop.des; fecharPop(); mudar(`${nomeGm(d.gm)} voltou ao horário normal`, () => { data.ocorrencias = data.ocorrencias.filter((o) => o.id !== d.ajuste); }); return; }
+    case "pop-escolher": {
+      const s = ui.pop, X = el.dataset.gm, via = el.dataset.via;
+      if (s.modo === "add") {
+        fecharPop();
+        const pn = postoPorId(s.posto).nome;
+        if (via === "rem") mudar(`${nomeGm(X)} remanejado para ${pn}`, () => data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: X, de: ui.dia, ate: ui.dia, posto: s.posto, obs: "Da reserva técnica" }));
+        else mudar(`${nomeGm(X)} entra com hora extra ${s.ini}–${s.fim} em ${pn}`, () => data.ocorrencias.push({ id: novoId(), tipo: "HE", gm: X, de: ui.dia, ini: s.ini, fim: s.fim, posto: s.posto, req: "" }));
+        return;
+      }
+      const d = s.des;
+      if (ehHeLancada(d)) { fecharPop(); mudar(`Hora extra passou para ${nomeGm(X)}`, () => { data.ocorrencias.find((o) => o.id === d.origem).gm = X; }); return; }
+      if (d.nat === "troca") { fecharPop(); mudar(`Troca: agora ${nomeGm(X)} cobre ${nomeGm(d.titular)}`, () => { data.ocorrencias.find((o) => o.id === d.origem).substituto = X; }); return; }
+      s.modo = "motivo"; s.escolhido = X; s.via = via; s.origem = el.dataset.origem || ""; desenharPop(); return;
+    }
+    case "pop-motivo": {
+      const s = ui.pop, d = s.des, m = el.dataset.m, X = s.escolhido, T = d.gm;
+      fecharPop();
+      if (m === "TROCA") { mudar(`${nomeGm(X)} assume o serviço de ${nomeGm(T)} (troca)`, () => data.ocorrencias.push({ id: novoId(), tipo: "TROCA", gm: T, substituto: X, de: ui.dia })); return; }
+      mudar(`${TIPOS[m]} para ${nomeGm(T)}; ${nomeGm(X)} ${s.via === "rem" ? "remanejado" : "com hora extra"}`, () => {
+        data.ocorrencias.push({ id: novoId(), tipo: m, gm: T, de: ui.dia });
+        if (s.via === "rem") data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: X, de: ui.dia, ate: ui.dia, posto: d.posto, obs: `Remanejado (${s.origem})` });
+        else data.ocorrencias.push({ id: novoId(), tipo: "HE", gm: X, de: ui.dia, ini: fmtHm(d.ini), fim: fmtHm(d.fim), posto: d.posto, req: "" });
+      });
+      return;
+    }
+    case "auto": { const n = Number(el.dataset.dias); ui.plano = planejarCobertura(data, Array.from({ length: n }, (_, i) => somaDias(ui.dia, i))).map((x) => ({ ...x, ok: !!x.tipo })); render(); break; }
+    case "plano-cancelar": ui.plano = null; render(); break;
+    case "plano-aplicar": {
+      const itens = ui.plano.filter((x) => x.ok && x.tipo);
+      ui.plano = null;
+      if (!itens.length) { render(); break; }
+      mudar(`${itens.length} lançamentos feitos de uma vez`, () => { for (const x of itens) data.ocorrencias.push(x.tipo === "REMANEJ"
+        ? { id: novoId(), tipo: "REMANEJ", gm: x.gm, de: x.dia, ate: x.dia, posto: x.posto, obs: "Preenchido automaticamente" }
+        : { id: novoId(), tipo: "HE", gm: x.gm, de: x.dia, ini: fmtHm(x.ini), fim: fmtHm(x.fim), posto: x.posto, req: "" }); });
+      break;
+    }
+    case "letra": { const on = document.documentElement.classList.toggle("letra-grande"); try { localStorage.setItem("escala-letra", on ? "1" : ""); } catch { /* ignora */ } el.setAttribute("aria-pressed", String(on)); if (ui.pop) desenharPop(); return; }
     case "remanejar": mudar(`${nomeGm(el.dataset.gm)} remanejado para ${postoPorId(d.posto).nome}`, () => { data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: el.dataset.gm, de: ui.dia, ate: ui.dia, posto: d.posto, obs: "Da reserva técnica" }); ui.drawer = null; }); break;
     case "pend-rem": mudar(`${nomeGm(el.dataset.gm)} remanejado para ${postoPorId(el.dataset.posto).nome} em ${ddmm(el.dataset.dia)}`, () => data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: el.dataset.gm, de: el.dataset.dia, ate: el.dataset.dia, posto: el.dataset.posto, obs: "Da reserva técnica" })); break;
     case "pend-he": mudar(`HE: ${nomeGm(el.dataset.gm)} ${el.dataset.ini}–${el.dataset.fim} em ${postoPorId(el.dataset.posto).nome} (${ddmm(el.dataset.dia)})`, () => data.ocorrencias.push({ id: novoId(), tipo: "HE", gm: el.dataset.gm, de: el.dataset.dia, ini: el.dataset.ini, fim: el.dataset.fim, posto: el.dataset.posto, req: "" })); break;
@@ -655,7 +844,7 @@ document.addEventListener("click", (e) => {
     case "abrir-ficha": ui.gm = el.dataset.gm; ui.mes = mesDe(ui.dia); ui.view = "ficha"; ui.drawer = null; location.hash = "ficha"; render(); window.scrollTo(0, 0); break;
     case "ir-dia": ui.dia = el.dataset.dia; ui.view = "quadro"; location.hash = "quadro"; render(); break;
     case "fechar": ui.drawer = null; render(); break;
-    case "desfazer": if (desfazer.length) { data.ocorrencias = JSON.parse(desfazer.pop()); data._versao++; salvar(); render(); toast("Alteração desfeita"); } break;
+    case "desfazer": if (desfazer.length) { data.ocorrencias = JSON.parse(desfazer.pop()); data._versao++; ui.plano = null; salvar(); render(); toast("Última alteração desfeita"); } break;
     case "imprimir": window.print(); break;
     case "restaurar": ui.confirmar = "restaurar"; $("#restaurar").outerHTML = `<button id="restaurar" class="btn perigo" data-act="restaurar-ok">Apagar meus lançamentos e restaurar</button>`; return;
     case "restaurar-ok": try { localStorage.removeItem(CHAVE); } catch { /* ignora */ } data = criarExemplo(); desfazer.length = 0; $("#restaurar").outerHTML = `<button id="restaurar" class="link" data-act="restaurar">Restaurar exemplo</button>`; render(); toast("Dados de exemplo restaurados"); break;
@@ -676,6 +865,8 @@ document.addEventListener("click", (e) => {
 });
 document.addEventListener("change", (e) => {
   const id = e.target.id, v = e.target.value;
+  if (e.target.classList.contains("plano-ck")) { ui.plano[Number(e.target.dataset.i)].ok = e.target.checked; const n = ui.plano.filter((x) => x.ok && x.tipo).length; const b = $("[data-act=plano-aplicar]"); if (b) b.textContent = `Confirmar ${n} ${n === 1 ? "lançamento" : "lançamentos"}`; return; }
+  if (id === "p-ini" || id === "p-fim") { previaHora(); return; }
   if (id === "q-dia" && v) { ui.dia = v; ui.mes = mesDe(v); ui.drawer = null; render(); }
   else if (id === "q-sofuros") { ui.soFuros = e.target.checked; render(); }
   else if (id === "f-ini" || id === "f-fim") { ui.drawer[id === "f-ini" ? "ini" : "fim"] = v; ui.drawer.req = $("#f-req").value; render(); }
@@ -690,6 +881,8 @@ document.addEventListener("change", (e) => {
 });
 document.addEventListener("input", (e) => {
   if (e.target.id === "cmd") { previaComando(e.target.value); return; }
+  if (e.target.id === "p-ini" || e.target.id === "p-fim") { previaHora(); return; }
+  if (e.target.id === "p-busca") { const q = norm(e.target.value.trim()); document.querySelectorAll("#p-lista li").forEach((li, i) => { li.hidden = q ? !li.dataset.nome.includes(q) : i >= 6; }); return; }
   const map = { "f-busca": ".sug li", "m-busca": "table.mes tbody tr", "lf-busca": "table.lanc tbody tr" };
   const sel = map[e.target.id];
   if (!sel) return;
@@ -700,6 +893,8 @@ document.addEventListener("keydown", (e) => {
   if (e.target.id === "cmd" && e.key === "Enter") { e.preventDefault(); lancarComando(); return; }
   if (e.target.id === "cmd" && e.key === "Escape") { e.target.blur(); return; }
   if (e.key === "/" && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName || "")) { e.preventDefault(); $("#cmd").focus(); return; }
+  if (e.key === "Escape" && ui.pop) { fecharPop(); return; }
+  if (e.key === "Enter" && ui.pop?.modo === "hora" && /p-ini|p-fim/.test(e.target.id)) { $("[data-act=pop-salvar-hora]").click(); return; }
   if (e.key === "Escape" && ui.drawer) { ui.drawer = null; render(); }
 });
 document.addEventListener("focusin", (e) => { if (e.target.id === "cmd") { $("#cmd-prev").hidden = false; previaComando(e.target.value); } });
@@ -707,5 +902,8 @@ document.addEventListener("focusout", (e) => { if (e.target.id === "cmd") setTim
 $("#veu").addEventListener("click", () => { ui.drawer = null; render(); });
 window.addEventListener("hashchange", () => { const h = location.hash.slice(1); if (VIEWS.includes(h) && h !== ui.view) { ui.view = h; ui.drawer = null; render(); } });
 
+window.addEventListener("scroll", () => { if (ui.pop && innerWidth >= 600) fecharPop(); }, { passive: true });
+window.addEventListener("resize", () => { if (ui.pop) desenharPop(); });
+try { if (localStorage.getItem("escala-letra")) { document.documentElement.classList.add("letra-grande"); $("#btn-letra")?.setAttribute("aria-pressed", "true"); } } catch { /* ignora */ }
 void hm; void trabalhaNoDia; void resumoMes; void norm;
 render();
