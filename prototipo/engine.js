@@ -218,6 +218,7 @@ export function calcularDia(data, dia) {
       if (d.gm !== oc.gm || d.nat === "he" || sobrepoe(d.ini, d.fim, ra, rb) <= 0) { novos.push(d); continue; }
       const mover = (x) => {
         if (oc.ficaNaFA) x.ficaNaFA = true; // voltou para a própria viatura mesmo em FA
+        if (oc.levaVtr) x.levouVtr = oc.levaVtr; // foi com a própria viatura para a operação: a vaga de origem não vira furo
         x.posto = oc.posto; if (oc.funcao) x.funcao = oc.funcao; x.remanejado = true; x.remanej = oc.id;
         x.req = oc.req || x.req || "";
         if (oc.obs && !OBS_AUTO_REMANEJ.has(oc.obs)) x.obs = oc.obs;
@@ -273,7 +274,7 @@ export function calcularDia(data, dia) {
     for (const t of TURNOS) {
       const vagas = (ajustesPosto.get(p.id)?.vagas?.vagas || p.vagas)[t.id] || 0;
       if (!vagas) continue;
-      const ocupantes = new Set(des.filter((d) => d.posto === p.id && sobrepoe(d.ini, d.fim, t.ini, t.fim) >= 60).map((d) => d.gm));
+      const ocupantes = new Set(des.filter((d) => (d.posto === p.id || d.levouVtr === p.id) && sobrepoe(d.ini, d.fim, t.ini, t.fim) >= 60).map((d) => d.gm));
       if (ocupantes.size < vagas) furos.push({ posto: p.id, turno: t.id, faltam: vagas - ocupantes.size });
     }
   }

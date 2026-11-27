@@ -826,6 +826,11 @@ table.acessos { min-width: 0; } table.acessos td { vertical-align: middle; }
   table.acessos tr { border-bottom: 1px solid var(--line); padding: .4rem 0; } table.acessos td { border: 0; padding: .15rem 0; }
   table.acessos input { width: 9rem; }
 }
+.ed-ordem { display: flex; flex-wrap: wrap; gap: .2rem .8rem; align-items: center; margin: .3rem 0 .1rem; font-size: .76rem; color: var(--muted); }
+.ed-ordem label { display: inline-flex !important; align-items: center; gap: .3rem; } .ed-ordem select { font-size: .76rem; padding: .05rem .2rem; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface); color: var(--ink); }
+.of-tag { display: inline-block; font-size: .68rem; font-weight: 700; padding: 0 .35rem; border-radius: 9px; margin-right: .3rem; white-space: nowrap; background: #fff1d6; color: #8a5300; border: 1px solid #f0c36a; }
+.of-tag.recusou { background: #fde4e4; color: #a12626; border-color: #f2a7a7; } .of-tag.confirmou { background: #dff3e3; color: #1d6b32; border-color: #9fd3ad; }
+.of-tag.antiga { background: transparent; color: var(--muted); border-color: var(--line-strong); font-weight: 500; }
 /* finalizar escala e controle de HE */
 .btn.fin { border-color: var(--accent); color: var(--accent); font-weight: 600; padding: .2rem .6rem; }
 .fin-ok { color: var(--ok, #2e7d32); font-weight: 600; } .fin-ok .link { font-weight: 400; margin-left: .3rem; }

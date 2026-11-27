@@ -320,6 +320,18 @@ function vagasDoHorario(ini, fim, n) {
   for (const t of TURNOS) v[t.id] = sobrepoe(a, b, t.ini, t.fim) >= 60 ? n : 0;
   return v;
 }
+// Viatura da escala levada para a operação: quem está nela no horário da operação, em cada dia
+function guarnicaoNaOperacao(postoId, dia, ini, fim) {
+  const [a, b] = intervalo(ini, fim);
+  return calcularDia(data, dia).designacoes.filter((x) => x.posto === postoId && x.nat !== "he" && x.nat !== "bh" && sobrepoe(x.ini, x.fim, a, b) > 0);
+}
+// posto da escala com esse número que tem gente no horário da operação (a NOITE VTR 1319, não a VTR 1319 do dia)
+function postoDaEscalaNaOp(num, dia, ini, fim) {
+  if (!num) return null;
+  const cd = calcularDia(data, dia), cands = data.postos.filter((p) => p.ativo !== false && !secaoOperacao(data, p.id) && numeroDe(nomeNoDia(p, cd)) === String(num) && cd.designacoes.some((x) => x.posto === p.id));
+  return cands.find((p) => guarnicaoNaOperacao(p.id, dia, ini, fim).length) || cands[0] || null;
+}
+function diasDaOperacao(de, ate) { const r = []; for (let d = de; d <= ate && r.length < 62; d = somaDias(d, 1)) r.push(d); return r; }
 function drawerOperacao(d) {
   const s = d.secao ? data.secoes.find((x) => x.id === d.secao) : null, o = s?.operacao || {}, cd = calcularDia(data, ui.dia);
   const existentes = s ? data.postos.filter((p) => p.secao === s.id && p.ativo !== false) : [];
@@ -337,7 +349,9 @@ function drawerOperacao(d) {
     <label>Observação <input id="op-obs" value="${esc(o.obs || "")}" placeholder="ex.: briefing às 18h na sede"></label>
     <h3>Equipes e viaturas</h3>
     ${existentes.length ? `<ul class="op-eq">${existentes.map((p) => `<li><b>${esc(p.nome)}</b>${p.sub ? ` <span class="meta">${esc(p.sub)}</span>` : ""} <span class="meta">· ${Math.max(...Object.values(p.vagas || { a: 0 }))} GM</span><button class="link" data-act="op-tirar" data-posto="${p.id}">tirar</button></li>`).join("")}</ul>` : ""}
-    ${novas.map((n, i) => `<div class="op-nova"><b>${esc(n.nome)}</b>${n.uso ? ` <span class="aviso-mini">está na escala em ${esc(n.uso)}</span>` : ""}<label>GMs <input type="number" min="1" max="9" value="${n.n}" data-opn="${i}" size="3"></label><button class="link" data-act="op-nova-tirar" data-i="${i}">tirar</button></div>`).join("")}
+    ${novas.map((n, i) => { const g = n.usoPosto ? guarnicaoNaOperacao(n.usoPosto, n.opDe || o.de || ui.dia, n.opIni || o.ini || "19:00", n.opFim || o.fim || "03:00") : [];
+      return `<div class="op-nova"><b>${esc(n.nome)}</b>${n.uso ? ` <span class="aviso-mini">está na escala em ${esc(n.uso)}</span>` : ""}<label>GMs <input type="number" min="1" max="9" value="${n.n}" data-opn="${i}" size="3"></label><button class="link" data-act="op-nova-tirar" data-i="${i}">tirar</button>
+        ${n.usoPosto ? `<label class="toggle op-levar"><input type="checkbox" data-oplevar="${i}" ${n.levar !== false ? "checked" : ""}> <span>Levar a guarnição da escala junto: no horário da operação ${g.length ? `<b>${g.map((x) => esc(nomeGm(x.gm))).join(", ")}</b>` : "quem estiver nela"} vai para a operação e depois volta para ${esc(n.uso)} (sem abrir furo lá)</span></label>` : ""}</div>`; }).join("")}
     <div class="linha op-add"><label class="cresce">Viatura da frota <select id="op-frota"><option value="">escolha…</option>${livres.map((v) => { const u = usoNaEscala(v.prefixo); return `<option value="${esc(v.prefixo)}">${esc(v.prefixo)} · ${esc(v.modelo)}${u ? ` (na escala: ${esc(u.nome)})` : " (livre)"}</option>`; }).join("")}</select></label><button class="btn" data-act="op-add-frota">Adicionar</button></div>
     <div class="linha op-add"><label class="cresce">Outra viatura ou equipe <input id="op-outra" placeholder="ex.: VTR 1399, MOTO 651, EQUIPE A PÉ 1"></label><button class="btn" data-act="op-add-outra">Adicionar</button></div>
     <button class="btn pri largo" data-act="op-salvar">${s ? "Salvar operação" : "Criar operação"}</button>
@@ -2097,7 +2111,8 @@ function fecharMenu() { const m = $("#menu"); if (m && !m.hidden) { m.hidden = t
 
 document.addEventListener("contextmenu", (e) => {
   // menu normal do navegador só em campos de texto, texto selecionado (copiar) ou com Shift
-  if (e.shiftKey || e.target.closest("input, textarea, select, #menu") || String(getSelection?.() || "").trim()) return;
+  if (e.target.closest("#menu")) { e.preventDefault(); e.stopImmediatePropagation(); const it = e.target.closest(".mn-item:not([disabled])"); if (it) it.click(); return; } // como no Windows: botão direito na opção = escolher
+  if (e.shiftKey || e.target.closest("input, textarea, select") || String(getSelection?.() || "").trim()) return;
   if (soVer() && !editaFrota()) { menuSoVer(e); return; }
   const liEd = e.target.closest("#ed-lista li[data-i]");
   if (liEd) { e.preventDefault(); menuSugestao(Number(liEd.dataset.i), liEd, e.clientX, e.clientY); return; }
@@ -2426,7 +2441,7 @@ function abrirEditor(modo, el, ctx) {
     if (modo === "add" && ctx.ini == null) [ctx.ini, ctx.fim] = intervaloVaga(ctx.posto, ctx.turno);
     const titulo = modo === "nome" ? `No lugar de ${nomeGm(ed.d.gm)}` : modo === "padrao" ? `${postoPorId(ctx.posto).nome} · ${ctx.per} · padrão ${ui.padrao.aba === "impar" ? "ímpar" : "par"}` : `${postoPorId(ctx.posto).nome}`;
     box.innerHTML = `<input id="ed-in" class="ed-in" value="${esc(ctx.inicial || "")}" placeholder="Digite o nome do GM" aria-label="${esc(titulo)}" role="combobox" aria-expanded="true" aria-controls="ed-lista" autocomplete="off" spellcheck="false">
-      <div class="ed-lista-box"><p class="ed-titulo">${esc(titulo)}</p>${modo === "add" && ctx.ini != null ? `<div class="ed-chips ed-dur">${opcoesVaga(ctx.posto, ctx.turno).map(([a, b, r]) => `<button class="ed-chip ${a === ctx.ini && b === ctx.fim ? "on" : ""}" data-act="ed-dur" data-ini="${a}" data-fim="${b}" tabindex="-1">${r} · ${fmtHm(a)}–${fmtHm(b)}</button>`).join("")}</div>` : ""}${modo === "add" ? `<div class="ed-chips ed-nat"><button class="ed-chip ${!["bh", "rem"].includes(ctx.nat) ? "on" : ""}" data-act="ed-nat" data-nat="he" tabindex="-1">Hora extra</button><button class="ed-chip ${ctx.nat === "bh" ? "on bh" : ""}" data-act="ed-nat" data-nat="bh" tabindex="-1">Banco de horas (BH+)</button><button class="ed-chip ${ctx.nat === "rem" ? "on rem" : ""}" data-act="ed-nat" data-nat="rem" tabindex="-1" title="GMs à disposição ou na reserva técnica">Remanejar<span class="n-rem"></span></button><input id="ed-req" class="ed-req" placeholder="REQ (opcional)" size="9" autocomplete="off"></div>` : ""}<ul id="ed-lista" role="listbox"></ul><div class="ed-rodape"><button class="link ed-mais" data-act="ed-mais">Mais opções…</button>${modo === "add" ? `<button class="link ed-of" data-act="ed-oferecer">📲 Oferecer a vários (WhatsApp)…</button>` : ""}${modo === "add" && calcularDia(data, ui.dia).furos.some((f) => f.posto === ctx.posto && f.turno === ctx.turno) ? `<button class="link ed-sem" data-act="ed-semgm">Deixar sem GM neste dia</button>` : ""}</div></div>`;
+      <div class="ed-lista-box"><p class="ed-titulo">${esc(titulo)}</p>${modo === "add" && ctx.ini != null ? `<div class="ed-chips ed-dur">${opcoesVaga(ctx.posto, ctx.turno).map(([a, b, r]) => `<button class="ed-chip ${a === ctx.ini && b === ctx.fim ? "on" : ""}" data-act="ed-dur" data-ini="${a}" data-fim="${b}" tabindex="-1">${r} · ${fmtHm(a)}–${fmtHm(b)}</button>`).join("")}</div>` : ""}${modo === "add" ? `<div class="ed-chips ed-nat"><button class="ed-chip ${!["bh", "rem"].includes(ctx.nat) ? "on" : ""}" data-act="ed-nat" data-nat="he" tabindex="-1">Hora extra</button><button class="ed-chip ${ctx.nat === "bh" ? "on bh" : ""}" data-act="ed-nat" data-nat="bh" tabindex="-1">Banco de horas (BH+)</button><button class="ed-chip ${ctx.nat === "rem" ? "on rem" : ""}" data-act="ed-nat" data-nat="rem" tabindex="-1" title="GMs à disposição ou na reserva técnica">Remanejar<span class="n-rem"></span></button><input id="ed-req" class="ed-req" placeholder="REQ (opcional)" size="9" autocomplete="off"></div><div class="ed-ordem"><label>Ordem <select id="ed-ordem" tabindex="-1">${[["sug", "sugerida"], ["horas", "menos horas no mês"], ["oferta", "oferta mais antiga"]].map(([k, t]) => `<option value="${k}" ${(ui.edOrdem || "sug") === k ? "selected" : ""}>${t}</option>`).join("")}</select></label><label class="toggle" title="Esconde quem já recebeu oferta de HE neste dia"><input type="checkbox" id="ed-sem-of" tabindex="-1" ${ui.edSemOfertados ? "checked" : ""}> sem os já oferecidos hoje</label></div>` : ""}<ul id="ed-lista" role="listbox"></ul><div class="ed-rodape"><button class="link ed-mais" data-act="ed-mais">Mais opções…</button>${modo === "add" ? `<button class="link ed-of" data-act="ed-oferecer">📲 Oferecer a vários (WhatsApp)…</button>` : ""}${modo === "add" && calcularDia(data, ui.dia).furos.some((f) => f.posto === ctx.posto && f.turno === ctx.turno) ? `<button class="link ed-sem" data-act="ed-semgm">Deixar sem GM neste dia</button>` : ""}</div></div>`;
   }
   box.hidden = false;
   box.style.left = Math.max(4, Math.min(r.left - 2, innerWidth - 284)) + "px";
@@ -2484,16 +2499,39 @@ function candidatosEditor() {
   // hora extra primeiro (escala oposta do posto, quem está no posto, menos horas); reserva técnica por último
   return [...he.map((x) => ({ ...x, via: "he" })), ...remanejar.map((x) => ({ ...x, via: "rem" }))].map((x) => ({ ...x, dur: fim - ini }));
 }
+// Ofertas de HE por GM: as do dia (em qualquer posto) e a data da última oferta, para não oferecer sempre aos mesmos
+let cacheOfertas = { v: -1, dia: "", m: null };
+function ofertasPorGm(dia) {
+  if (cacheOfertas.v === data._versao && cacheOfertas.dia === dia) return cacheOfertas.m;
+  const m = new Map();
+  for (const o of data.ocorrencias) if (o.tipo === "OFERTA") for (const x of o.gms || []) {
+    const r = m.get(x.gm) || { ultima: "", hoje: [] }, quando = o.de; // dia do serviço oferecido
+    if (quando > r.ultima) r.ultima = quando;
+    if (o.de === dia && x.estado !== "cancelada") r.hoje.push({ posto: o.posto, estado: x.estado, ini: o.ini, fim: o.fim });
+    m.set(x.gm, r);
+  }
+  cacheOfertas = { v: data._versao, dia, m }; return m;
+}
+function seloOferta(gm) {
+  const r = ofertasPorGm(ui.dia).get(gm); if (!r) return "";
+  if (r.hoje.length) { const o = r.hoje[r.hoje.length - 1], t = { oferecida: "aguardando", confirmou: "confirmou", recusou: "recusou" }[o.estado] || o.estado;
+    return `<span class="of-tag ${o.estado}" title="HE já oferecida hoje: ${esc(r.hoje.map((x) => `${postoPorId(x.posto)?.nome} ${x.ini}–${x.fim} (${x.estado})`).join("; "))}">📲 ${t}${r.hoje.length > 1 ? ` ×${r.hoje.length}` : ` · ${esc(postoPorId(o.posto)?.nome || "")}`}</span>`; }
+  return `<span class="of-tag antiga" title="Última vez que recebeu oferta de HE">últ. oferta ${ddmm(r.ultima)}</span>`;
+}
 function atualizarLista() {
   const q = norm($("#ed-in").value.trim());
   const cand = candidatosEditor(), nat = ed.modo === "add" ? ed.ctx?.nat || "he" : null;
   const nRem = cand.filter((x) => x.via === "rem").length, sp = document.querySelector(".ed-nat .n-rem"); if (sp) sp.textContent = ` (${nRem})`;
   const todos = cand.filter((x) => (!nat ? true : nat === "rem" ? x.via === "rem" : x.via !== "rem")).filter((x) => !q || norm(x.gm.nome).includes(q));
-  todos.sort((a, b) => (q ? (norm(b.gm.nome).startsWith(q) - norm(a.gm.nome).startsWith(q)) : 0));
+  const ofs = ofertasPorGm(ui.dia), ord = ed.modo === "add" && nat !== "rem" ? ui.edOrdem || "sug" : "sug";
+  if (ed.modo === "add" && nat !== "rem" && ui.edSemOfertados) for (let i = todos.length - 1; i >= 0; i--) if (ofs.get(todos[i].gm.id)?.hoje.length) todos.splice(i, 1);
+  const horas = (x) => (x.heMes || 0) + (x.transporte || 0), ultima = (x) => ofs.get(x.gm.id)?.ultima || "";
+  todos.sort((a, b) => (q ? (norm(b.gm.nome).startsWith(q) - norm(a.gm.nome).startsWith(q)) : 0) || (!!a.bloqueado - !!b.bloqueado)
+    || (ord === "horas" ? horas(a) - horas(b) : ord === "oferta" ? ultima(a).localeCompare(ultima(b)) || horas(a) - horas(b) : 0));
   ed.lista = todos.slice(0, 25); // mais opções, com rolagem (as mesmas informações de cada uma)
   if (ed.sel >= ed.lista.length) ed.sel = 0;
   $("#ed-lista").innerHTML = ed.lista.length ? ed.lista.map((x, i) => `<li role="option" id="ed-op-${i}" aria-selected="${i === ed.sel}" aria-disabled="${!!x.bloqueado}" data-i="${i}" class="${x.bloqueado ? "bloq" : ""} ${ed.oferta?.has(x.gm.id) ? "marcado" : ""}">
-    <b>${ed.oferta ? `<span class="caixa" aria-hidden="true">${ed.oferta.has(x.gm.id) ? "☑" : "☐"}</span>` : ""}${esc(x.gm.nome)}</b><span>${x.via === "pad" ? esc(x.notas[0]) : x.via === "rem" ? `${esc(x.origem.toLowerCase())} · ${x.daEscala ? "tirar da escala (abre vaga lá)" : "remanejar"}` : `${x.notas?.length ? `<span class="mot">${esc(x.notas[0])}</span>` : ""}`}${x.via === "rem" ? "" : seloHE(x.heMes + x.transporte)}</span></li>`).join("")
+    <b>${ed.oferta ? `<span class="caixa" aria-hidden="true">${ed.oferta.has(x.gm.id) ? "☑" : "☐"}</span>` : ""}${esc(x.gm.nome)}</b><span>${x.via === "pad" ? esc(x.notas[0]) : x.via === "rem" ? `${esc(x.origem.toLowerCase())} · ${x.daEscala ? "tirar da escala (abre vaga lá)" : "remanejar"}` : `${x.notas?.length ? `<span class="mot">${esc(x.notas[0])}</span>` : ""}`}${x.via === "rem" || x.via === "pad" ? "" : seloOferta(x.gm.id) + seloHE(x.heMes + x.transporte)}</span></li>`).join("")
     + (todos.length > 25 ? `<li class="ed-resto" aria-hidden="true">+ ${todos.length - 25} — continue digitando</li>` : "")
     : `<li class="ed-resto">${nat === "rem" && !q ? "Ninguém à disposição ou na reserva nesse horário" : "Ninguém livre com esse nome nesse horário"}</li>`;
   $("#ed-in").setAttribute("aria-activedescendant", ed.lista.length ? `ed-op-${ed.sel}` : "");
@@ -3525,13 +3563,16 @@ document.addEventListener("click", (e) => {
       if (el.dataset.act === "op-add-frota") {
         const pref = $("#op-frota").value; if (!pref) { toast("Escolha a viatura."); return; }
         const v = data.frota.find((x) => String(x.prefixo) === pref), cd = calcularDia(data, ui.dia);
-        const u = data.postos.find((p) => p.ativo !== false && !secaoOperacao(data, p.id) && numeroDe(nomeNoDia(p, cd)) === pref && cd.designacoes.some((x) => x.posto === p.id));
-        item = { nome: `${ehMoto(v?.modelo) ? "MT" : "VTR"} ${pref}`, tipo: ehMoto(v?.modelo) ? "moto" : "vtr", n: ehMoto(v?.modelo) ? 1 : 2, uso: u?.nome || "" };
+        const u = postoDaEscalaNaOp(pref, $("#op-de").value || ui.dia, $("#op-ini").value || "19:00", $("#op-fim").value || "03:00"); void cd;
+        item = { nome: `${ehMoto(v?.modelo) ? "MT" : "VTR"} ${pref}`, tipo: ehMoto(v?.modelo) ? "moto" : "vtr", n: ehMoto(v?.modelo) ? 1 : 2, uso: u?.nome || "", usoPosto: u?.id || "" };
       } else {
         const t = $("#op-outra").value.trim().toUpperCase(); if (!t) { toast("Escreva a viatura ou equipe."); return; }
-        item = { nome: t, tipo: /^(VTR|VIATURA)/.test(t) ? "vtr" : /^(MT|MOTO)/.test(t) ? "moto" : "posto", n: /^(MT|MOTO)/.test(t) ? 1 : 2 };
+        const u = postoDaEscalaNaOp(numeroDe(t), $("#op-de").value || ui.dia, $("#op-ini").value || "19:00", $("#op-fim").value || "03:00");
+        item = { nome: t, tipo: /^(VTR|VIATURA)/.test(t) ? "vtr" : /^(MT|MOTO)/.test(t) ? "moto" : "posto", n: /^(MT|MOTO)/.test(t) ? 1 : 2, uso: u?.nome || "", usoPosto: u?.id || "" };
       }
+      Object.assign(item, { opDe: $("#op-de").value || ui.dia, opIni: $("#op-ini").value || "19:00", opFim: $("#op-fim").value || "03:00" });
       d.novas = [...(d.novas || []), item]; render();
+      if (item.usoPosto) toast(`${item.nome} está na escala em ${item.uso}. Marquei para levar a guarnição junto no horário da operação.`);
       for (const [id, v] of campos) if ($("#" + id)) $("#" + id).value = v;
       return;
     }
@@ -3545,11 +3586,16 @@ document.addEventListener("click", (e) => {
       const meta = { de, ate, ini, fim, local: $("#op-local").value.trim(), obs: $("#op-obs").value.trim() };
       const s0 = d.secao ? data.secoes.find((x) => x.id === d.secao) : null;
       if (!s0 && !(d.novas || []).length) { toast("Adicione pelo menos uma viatura ou equipe."); return; }
-      mudar(`Operação ${nome}${s0 ? " atualizada" : " criada"}: ${textoOp(meta)}`, () => {
+      // guarnições da escala que vão junto com a viatura (remanejamento só no horário da operação; depois voltam)
+      const novas = (d.novas || []).map((n) => ({ ...n, id: "p" + novoId() + Math.random().toString(36).slice(2, 5) }));
+      const levar = novas.filter((n) => n.usoPosto && n.levar !== false).flatMap((n) => diasDaOperacao(de, ate).flatMap((dia) => guarnicaoNaOperacao(n.usoPosto, dia, ini, fim).map((x) => ({ gm: x.gm, dia, posto: n.id, origem: n.usoPosto, funcao: x.funcao || "" }))));
+      const vistos = new Set(), mov = levar.filter((x) => { const k = x.gm + x.dia; if (vistos.has(k)) return false; vistos.add(k); return true; });
+      mudar(`Operação ${nome}${s0 ? " atualizada" : " criada"}: ${textoOp(meta)}${mov.length ? ` · ${new Set(mov.map((x) => x.gm)).size} GM(s) da escala vão junto no horário` : ""}`, () => {
         const s = s0 || { id: "s" + novoId(), nome, operacao: meta };
         if (!s0) data.secoes.push(s); else { s.nome = nome; s.operacao = meta; }
         for (const p of data.postos.filter((x) => x.secao === s.id)) { const n = Math.max(1, ...Object.values(p.vagas || {})); Object.assign(p, { de, ate, reforco: { ini, fim }, vagas: vagasDoHorario(ini, fim, n) }); }
-        for (const n of d.novas || []) data.postos.push({ id: "p" + novoId(), secao: s.id, nome: n.nome, ...(n.tipo !== "posto" ? { tipo: n.tipo } : {}), vagas: vagasDoHorario(ini, fim, Number(n.n) || 1), reforco: { ini, fim }, de, ate, ...(meta.local ? { sub: meta.local.toUpperCase() } : {}) });
+        for (const x of mov) data.ocorrencias.push({ id: novoId() + Math.random().toString(36).slice(2, 5), tipo: "REMANEJ", gm: x.gm, de: x.dia, ate: x.dia, posto: x.posto, ini, fim, levaVtr: x.origem, ...(x.funcao ? { funcao: x.funcao } : {}), obs: `Operação ${nome}` });
+        for (const n of novas) data.postos.push({ id: n.id, secao: s.id, nome: n.nome, ...(n.tipo !== "posto" ? { tipo: n.tipo } : {}), vagas: vagasDoHorario(ini, fim, Number(n.n) || 1), reforco: { ini, fim }, de, ate, ...(meta.local ? { sub: meta.local.toUpperCase() } : {}) });
         ui.drawer = null;
         if (ui.dia < de || ui.dia > ate) ui.dia = de;
       });
@@ -4038,6 +4084,9 @@ document.addEventListener("change", (e) => {
     });
     return;
   }
+  if (id === "ed-ordem") { ui.edOrdem = v; ed.sel = 0; atualizarLista(); $("#ed-in")?.focus(); return; }
+  if (id === "ed-sem-of") { ui.edSemOfertados = e.target.checked; ed.sel = 0; atualizarLista(); $("#ed-in")?.focus(); return; }
+  if (e.target.dataset?.oplevar) { ui.drawer.novas[Number(e.target.dataset.oplevar)].levar = e.target.checked; return; }
   if (e.target.dataset?.opn) { ui.drawer.novas[Number(e.target.dataset.opn)].n = Number(v) || 1; return; }
   if (e.target.dataset?.rst) {
     const f = new Set(ui.drawer.fora || []); if (e.target.checked) f.delete(e.target.dataset.rst); else f.add(e.target.dataset.rst); ui.drawer.fora = [...f];

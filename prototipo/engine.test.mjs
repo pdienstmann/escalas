@@ -432,3 +432,19 @@ test("posto só de um padrão: nos dias do outro padrão não existe (sem furo)"
   assert.ok(calcularDia(data, d1).furos.some((f) => f.posto === "so1"));
   assert.ok(!calcularDia(data, d2).furos.some((f) => f.posto === "so1"));
 });
+
+test("viatura da escala levada para a operação: guarnição vai no horário e volta; origem sem furo", () => {
+  const data = base();
+  data.secoes = [{ id: "op", nome: "JOGO", operacao: { de: "", ate: "", ini: "21:00", fim: "03:00" } }];
+  data.postos.push({ id: "opv", secao: "op", nome: "VTR 1318", tipo: "vtr", vagas: { t4: 1, t1: 1 }, reforco: { ini: "21:00", fim: "03:00" } });
+  const d = diaDe(data, "N1");
+  data.secoes[0].operacao.de = d; data.secoes[0].operacao.ate = d; data.postos.at(-1).de = d; data.postos.at(-1).ate = d;
+  const noite = calcularDia(data, d).designacoes.filter((x) => x.posto === "noite");
+  assert.ok(noite.length);
+  for (const x of noite) data.ocorrencias.push({ id: "r" + x.gm, tipo: "REMANEJ", gm: x.gm, de: d, ate: d, posto: "opv", ini: "21:00", fim: "03:00", levaVtr: "noite" });
+  data._versao++;
+  const cd = calcularDia(data, d), g = noite[0].gm;
+  const doGm = cd.designacoes.filter((x) => x.gm === g).sort((a, b) => a.ini - b.ini).map((x) => [x.posto, x.ini, x.fim]);
+  assert.deepEqual(doGm.map((x) => x[0]), ["noite", "opv", "noite"]);
+  assert.ok(!cd.furos.some((f) => f.posto === "noite"), "origem não vira furo");
+});
