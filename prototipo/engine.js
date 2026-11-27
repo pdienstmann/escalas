@@ -327,7 +327,7 @@ export function mesmoPeriodo(data, gm, dia, ini) {
 // (06–18 → EJA a partir das 18h; 07–19 → a partir das 19h), com a mesma duração do reforço.
 export function horarioEja(data, dia, gmId, postoId, ini, fim) {
   const p = data.postos.find((x) => x.id === postoId);
-  if (!p?.reforco) return null;
+  if (!p?.reforco || secaoOperacao(data, postoId)) return null; // operação tem horário próprio
   const [ri, rf] = intervalo(p.reforco.ini, p.reforco.fim);
   if (sobrepoe(ini, fim, ri, rf) <= 0) return null;
   const d = calcularDia(data, dia).designacoes.filter((x) => x.gm === gmId && x.nat !== "he" && x.nat !== "bh" && x.fim <= ri && ri - x.fim <= 120 && x.ini < ri - 240).sort((a, b) => b.fim - a.fim)[0];
@@ -382,7 +382,8 @@ export function sugerir(data, dia, postoId, ini, fim) {
   const daEscala = (d) => op && d.nat !== "he" && d.nat !== "bh" && d.posto && d.posto !== postoId && !secaoOperacao(data, d.posto);
   const remanejar = [], he = [];
   const afastados = new Set(data.ocorrencias.filter((o) => (["FERIAS", "LICENCA", "ATESTADO", "CURSO"].includes(o.tipo) && ocorrenciaCobre(o, dia)) || (DE_UM_DIA.includes(o.tipo) && o.de === dia)).map((o) => o.gm));
-  const ontemNoite = calcularDia(data, somaDias(dia, -1)).designacoes.filter((d) => d.fim - 1440 > ini && d.ini - 1440 < fim).map((d) => d.gm);
+  const ontem = calcularDia(data, somaDias(dia, -1)).designacoes;
+  const ontemNoite = ontem.filter((d) => d.fim - 1440 > ini && d.ini - 1440 < fim).map((d) => d.gm);
   for (const gm of data.gms) {
     if (gm.ativo === false) continue;
     if (afastados.has(gm.id)) continue;
@@ -407,11 +408,14 @@ export function sugerir(data, dia, postoId, ini, fim) {
     if (ontemNoite.includes(gm.id)) continue;
     const teto = (data.config?.tetoHE ?? 60) * 60, total = base.heMes + base.transporte;
     const notas = [];
-    const eja = horarioEja(data, dia, gm.id, postoId, ini, fim);
+    const eja = op ? null : horarioEja(data, dia, gm.id, postoId, ini, fim);
     const [ea, eb] = eja || limitarExtensao(data, dia, gm.id, ini, fim);
-    // vaga curta (até 6h) colada no serviço dele hoje: quem termina na hora em que ela começa (ou entra quando ela acaba) estende
-    const colado = fim - ini <= 360 && minhas.find((d) => d.nat !== "he" && d.nat !== "bh" && d.posto !== null && (d.fim === ini || d.ini === fim));
-    if (colado && !eja) { base.estende = true; if (!base.noPostoHoje) notas.push(colado.fim === ini ? `termina às ${fmtHm(ini)} · estende até ${fmtHm(fim)}` : `entra às ${fmtHm(fim)} · começa às ${fmtHm(ini)}`); }
+    // vaga curta (até 6h) colada no serviço dele: quem termina na hora em que ela começa (ou entra quando ela acaba) estende.
+    // Vale também para quem trabalhou a noite anterior e sai às 07h (estende de manhã). Em operação, aceita até 2h de intervalo.
+    const folga = op ? 120 : 0, regular = (d) => d.nat !== "he" && d.nat !== "bh" && d.posto !== null;
+    const colado = fim - ini <= 360 && (minhas.find((d) => regular(d) && ((d.fim <= ini && ini - d.fim <= folga) || (d.ini >= fim && d.ini - fim <= folga)))
+      || ontem.find((d) => d.gm === gm.id && regular(d) && d.fim - 1440 <= ini && ini - (d.fim - 1440) <= folga && d.fim > 1440));
+    if (colado && !eja) { base.estende = true; if (!base.noPostoHoje) notas.push(colado.dia === "ontem" || ontem.includes(colado) ? `trabalhou a noite · sai às ${fmtHm(colado.fim)} · estende até ${fmtHm(fim)}` : colado.fim <= ini ? `termina às ${fmtHm(colado.fim)} · ${colado.fim === ini ? "estende" : "emenda"} até ${fmtHm(fim)}` : `entra às ${fmtHm(colado.ini)} · começa às ${fmtHm(ini)}`); }
     if (eja) { base.eja = eja; notas.push(`do dia · estende ${fmtHm(eja[0])}–${fmtHm(eja[1])}`); }
     else if (base.mesmoPosto && !base.noPostoHoje) notas.push(base.mesmoPeriodo ? "escala oposta deste posto" : "deste posto · turno oposto");
     else if (base.mesmoPeriodo) notas.push("de folga · mesmo turno");

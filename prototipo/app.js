@@ -3985,7 +3985,7 @@ document.addEventListener("click", (e) => {
       const dd = { dia: x.dia, posto: x.posto, gm: x.gm, ini: x.ini || "", fim: x.fim || "" };
       abrirMenu([{ t: txt, act: "ed-nada", desab: true }, { sep: true },
         ...(x.via === "rem" ? [{ t: "Sim, remanejar", act: "pend-rem", d: dd, padrao: true }]
-          : [{ t: "📲 Oferecer a ele (WhatsApp)", act: "pend-oferecer", d: dd, padrao: true }, { t: "Copiar mensagem da vaga", act: "pend-copiar", d: dd }, { sep: true },
+          : [{ t: "📋 Copiar mensagem e marcar como oferecida", act: "pend-copiar-of", d: dd, padrao: true }, { t: "📲 Só marcar como oferecida", act: "pend-oferecer", d: dd }, { t: "Só copiar a mensagem", act: "pend-copiar", d: dd }, { sep: true },
             ...itensLancarHE(dd, "Já confirmou: lançar HE", "he"), ...itensLancarHE(dd, "Já confirmou: lançar como BH+", "bh")]),
         ...(x.via === "rem" ? [] : [{ t: "Mudar o horário antes…", act: "pend-abrir", d: { dia: x.dia, posto: x.posto, turno: TURNOS.find((t) => sobrepoe(intervalo(x.ini, x.fim)[0], intervalo(x.ini, x.fim)[1], t.ini, t.fim) > 0)?.id || "t2" } }]),
         { t: "Cancelar", act: "dr-cancelar" }], r.left, r.bottom + 2, el, {});

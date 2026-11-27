@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { limitarExtensao, calcularDia, livroMes, resumoMes, intervalo, sugerir, saldoBH, minutosNoturnos, planejarCobertura } from "./engine.js";
+import { somaDias, limitarExtensao, calcularDia, livroMes, resumoMes, intervalo, sugerir, saldoBH, minutosNoturnos, planejarCobertura } from "./engine.js";
 import { criarExemplo } from "./seed.js";
 
 const base = () => ({
@@ -467,4 +467,16 @@ test("vaga de 6h colada no fim do dia: quem termina às 19h aparece primeiro par
   assert.match(primeiro.notas.join(), /termina às 19:00 · estende até 01:00/);
   const s12 = sugerir(data, d, "noite", 1140, 1860).he; // 12h: continua dando prioridade ao turno da noite
   assert.ok(!s12[0].estende);
+});
+
+test("vaga de 6h de manhã: quem trabalhou a noite anterior e sai às 07h aparece para estender", () => {
+  const data = base(), d = diaDe(data, "D1");
+  data.equipes.push({ id: "N2", tipo: "alternado", paridade: 1, periodo: "noite" });
+  data.gms.push({ id: "z", nome: "Z", equipe: "N2", lotacao: { posto: "noite", segmentos: [{ ini: "19:00", fim: "07:00" }] } });
+  data._versao++;
+  const s = sugerir(data, d, "hosp", 420, 780).he; // 07:00–13:00
+  const x = s.find((y) => y.gm.id === "z");
+  assert.ok(x, "GM da noite anterior entra nas sugestões");
+  assert.ok(x.estende); assert.match(x.notas.join(), /trabalhou a noite · sai às 07:00/);
+  assert.equal(s.filter((y) => !y.bloqueado)[0].gm.id, "z");
 });
