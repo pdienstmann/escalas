@@ -883,6 +883,23 @@ function celulaDia(marcas) {
   const he = marcas.includes("HE"), bh = marcas.includes("BH+");
   return `<td class="d ${cls}" title="${marcas.map((m) => TIPOS[m] || { S: "Serviço", TR: "Troca (cobrindo)", HE: "Hora extra", "BH+": "Banco de horas +" }[m]).join(", ")}">${txt}${he ? `<i class="dot he"></i>` : ""}${bh ? `<i class="dot bh"></i>` : ""}</td>`;
 }
+// Horas que passam do mês anterior (acima do teto): confere e confirma de uma vez, corrigindo só o que divergir
+function anteriorDe(m) { const [y, mm] = m.split("-").map(Number); return mm === 1 ? `${y - 1}-12` : `${y}-${String(mm - 1).padStart(2, "0")}`; }
+function painelTransporte(m) {
+  const ant = anteriorDe(m), conf = data.config.transporteConfirmado?.[m];
+  if (ant < (data.config.mesInicial || ant)) return "";
+  const calc = controleMes(data, ant), atual = controleMes(data, m);
+  const lista = data.gms.filter((g) => (calc.get(g.id)?.proximo || 0) > 0 || atual.get(g.id)?.manual?.transporte);
+  if (!lista.length) return "";
+  const nomeAnt = MESES[Number(ant.slice(5)) - 1];
+  if (conf && !ui.verTransporte) return `<p class="transp-ok">✓ Horas que vieram de ${nomeAnt} confirmadas${conf.quem ? ` por ${esc(conf.quem)}` : ""} em ${ddmm(conf.em.slice(0, 10))} · ${lista.length} GM${lista.length === 1 ? "" : "s"} · <button class="link" data-act="tr-rever">rever</button></p>`;
+  return `<section class="painel transp"><div class="transp-cab"><h3>Horas que vieram de ${nomeAnt}</h3><span class="meta">Passaram do teto de ${data.config.tetoHE}h em ${nomeAnt}. Confira e corrija só quem tiver diferença (falta, saiu mais cedo…).</span></div>
+    <table class="lanc transp-t"><thead><tr><th>GM</th><th>Calculado</th><th>Vai para ${MESES[Number(m.slice(5)) - 1]}</th></tr></thead><tbody>
+    ${lista.sort((a, b) => a.nome.localeCompare(b.nome)).map((g) => { const c = calc.get(g.id)?.proximo || 0, v = atual.get(g.id)?.transporte ?? c;
+      return `<tr><td>${esc(g.nome)}</td><td class="num">${fmtHoras(c)}</td><td><input class="tr-h" data-trgm="${g.id}" data-calc="${c}" value="${hhmm(v) || "0:00"}" size="6" inputmode="numeric"></td></tr>`; }).join("")}
+    </tbody></table>
+    <div class="linha"><button class="btn pri" data-act="tr-confirmar">Confirmar ${lista.length} valor${lista.length === 1 ? "" : "es"}</button>${conf ? `<button class="link" data-act="tr-fechar">fechar</button>` : ""}</div></section>`;
+}
 function vMes() {
   const m = ui.mes;
   // serviços, folgas e dias vêm da escala; as horas extras vêm do controle (só dias finalizados)
@@ -904,6 +921,7 @@ function vMes() {
     <select id="m-ord" aria-label="Ordenar"><option value="he" ${f.ordem === "he" ? "selected" : ""}>Mais HE no mês</option><option value="heAsc" ${f.ordem === "heAsc" ? "selected" : ""}>Menos HE (próximo a chamar)</option><option value="proximo" ${f.ordem === "proximo" ? "selected" : ""}>Maior transporte p/ próximo mês</option><option value="equipe" ${f.ordem === "equipe" ? "selected" : ""}>Equipe</option><option value="nome" ${f.ordem === "nome" ? "selected" : ""}>Nome</option></select>
     <input type="search" id="m-busca" placeholder="Buscar GM" aria-label="Buscar GM">
     ${abertos.length ? `<button class="btn fin" data-act="fin-pendentes">Finalizar ${abertos.length} dia${abertos.length === 1 ? "" : "s"} em aberto…</button>` : ""}</div></div>
+  ${painelTransporte(m)}
   <div class="resumo">
     <div class="kpi"><span class="v">${fmtHoras(tot("he"))}</span><span class="l">HE no controle · ${nFin} de ${diasDoMes(m).length} dias finalizados</span></div>
     <div class="kpi previsto"><span class="v">${fmtHoras(tot("prevista"))}</span><span class="l">HE prevista nos dias em aberto (ainda não conta)</span></div>
@@ -3166,6 +3184,22 @@ document.addEventListener("click", (e) => {
       const p = postoPorId(el.dataset.posto), dest = postoPorId(document.querySelector(`[data-ex-dest="${p.id}"]`).value), dia = ui.padrao?.desde || ui.dia, lot = lotadosEm(p.id, dia);
       mudar(`${lot.length} GM${lot.length === 1 ? "" : "s"} de ${p.nome} passa${lot.length === 1 ? "" : "m"} para ${dest.nome} a partir de ${ddmm(dia)}`, () => {
         for (const g of lot) { const antes = vigente(g, somaDias(dia, -1)); g.historico = [...(g.historico || []).filter((h) => h.ate < somaDias(dia, -1)), { ate: somaDias(dia, -1), equipe: antes.equipe, lotacao: antes.lotacao, dias: antes.dias }]; g.lotacao = { ...g.lotacao, posto: dest.id }; }
+      });
+      return;
+    }
+    case "tr-rever": ui.verTransporte = true; render(); return;
+    case "tr-fechar": ui.verTransporte = false; render(); return;
+    case "tr-confirmar": {
+      const m = ui.mes, campos = [...document.querySelectorAll("[data-trgm]")], erros = campos.filter((i) => lerHoras(i.value) === null);
+      if (erros.length) { toast("Confira as horas (ex.: 6 ou 6:30)."); erros[0].focus(); return; }
+      const dif = campos.filter((i) => lerHoras(i.value) !== Number(i.dataset.calc)).length;
+      mudar(`Horas que vieram de ${MESES[Number(anteriorDe(m).slice(5)) - 1]} confirmadas${dif ? ` (${dif} corrigida${dif === 1 ? "" : "s"})` : ""}`, () => {
+        for (const i of campos) {
+          const gm = i.dataset.trgm, v = lerHoras(i.value), c = Number(i.dataset.calc), ex = (data.controle ||= []).find((x) => x.tipo === "TRANSPORTE" && x.mes === m && x.gm === gm);
+          if (v === c) { if (ex) data.controle = data.controle.filter((x) => x !== ex); } else if (ex) ex.min = v; else data.controle.push({ id: novoId(), tipo: "TRANSPORTE", mes: m, gm, min: v });
+        }
+        data.config.transporteConfirmado = { ...(data.config.transporteConfirmado || {}), [m]: { em: new Date().toISOString(), quem: window.ESCALA_SERVIDOR?.nome || "" } };
+        ui.verTransporte = false;
       });
       return;
     }
