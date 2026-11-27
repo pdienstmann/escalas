@@ -1995,9 +1995,14 @@ function fecharMenu() { const m = $("#menu"); if (m && !m.hidden) { m.hidden = t
 
 document.addEventListener("contextmenu", (e) => {
   if (e.target.closest("input, textarea, select, #pop, #drawer")) return; // nesses lugares fica o menu normal do navegador
-  const chipEl = e.target.closest("button.chip[data-des]"), postoEl = e.target.closest(".posto-btn"), secEl = e.target.closest(".secao-btn"), cel = e.target.closest("table.quadro td[data-posto]");
+  if (e.shiftKey) return; // Shift + botão direito = menu normal do navegador
+  const chipEl = e.target.closest("button.chip[data-des]"), tr = e.target.closest("table.quadro tr");
+  // a linha inteira conta: passar o mouse em qualquer parte da seção ou do nome do posto abre o menu dela
+  const postoEl = e.target.closest(".posto-btn") || e.target.closest("table.quadro th.posto")?.querySelector(".posto-btn");
+  const secEl = e.target.closest(".secao-btn") || (tr?.classList.contains("secao") ? tr.querySelector(".secao-btn[data-secao]") : null);
+  const cel = e.target.closest("table.quadro td[data-posto]");
   const alvo = chipEl || postoEl || secEl || cel;
-  if (!alvo) return;
+  if (!alvo) { menuGenerico(e); return; }
   e.preventDefault();
   fecharPop();
   const r = alvo.getBoundingClientRect();
@@ -2007,6 +2012,52 @@ document.addEventListener("contextmenu", (e) => {
   else if (secEl) abrirMenu(itensSecao(secEl.dataset.secao), x, y, secEl, {});
   else abrirMenu(itensCelula(cel.dataset.posto, cel.dataset.turno), x, y, cel, { posto: cel.dataset.posto });
 });
+// Menu do botão direito em qualquer outro lugar: célula dos padrões, linhas de listas (lançamentos, mês, efetivo),
+// cartões da frota e o fundo do quadro. Os itens são os próprios botões daquele lugar ("atalhos" que clicam neles).
+function itensDosBotoes(box) {
+  const vistos = new Set(), out = [];
+  for (const b of box.querySelectorAll("button[data-act], a[data-act]")) {
+    if (b.disabled || b.closest("[hidden]") || !b.getClientRects().length) continue;
+    if (b.dataset.act === "abrir-ficha" && b.dataset.gm) continue; // já vem nos itens do GM
+    let t = (b.getAttribute("aria-label") || b.textContent || b.title || "").replace(/\s+/g, " ").replace(/[✎›×]/g, "").trim();
+    if (b.title && t.length <= 8 && !b.title.includes(t)) t = `${t} · ${b.title}`;
+    if (b.getAttribute("aria-pressed") === "true" || b.classList.contains("on")) t = "✓ " + t;
+    if (!t || t.length > 60) t = (b.title || t).slice(0, 60); if (!t || vistos.has(t)) continue;
+    vistos.add(t); out.push({ t, act: "mn-proxy", d: { i: String((ui.proxies ||= []).push(b) - 1) } });
+  }
+  return out;
+}
+function itensDeGm(gm) {
+  return [{ t: "Onde está hoje / situação…", act: "mn-busca-gm", d: { gm } }, { t: "Ficha do GM", act: "abrir-ficha", d: { gm } }, { t: "Lotação e horário…", act: "bg-lotacao", d: { gm } }];
+}
+function menuGenerico(e) {
+  if (!["quadro", "padroes", "lancamentos", "mes", "frota", "pendencias", "ajustes"].includes(ui.view) || !e.target.closest("main") || e.target.closest("a[href], p, h1, h2, h3, label")) return;
+  ui.proxies = [];
+  const x = e.clientX, y = e.clientY;
+  const tdPad = e.target.closest("td[data-pposto]");
+  if (tdPad) { // célula do padrão (dia / noite de um posto)
+    const p = postoPorId(tdPad.dataset.pposto), per = tdPad.dataset.pper, add = tdPad.querySelector("[data-act=pad-add]");
+    const tem = (per === "dia" ? ["t2", "t3"] : ["t4", "t1"]).some((t) => p.vagas?.[t]);
+    e.preventDefault(); fecharPop();
+    abrirMenu([...(add ? [{ t: `Pôr GM ${per === "dia" ? "de dia" : "à noite"} aqui…`, act: "mn-proxy", d: { i: String(ui.proxies.push(add) - 1) }, padrao: true }] : []),
+      { t: tem ? `Não usar ${per === "dia" ? "de dia" : "à noite"}` : `Usar ${per === "dia" ? "de dia" : "à noite"} (1 vaga)`, act: "pad-vagas", d: { per, n: tem ? "0" : "1" } },
+      { sep: true }, ...itensPostoPadrao(p).filter((i) => !i.sep && i.act !== "pad-vagas").slice(0, 1), ...itensGerais()], x, y, tdPad, { posto: p.id });
+    return;
+  }
+  const box = e.target.closest("main tr, main li, .fr-card > header, .fr-card");
+  if (box && !box.closest("thead")) {
+    const gm = box.querySelector("[data-act=abrir-ficha][data-gm]")?.dataset.gm;
+    const itens = [...(gm ? itensDeGm(gm) : []), ...itensDosBotoes(box).filter((i) => !(gm && /ficha/i.test(i.t)))];
+    if (itens.length) { e.preventDefault(); fecharPop(); abrirMenu([...itens.slice(0, 1).map((i) => ({ ...i, padrao: true })), ...itens.slice(1), ...itensGerais()], x, y, box, {}); return; }
+  }
+  if (["quadro", "padroes"].includes(ui.view)) { // fundo da tela
+    const novo = $("main [data-act=pad-novo]"), busca = $("main [data-act=busca-gm]");
+    e.preventDefault(); fecharPop();
+    abrirMenu([...(novo ? [{ t: "Novo posto, viatura, seção ou grupamento…", act: "mn-proxy", d: { i: String(ui.proxies.push(novo) - 1) } }] : []),
+      ...(busca ? [{ t: "Buscar GM…", act: "mn-proxy", d: { i: String(ui.proxies.push(busca) - 1) }, atalho: "Ctrl+F" }] : []),
+      ...(ui.view === "quadro" ? [{ t: `${ui.soFuros ? "✓ " : ""}Ver só o que falta cobrir`, act: "mn-so-furos" }] : []), ...itensGerais()], x, y, e.target, {});
+  }
+}
 // Teclado dentro do menu: setas, Enter, Esc
 document.addEventListener("keydown", (e) => {
   const m = $("#menu");
@@ -3469,6 +3520,9 @@ document.addEventListener("click", (e) => {
       mudar(q ? `${p.nome} agora só existe no padrão ${q === "impar" ? "ímpar" : "par"}` : `${p.nome} agora existe nos dois padrões`, () => { if (eqs) p.equipes = eqs; else delete p.equipes; });
       return;
     }
+    case "mn-proxy": { const b = ui.proxies?.[Number(el.dataset.i)]; fecharMenu(); if (b?.isConnected) b.click(); return; }
+    case "mn-busca-gm": { const gm = el.dataset.gm, alvo = ui.menu?.alvo || document.body; fecharMenu(); abrirPop("buscagm", alvo, { q: "", gm }); return; }
+    case "mn-so-furos": fecharMenu(); ui.soFuros = !ui.soFuros; render(); return;
     case "copiar-modelo": { ui.modeloCopiado = el.dataset.id; fecharMenu(); toast(`${postoPorId(el.dataset.id).nome} copiado como modelo. Botão direito numa seção → "Colar modelo aqui", ou use "+ Posto / viatura".`); return; }
     case "colar-modelo": { const alvo = ui.menu.alvo; fecharMenu(); abrirPop("novo", alvo, { secao: el.dataset.secao, modeloPosto: "copiar:" + ui.modeloCopiado }); $("#np-nome")?.focus(); return; }
     case "pad-vazios": { const set = (ui.padVazios ||= new Set()), id = el.dataset.secao; if (set.has(id)) set.delete(id); else set.add(id); render(); return; }
