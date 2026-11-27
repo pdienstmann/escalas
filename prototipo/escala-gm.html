@@ -370,7 +370,7 @@ button.eq:hover { border-color: var(--accent); }
 .aviso { margin: 0; padding: .4rem .55rem; border-radius: 6px; background: var(--warn-bg); color: var(--warn); font-size: .85rem; }
 
 /* menu do botão direito, no padrão do Windows */
-.menu { position: fixed; z-index: 70; min-width: 15rem; max-width: calc(100vw - 8px); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 6px; padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,.22); font: 400 .88rem var(--f-ui); }
+.menu { position: fixed; z-index: 78; min-width: 15rem; max-width: calc(100vw - 8px); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 6px; padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,.22); font: 400 .88rem var(--f-ui); }
 .mn-item { display: flex; align-items: center; gap: 1.5rem; width: 100%; border: 0; background: none; color: var(--ink); text-align: left; padding: .38rem .8rem .38rem 1.6rem; border-radius: 4px; cursor: default; font: inherit; white-space: nowrap; }
 .mn-item:hover:not(:disabled), .mn-item:focus-visible, .mn-sub.aberto > .mn-item { background: var(--accent-soft); outline: none; }
 .mn-item:disabled { color: var(--muted); opacity: .55; }
@@ -3940,8 +3940,12 @@ function abrirMenu(itens, x, y, alvo, ctx) {
 function fecharMenu() { const m = $("#menu"); if (m && !m.hidden) { m.hidden = true; m.innerHTML = ""; ui.menu = null; } }
 
 document.addEventListener("contextmenu", (e) => {
-  if (e.target.closest("input, textarea, select, #pop, #drawer")) return; // nesses lugares fica o menu normal do navegador
-  if (e.shiftKey) return; // Shift + botão direito = menu normal do navegador
+  // menu normal do navegador só em campos de texto, texto selecionado (copiar) ou com Shift
+  if (e.shiftKey || e.target.closest("input, textarea, select, #menu") || String(getSelection?.() || "").trim()) return;
+  const liEd = e.target.closest("#ed-lista li[data-i]");
+  if (liEd) { e.preventDefault(); menuSugestao(Number(liEd.dataset.i), liEd, e.clientX, e.clientY); return; }
+  if (e.target.closest("#inline")) { e.preventDefault(); ui.proxies = []; const it = itensDosBotoes($("#inline")).slice(0, 12); if (it.length) abrirMenu(it, e.clientX, e.clientY, $("#inline"), {}); return; }
+  if (e.target.closest("#pop, #drawer")) { menuGenerico(e); return; }
   const chipEl = e.target.closest("button.chip[data-des]"), tr = e.target.closest("table.quadro tr");
   // a linha inteira conta: passar o mouse em qualquer parte da seção ou do nome do posto abre o menu dela
   const postoEl = e.target.closest(".posto-btn") || e.target.closest("table.quadro th.posto")?.querySelector(".posto-btn");
@@ -3976,10 +3980,36 @@ function itensDosBotoes(box) {
 function itensDeGm(gm) {
   return [{ t: "Onde está hoje / situação…", act: "mn-busca-gm", d: { gm } }, { t: "Ficha do GM", act: "abrir-ficha", d: { gm } }, { t: "Lotação e horário…", act: "bg-lotacao", d: { gm } }];
 }
+// Sugestão da lista (pôr GM / trocar / cobrir): botão direito = as mesmas escolhas do clique, mais ficha e situação
+function menuSugestao(i, li, x, y) {
+  const it = ed.lista[i]; if (!it) return;
+  ed.sel = i; atualizarLista();
+  if (ed.modo === "add" && it.via !== "rem" && !ed.oferta) { escolherEditor(i); return; } // já abre: oferecer / copiar / lançar
+  const g = it.gm.id;
+  abrirMenu([{ t: ed.oferta ? `${ed.oferta.has(g) ? "Desmarcar" : "Marcar"} ${it.gm.nome} para a oferta` : it.via === "rem" ? `Remanejar ${it.gm.nome} para cá` : `Escolher ${it.gm.nome}`, act: "mn-ed-escolher", d: { i: String(i) }, padrao: true, desab: !!it.bloqueado },
+    { sep: true }, { t: "Onde está hoje / situação…", act: "mn-busca-gm", d: { gm: g } }, { t: "Ficha do GM", act: "abrir-ficha", d: { gm: g } }], x, y, li, {});
+}
 function menuGenerico(e) {
-  if (!["quadro", "padroes", "lancamentos", "mes", "frota", "pendencias", "ajustes"].includes(ui.view) || !e.target.closest("main") || e.target.closest("a[href], p, h1, h2, h3, label")) return;
   ui.proxies = [];
   const x = e.clientX, y = e.clientY;
+  const geral = () => { e.preventDefault(); fecharMenu();
+    const busca = $("main [data-act=busca-gm]");
+    abrirMenu([{ t: "Buscar GM…", act: busca ? "mn-proxy" : "mn-busca-gm", d: busca ? { i: String(ui.proxies.push(busca) - 1) } : { gm: "" }, atalho: "Ctrl+F" },
+      ...(desfazer.length ? [{ t: "Desfazer", act: "desfazer", atalho: "Ctrl+Z" }] : []),
+      { sep: true }, { t: "Menu do navegador: Shift + botão direito", act: "ed-nada", desab: true }], x, y, e.target, {}); };
+  const nav = e.target.closest("a[data-nav]");
+  if (nav) { e.preventDefault(); abrirMenu([{ t: `Abrir ${nav.textContent.trim()}`, act: "mn-proxy", d: { i: String(ui.proxies.push(nav) - 1) }, padrao: true }, { t: "Abrir em nova aba", act: "mn-nova-aba", d: { href: nav.getAttribute("href") } }], x, y, nav, {}); return; }
+  if (e.target.closest("a[href]")) return; // outros links: menu do navegador
+  const naJanela = e.target.closest("#pop, #drawer");
+  if (naJanela) { // dentro de uma janela: os botões do item onde clicou
+    const box = e.target.closest("li, tr, .pessoa, .bloco, .linha, section") || naJanela;
+    const gm = e.target.closest("[data-gm]")?.dataset.gm || box.querySelector("[data-gm]")?.dataset.gm;
+    const itens = [...(gm && gmPorId(gm) ? itensDeGm(gm) : []), ...itensDosBotoes(box).slice(0, 10)];
+    if (itens.length) { e.preventDefault(); abrirMenu([...itens.slice(0, 1).map((i) => ({ ...i, padrao: true })), ...itens.slice(1), ...itensGerais()], x, y, box, {}); }
+    else geral();
+    return;
+  }
+  if (!e.target.closest("main") || !["quadro", "padroes", "lancamentos", "mes", "frota", "pendencias", "ajustes", "ficha", "folha"].includes(ui.view)) { geral(); return; }
   const tdPad = e.target.closest("td[data-pposto]");
   if (tdPad) { // célula do padrão (dia / noite de um posto)
     const p = postoPorId(tdPad.dataset.pposto), per = tdPad.dataset.pper, add = tdPad.querySelector("[data-act=pad-add]");
@@ -4002,7 +4032,14 @@ function menuGenerico(e) {
     abrirMenu([...(novo ? [{ t: "Novo posto, viatura, seção ou grupamento…", act: "mn-proxy", d: { i: String(ui.proxies.push(novo) - 1) } }] : []),
       ...(busca ? [{ t: "Buscar GM…", act: "mn-proxy", d: { i: String(ui.proxies.push(busca) - 1) }, atalho: "Ctrl+F" }] : []),
       ...(ui.view === "quadro" ? [{ t: `${ui.soFuros ? "✓ " : ""}Ver só o que falta cobrir`, act: "mn-so-furos" }] : []), ...itensGerais()], x, y, e.target, {});
+    return;
   }
+  // card/item com botões (Semana, ficha, ajustes…): os botões dele; senão, o menu geral
+  const card = e.target.closest("main li, main section, main .painel, main .card, main .kpi");
+  const gm = e.target.closest("[data-gm]")?.dataset.gm;
+  const itens = card ? [...(gm && gmPorId(gm) ? itensDeGm(gm) : []), ...itensDosBotoes(card).slice(0, 10)] : [];
+  if (itens.length) { e.preventDefault(); fecharPop(); abrirMenu([...itens, ...itensGerais()], x, y, card, {}); return; }
+  geral();
 }
 // Teclado dentro do menu: setas, Enter, Esc
 document.addEventListener("keydown", (e) => {
@@ -4396,8 +4433,8 @@ document.addEventListener("input", (e) => {
 });
 document.addEventListener("mousedown", (e) => {
   const li = e.target.closest("#ed-lista li[data-i]");
-  if (li) { e.preventDefault(); escolherEditor(Number(li.dataset.i)); return; }
-  if (ed.modo && !e.target.closest("#inline")) fecharEditor();
+  if (li) { e.preventDefault(); if (e.button === 0) escolherEditor(Number(li.dataset.i)); return; } // botão direito: menu (contextmenu)
+  if (ed.modo && !e.target.closest("#inline, #menu")) fecharEditor();
 });
 window.addEventListener("scroll", () => { if (ed.modo && Date.now() - ed.aberto > 400) fecharEditor(); }, { passive: true });
 document.addEventListener("scroll", (e) => { if (ed.modo && e.target !== document && !e.target.closest?.("#inline")) fecharEditor(); }, { passive: true, capture: true });
@@ -5466,8 +5503,10 @@ document.addEventListener("click", (e) => {
       mudar(q ? `${p.nome} agora só existe no padrão ${q === "impar" ? "ímpar" : "par"}` : `${p.nome} agora existe nos dois padrões`, () => { if (eqs) p.equipes = eqs; else delete p.equipes; });
       return;
     }
+    case "mn-nova-aba": fecharMenu(); window.open(location.pathname + location.search + el.dataset.href, "_blank"); return;
+    case "mn-ed-escolher": { fecharMenu(); escolherEditor(Number(el.dataset.i)); return; }
     case "mn-proxy": { const b = ui.proxies?.[Number(el.dataset.i)]; fecharMenu(); if (b?.isConnected) b.click(); return; }
-    case "mn-busca-gm": { const gm = el.dataset.gm, alvo = ui.menu?.alvo || document.body; fecharMenu(); abrirPop("buscagm", alvo, { q: "", gm }); return; }
+    case "mn-busca-gm": { const gm = el.dataset.gm, alvo = ui.menu?.alvo || document.body; fecharMenu(); fecharEditor(); abrirPop("buscagm", alvo, { q: "", gm, fixo: !gm }); if (!gm) setTimeout(() => $("#bg-in")?.focus(), 30); return; }
     case "mn-so-furos": fecharMenu(); ui.soFuros = !ui.soFuros; render(); return;
     case "copiar-modelo": { ui.modeloCopiado = el.dataset.id; fecharMenu(); toast(`${postoPorId(el.dataset.id).nome} copiado como modelo. Botão direito numa seção → "Colar modelo aqui", ou use "+ Posto / viatura".`); return; }
     case "colar-modelo": { const alvo = ui.menu.alvo; fecharMenu(); abrirPop("novo", alvo, { secao: el.dataset.secao, modeloPosto: "copiar:" + ui.modeloCopiado }); $("#np-nome")?.focus(); return; }
@@ -5713,7 +5752,7 @@ document.addEventListener("click", (e) => {
     }
     case "pre-apagar": ui.confirmar = el.dataset.id; render(); break;
     case "apagar": mudar("Lançamento excluído", () => { data.ocorrencias = data.ocorrencias.filter((o) => o.id !== el.dataset.id); ui.confirmar = null; }); break;
-    case "abrir-ficha": ui.gm = el.dataset.gm; ui.mes = mesDe(ui.dia); ui.view = "ficha"; ui.drawer = null; location.hash = "ficha"; render(); window.scrollTo(0, 0); break;
+    case "abrir-ficha": fecharEditor(); fecharPop(); ui.gm = el.dataset.gm; ui.mes = mesDe(ui.dia); ui.view = "ficha"; ui.drawer = null; location.hash = "ficha"; render(); window.scrollTo(0, 0); break;
     case "ir-dia": ui.dia = el.dataset.dia; ui.view = "quadro"; location.hash = "quadro"; render(); break;
     case "fechar": ui.drawer = null; render(); break;
     case "fin-abrir": abrirFinalizar(ui.dia); return;
