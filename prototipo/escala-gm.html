@@ -840,6 +840,9 @@ table.acessos { min-width: 0; } table.acessos td { vertical-align: middle; }
 .of-tag.antiga { background: transparent; color: var(--muted); border-color: var(--line-strong); font-weight: 500; }
 .vtr-livres { display: flex; flex-wrap: wrap; gap: .3rem; margin: .2rem 0 .4rem; }
 .chip-vtr { border: 1px solid #9fd3ad; background: #eef9f0; color: #1d6b32; border-radius: 6px; padding: .2rem .5rem; font-size: .82rem; cursor: pointer; } .chip-vtr span { color: var(--muted); font-size: .74rem; } .chip-vtr:hover { background: #dff3e3; }
+.pop .bloco, .pop .bloco label, .pop .linha > * { min-width: 0; }
+.pop select { max-width: 100%; min-width: 0; } .pop .bloco > label > select, .pop .bloco > label > input:not([type=checkbox]):not([type=radio]) { width: 100%; box-sizing: border-box; }
+.pop-corpo { overflow-x: hidden; }
 /* finalizar escala e controle de HE */
 .btn.fin { border-color: var(--accent); color: var(--accent); font-weight: 600; padding: .2rem .6rem; }
 .fin-ok { color: var(--ok, #2e7d32); font-weight: 600; } .fin-ok .link { font-weight: 400; margin-left: .3rem; }
@@ -3515,7 +3518,7 @@ function blocoNovoPosto(sec, s) {
   return `<div class="bloco"><b>Posto, viatura ou moto</b>
       <label>Modelo <select id="np-modelo">
         <optgroup label="Modelos prontos">${Object.entries(MODELOS_POSTO).map(([k, x]) => `<option value="${k}" ${chave === k ? "selected" : ""}>${esc(x.t)}</option>`).join("")}</optgroup>
-        ${copiaveis.map(([x, ps]) => `<optgroup label="Copiar de ${esc(x.nome)}">${ps.map((p) => `<option value="copiar:${p.id}" ${chave === "copiar:" + p.id ? "selected" : ""}>${esc(p.nome)}${p.sub ? " · " + esc(p.sub) : ""}</option>`).join("")}</optgroup>`).join("")}
+        ${copiaveis.map(([x, ps]) => `<optgroup label="Copiar de ${esc(x.nome.length > 34 ? x.nome.slice(0, 32) + "…" : x.nome)}">${ps.map((p) => { const t = `${p.nome}${p.sub ? " · " + p.sub : ""}`; return `<option value="copiar:${p.id}" ${chave === "copiar:" + p.id ? "selected" : ""} title="${esc(t)}">${esc(t.length > 42 ? t.slice(0, 40) + "…" : t)}</option>`; }).join("")}</optgroup>`).join("")}
       </select></label>
       ${chave.startsWith("copiar:") ? `<p class="dica">Copiando ${esc(m.nome)}: tipo, vagas, horário e dias. Só falta o nome.</p>` : ""}
       <label>Nome <input id="np-nome" placeholder="${ref ? "ex.: EMEF NOVA · EJA" : "ex.: VTR 1352 ou PRAÇA NOVA"}" autocomplete="off"></label>

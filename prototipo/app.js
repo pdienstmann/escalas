@@ -1507,7 +1507,7 @@ function blocoNovoPosto(sec, s) {
   return `<div class="bloco"><b>Posto, viatura ou moto</b>
       <label>Modelo <select id="np-modelo">
         <optgroup label="Modelos prontos">${Object.entries(MODELOS_POSTO).map(([k, x]) => `<option value="${k}" ${chave === k ? "selected" : ""}>${esc(x.t)}</option>`).join("")}</optgroup>
-        ${copiaveis.map(([x, ps]) => `<optgroup label="Copiar de ${esc(x.nome)}">${ps.map((p) => `<option value="copiar:${p.id}" ${chave === "copiar:" + p.id ? "selected" : ""}>${esc(p.nome)}${p.sub ? " · " + esc(p.sub) : ""}</option>`).join("")}</optgroup>`).join("")}
+        ${copiaveis.map(([x, ps]) => `<optgroup label="Copiar de ${esc(x.nome.length > 34 ? x.nome.slice(0, 32) + "…" : x.nome)}">${ps.map((p) => { const t = `${p.nome}${p.sub ? " · " + p.sub : ""}`; return `<option value="copiar:${p.id}" ${chave === "copiar:" + p.id ? "selected" : ""} title="${esc(t)}">${esc(t.length > 42 ? t.slice(0, 40) + "…" : t)}</option>`; }).join("")}</optgroup>`).join("")}
       </select></label>
       ${chave.startsWith("copiar:") ? `<p class="dica">Copiando ${esc(m.nome)}: tipo, vagas, horário e dias. Só falta o nome.</p>` : ""}
       <label>Nome <input id="np-nome" placeholder="${ref ? "ex.: EMEF NOVA · EJA" : "ex.: VTR 1352 ou PRAÇA NOVA"}" autocomplete="off"></label>
