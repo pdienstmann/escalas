@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Escala GM — Manual do usuário</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Public+Sans:ital,wght@0,400;0,600;0,700;1,400&display=swap">
+<style>
+  @page { size: A4; margin: 18mm 16mm 20mm; }
+  :root { --navy: #0F2A4F; --ouro: #D4A72C; --tinta: #1B2433; --suave: #4A5568; --papel: #F6F4EE; --linha: #D9D3C3; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Public Sans', Arial, sans-serif; color: var(--tinta); font-size: 10.5pt; line-height: 1.5; margin: 0; }
+  h1, h2, h3 { font-family: 'Oswald', 'Arial Narrow', sans-serif; color: var(--navy); letter-spacing: .01em; }
+  h1 { font-size: 30pt; margin: 0 0 6pt; }
+  h2 { font-size: 20pt; margin: 0 0 8pt; padding-top: 4pt; border-bottom: 3px solid var(--ouro); padding-bottom: 4pt; }
+  h3 { font-size: 13.5pt; margin: 14pt 0 4pt; }
+  p { margin: 0 0 7pt; }
+  ul, ol { margin: 0 0 8pt; padding-left: 18pt; } li { margin-bottom: 3pt; }
+  .capitulo { break-before: page; }
+  figure { margin: 8pt 0 12pt; break-inside: avoid; }
+  figure img { width: 100%; border: 1px solid var(--linha); border-radius: 6px; display: block; }
+  figure.meia img { width: 62%; margin: 0 auto; }
+  figure.celular img { width: 34%; margin: 0 auto; }
+  figcaption { font-size: 8.5pt; color: var(--suave); margin-top: 3pt; text-align: center; }
+  .dica { background: #FBF3DC; border-left: 4px solid var(--ouro); padding: 6pt 9pt; border-radius: 4px; margin: 8pt 0; break-inside: avoid; }
+  .atencao { background: #FBE9E7; border-left: 4px solid #B3261E; padding: 6pt 9pt; border-radius: 4px; margin: 8pt 0; break-inside: avoid; }
+  .passos { counter-reset: p; list-style: none; padding-left: 0; }
+  .passos li { counter-increment: p; position: relative; padding-left: 24pt; margin-bottom: 5pt; }
+  .passos li::before { content: counter(p); position: absolute; left: 0; top: 0; width: 17pt; height: 17pt; border-radius: 50%; background: var(--navy); color: #fff; font-weight: 700; font-size: 9pt; text-align: center; line-height: 17pt; }
+  table { width: 100%; border-collapse: collapse; margin: 6pt 0 10pt; font-size: 9.5pt; break-inside: avoid; }
+  th { text-align: left; background: var(--navy); color: #fff; padding: 5pt 7pt; font-weight: 600; }
+  td { padding: 5pt 7pt; border-bottom: 1px solid var(--linha); vertical-align: top; }
+  tr:nth-child(even) td { background: #FAF8F3; }
+  kbd { font-family: 'Courier New', monospace; font-size: 9pt; background: #EEE; border: 1px solid #CCC; border-radius: 3px; padding: 0 4pt; }
+  .capa { height: 255mm; display: flex; flex-direction: column; justify-content: center; background: var(--navy); color: #F6F4EE; margin: -18mm -16mm 0; padding: 30mm 22mm; }
+  .capa h1 { color: #F6F4EE; font-size: 54pt; line-height: 1; }
+  .capa .olho { color: var(--ouro); font-weight: 700; letter-spacing: .14em; text-transform: uppercase; font-size: 11pt; margin-bottom: 10pt; }
+  .capa .faixa { width: 60mm; height: 4px; background: var(--ouro); margin: 12pt 0 16pt; }
+  .capa p { color: #DCE4F0; font-size: 13pt; max-width: 140mm; }
+  .capa .pe { margin-top: auto; font-size: 9.5pt; color: #9FB0C8; }
+  .sumario ol { padding-left: 16pt; font-size: 11pt; } .sumario li { margin-bottom: 4pt; }
+  .duas { display: grid; grid-template-columns: 1fr 1fr; gap: 12pt; }
+</style>
+</head>
+<body>
+
+<section class="capa">
+  <p class="olho">Guarda Municipal de Novo Hamburgo</p>
+  <h1>Escala GM</h1>
+  <div class="faixa"></div>
+  <p><b>Manual do usuário.</b> Como montar e acompanhar a escala do dia, cobrir vagas, oferecer hora extra, controlar as horas do mês e gerar a folha.</p>
+  <p class="pe">As telas deste manual são da versão de demonstração, com nomes e dados fictícios.</p>
+</section>
+
+<section class="capitulo sumario">
+  <h2>Sumário</h2>
+  <ol>
+    <li>Primeiros passos: entrar, navegar e salvar</li>
+    <li>Semana: o que falta resolver</li>
+    <li>Quadro do dia: ler a escala</li>
+    <li>Quadro do dia: editar</li>
+    <li>Cobrir vagas e oferecer hora extra</li>
+    <li>Postos, viaturas e imprevistos do dia</li>
+    <li>Operações</li>
+    <li>Finalizar a escala</li>
+    <li>Padrões, efetivo e inspetores</li>
+    <li>Lançamentos</li>
+    <li>Mês e horas</li>
+    <li>Folha</li>
+    <li>Viaturas (logística)</li>
+    <li>Ajustes e acessos por setor</li>
+    <li>No celular</li>
+    <li>Atalhos e perguntas frequentes</li>
+  </ol>
+  <div class="dica"><b>A regra de ouro.</b> O que você muda no <b>Quadro do dia</b> vale só para aquele dia. O que muda nos <b>Padrões</b> vale para todos os dias a partir da data escolhida. Na dúvida, mexa no Quadro do dia.</div>
+</section>
+
+<section class="capitulo">
+  <h2>1. Primeiros passos</h2>
+  <h3>Entrar</h3>
+  <ol class="passos">
+    <li>Abra o endereço do sistema no navegador (Chrome, Edge ou o navegador do celular).</li>
+    <li>Digite <b>seu nome</b> e a <b>senha do seu setor</b>. O nome aparece no histórico de alterações.</li>
+    <li>O sistema abre na tela do seu perfil: o escalante vê tudo; inspetor, logística e reserva de armamento veem a folha (veja o capítulo 14).</li>
+  </ol>
+  <h3>Navegar</h3>
+  <p>As abas no alto levam às telas: <b>Semana</b>, <b>Quadro do dia</b>, <b>Padrões</b>, <b>Lançamentos</b>, <b>Mês e horas</b>, <b>Folha</b> e <b>Viaturas</b>. <b>Ajustes</b> fica no canto superior direito.</p>
+  <figure><img src="img/01-quadro.jpg" alt=""><figcaption>Cabeçalho com as abas, a barra “Lançar” e o Quadro do dia.</figcaption></figure>
+  <h3>Salvar</h3>
+  <p>Não existe botão de salvar: cada alteração é gravada na hora e o aviso <b>“✓ Salvo”</b> aparece no topo. Se duas pessoas mexem ao mesmo tempo e a outra salvou antes, a sua tela abre a versão mais nova e avisa para você conferir a sua última mudança.</p>
+  <h3>Desfazer</h3>
+  <ul>
+    <li><kbd>Ctrl</kbd>+<kbd>Z</kbd> ou o botão <b>Desfazer</b> voltam as últimas alterações (até 30).</li>
+    <li>O aviso que aparece embaixo depois de cada ação também tem um botão <b>Desfazer</b>.</li>
+    <li>No Quadro do dia, <b>“Desfazer alterações do dia…”</b> volta o dia inteiro ao padrão, mostrando antes o que será desfeito.</li>
+  </ul>
+  <h3>A letra está pequena?</h3>
+  <p>O botão <b>A+</b> no topo aumenta o tamanho do texto. O sistema lembra a escolha.</p>
+</section>
+
+<section class="capitulo">
+  <h2>2. Semana: o que falta resolver</h2>
+  <p>É a melhor tela para começar o dia. Mostra os próximos 7 dias de uma vez.</p>
+  <figure><img src="img/11-semana.jpg" alt=""><figcaption>Indicadores da semana, lembretes, cobertura e “O que falta resolver”.</figcaption></figure>
+  <h3>O que tem nela</h3>
+  <ul>
+    <li><b>Indicadores:</b> vagas para resolver, cobertura em %, reserva técnica, HE lançada e GMs acima de 60h.</li>
+    <li><b>Não esqueça:</b> GM 12x36 com menos de 2 folgas no mês, quem vai passar de 60h, HE oferecida sem resposta, viatura em FA com guarnição, dia sem inspetor. “ver todos” abre a lista completa.</li>
+    <li><b>Cobertura da semana:</b> cada bolinha verde é um posto coberto; o número vermelho é a quantidade de vagas abertas. Clique para ir ao dia.</li>
+    <li><b>O que falta resolver:</b> para cada vaga, a melhor opção e duas alternativas, já com o horário. “+ opções” mostra mais nomes.</li>
+  </ul>
+  <h3>Resolver uma vaga pela Semana</h3>
+  <ol class="passos">
+    <li>Clique no nome sugerido.</li>
+    <li>Escolha <b>“📋 Copiar mensagem e marcar como oferecida”</b>: a mensagem vai para a área de transferência e o GM fica como “aguardando”.</li>
+    <li>Cole no WhatsApp. Quando ele responder, marque “confirmou” (capítulo 5).</li>
+  </ol>
+  <div class="dica">“Deixar sem GM” dispensa a vaga só naquele dia, e ela sai dos avisos.</div>
+</section>
+
+<section class="capitulo">
+  <h2>3. Quadro do dia: ler a escala</h2>
+  <p>O quadro mostra um dia de serviço, das 07h às 07h do dia seguinte, com os quatro turnos: 2º (07–13), 3º (13–19), 4º (19–01) e 1º (01–07).</p>
+  <h3>No alto</h3>
+  <ul>
+    <li><b>‹ data ›</b>: troque de dia. Essa barra fica presa no topo quando você rola a página.</li>
+    <li><b>Equipes do dia e da noite</b> com o inspetor de serviço (clique para trocar).</li>
+    <li><b>Faixa de resumo:</b> vagas descobertas, horas de HE, GMs escalados, fora da escala e a opção “Só furos”.</li>
+    <li>Botões <b>🔍 Buscar GM</b>, <b>+ Posto / viatura</b>, <b>+ Operação</b> e <b>Finalizar escala…</b>.</li>
+  </ul>
+  <h3>Cores e marcas</h3>
+  <table>
+    <tr><th style="width:32%">O que aparece</th><th>Significa</th></tr>
+    <tr><td>Botão vermelho “Cobrir · falta N”</td><td>Vaga sem GM naquele turno</td></tr>
+    <tr><td>Caixa laranja “HE oferecida a N · aguardando”</td><td>Hora extra oferecida no WhatsApp, esperando resposta</td></tr>
+    <tr><td>GM em verde com “HE+” e REQ</td><td>Hora extra lançada (com requerimento)</td></tr>
+    <tr><td>Ícone de volante / escudo</td><td>Motorista / patrulheiro da viatura</td></tr>
+    <tr><td>“REMANEJ.”</td><td>GM trazido de outro posto</td></tr>
+    <tr><td>Faixa amarela “VTR/RONDAS FREQUENTES”</td><td>Posto coberto por ronda, sem GM fixo</td></tr>
+    <tr><td>Listras e “Viatura em manutenção (FA)”</td><td>Viatura parada; a guarnição foi para À disposição</td></tr>
+    <tr><td>Etiqueta “sem motorista”</td><td>Turno com patrulheiro, mas sem motorista</td></tr>
+    <tr><td>Etiqueta “horários diferentes”</td><td>Dupla da viatura com horários diferentes (só na tela)</td></tr>
+    <tr><td>Etiqueta “logística: FA”</td><td>A logística marcou a viatura como fora de atividade</td></tr>
+  </table>
+  <h3>Faixa “Atenção”</h3>
+  <p>Logo acima do quadro, lista o que precisa de ação: vagas descobertas, HE sem resposta, GM em dois lugares, viatura em FA com guarnição, viatura sem motorista, dupla com horários diferentes, falta de inspetor e dia que já passou sem ser finalizado.</p>
+  <figure class="meia"><img src="img/07-atencao.jpg" alt=""><figcaption>Faixa Atenção.</figcaption></figure>
+  <h3>Fora da escala e à disposição</h3>
+  <ul>
+    <li><b>À disposição:</b> GMs sem posto no dia (viatura parada, posto fechado). Clique para mandar a uma vaga ou devolver ao posto de origem.</li>
+    <li><b>Quadrantes de folga, falta, férias, licença, atestado e curso</b>, cada um dividido em <b>diurno</b> e <b>noturno</b>. Folgas em ordem alfabética; férias e afastamentos em ordem de período, com a data de volta.</li>
+  </ul>
+  <figure class="meia"><img src="img/08-fora.jpg" alt=""><figcaption>Quadrantes de quem está fora da escala.</figcaption></figure>
+</section>
+
+<section class="capitulo">
+  <h2>4. Quadro do dia: editar</h2>
+  <p>O quadro funciona como uma planilha. Há quatro jeitos de mexer, e todos fazem a mesma coisa:</p>
+  <table>
+    <tr><th style="width:24%">Jeito</th><th>Como</th></tr>
+    <tr><td>Clicar</td><td>No <b>nome</b> para trocar o GM; no <b>horário</b> para mudar a hora; no <b>+ pôr GM</b> para colocar alguém.</td></tr>
+    <tr><td>Arrastar</td><td>Segure o GM e solte em outro posto ou turno. Um menu pequeno pergunta o que fazer: remanejar, só um turno, trocar de lugar.</td></tr>
+    <tr><td>Botão direito</td><td>Em qualquer lugar: GM, posto, seção, célula, viatura. Mostra todas as opções daquele item. A opção em negrito é a mesma do clique.</td></tr>
+    <tr><td>Teclado</td><td>Setas para andar, <kbd>Enter</kbd> para editar, <kbd>Delete</kbd> para tirar, <kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>Ctrl</kbd>+<kbd>V</kbd> para copiar e colar GM.</td></tr>
+  </table>
+  <figure><img src="img/05-menu-gm.jpg" alt=""><figcaption>Menu do botão direito sobre um GM.</figcaption></figure>
+  <h3>O que dá para fazer com um GM</h3>
+  <ul>
+    <li><b>Trocar o GM</b> por outro, ou lançar <b>troca de serviço</b>.</li>
+    <li><b>Estender horário</b> em hora extra (+6h, +1h, +2h, +3h ou outro horário).</li>
+    <li><b>Função</b> na viatura: motorista ou patrulheiro, só hoje ou sempre (no padrão).</li>
+    <li><b>Tirar do dia:</b> folga, falta, atestado, compensação de banco de horas etc.</li>
+    <li>Editar horário, REQ e observação.</li>
+  </ul>
+  <h3>Barra “Lançar” (para quem prefere digitar)</h3>
+  <p>No topo, escreva e tecle <kbd>Enter</kbd>. Exemplos: <i>folga kraemer 28/11</i> · <i>he couto hoje 19-01 vtr 1317</i>. A tecla <kbd>/</kbd> leva o cursor até ela.</p>
+  <h3>Buscar um GM</h3>
+  <p><kbd>Ctrl</kbd>+<kbd>F</kbd> (ou 🔍 Buscar GM) abre a busca no quadro e nos padrões. Mostra onde o GM está no dia ou por que não está, o padrão dele, posto, horário, folgas do mês e HE oferecida. “Mostrar no quadro” rola até ele e pisca. Apertando <kbd>Ctrl</kbd>+<kbd>F</kbd> de novo, abre a busca normal do navegador.</p>
+  <figure class="meia"><img src="img/06-busca.jpg" alt=""><figcaption>Busca de GM.</figcaption></figure>
+  <div class="dica"><b>Shift + botão direito</b> abre o menu normal do navegador, se você precisar dele. Em campos de texto, o menu do navegador (copiar/colar) continua funcionando.</div>
+</section>
+
+<section class="capitulo">
+  <h2>5. Cobrir vagas e oferecer hora extra</h2>
+  <ol class="passos">
+    <li>Clique no botão vermelho <b>Cobrir</b> (ou no “+ pôr GM”).</li>
+    <li>Escolha a duração: <b>12h</b> ou <b>6h</b> (para estender o serviço de alguém).</li>
+    <li>Escolha o tipo: <b>Hora extra</b>, <b>Banco de horas (BH+)</b> ou <b>Remanejar</b> (quem está à disposição ou na reserva técnica).</li>
+    <li>Clique no GM (ou digite o nome para filtrar).</li>
+    <li>Escolha <b>“📋 Copiar mensagem e marcar como oferecida”</b> e cole no WhatsApp.</li>
+  </ol>
+  <figure><img src="img/02-sugestoes.jpg" alt=""><figcaption>Lista de sugestões com duração, tipo, ordem e horas do mês.</figcaption></figure>
+  <h3>Em que ordem os nomes aparecem</h3>
+  <table>
+    <tr><th style="width:36%">Vem primeiro</th><th>Por quê</th></tr>
+    <tr><td>Vaga de viatura: GMs lotados em viatura</td><td>Conhecem a área e a viatura</td></tr>
+    <tr><td>Membros do grupamento da vaga</td><td>Ex.: vaga do GESCOM para quem é do GESCOM</td></tr>
+    <tr><td>Quem estende colado (vaga de 6h)</td><td>Quem sai às 19h estende até 01h; quem saiu da noite às 07h estende até 13h; quem já está no mesmo posto vem antes</td></tr>
+    <tr><td>EJA / reforço</td><td>O GM do dia estende a partir do fim do próprio serviço</td></tr>
+    <tr><td>Escala oposta do posto, mesmo turno</td><td>Conhece o posto, dia com dia, noite com noite</td></tr>
+    <tr><td>Quem se ofereceu para HE</td><td>Pelo Sistema de Folgas ou lançamento</td></tr>
+    <tr><td>Menos horas no mês</td><td>Divide a HE; quem passou de 60h vai para o fim</td></tr>
+  </table>
+  <p>Operadores de videomonitoramento só aparecem para vagas do videomonitoramento. Quem trabalhou a noite inteira não aparece para o mesmo horário do dia seguinte.</p>
+  <h3>Ordem e filtro</h3>
+  <ul>
+    <li><b>Ordem:</b> sugerida, menos horas no mês ou oferta mais antiga (para revezar).</li>
+    <li><b>“sem os já oferecidos hoje”</b> esconde quem já recebeu oferta no dia.</li>
+    <li>Quem já recebeu oferta aparece com a marca <b>📲 aguardando</b>, <b>confirmou</b> ou <b>recusou</b>; quem não recebeu hoje mostra a data da última oferta.</li>
+  </ul>
+  <h3>Opções ao clicar num GM sugerido</h3>
+  <figure class="meia"><img src="img/03-menu-oferta.jpg" alt=""><figcaption>Copiar e marcar, só marcar, só copiar, ou lançar direto se ele já confirmou.</figcaption></figure>
+  <ul>
+    <li><b>Copiar mensagem e marcar como oferecida</b> (o normal).</li>
+    <li><b>Só marcar como oferecida</b> ou <b>Só copiar a mensagem</b>.</li>
+    <li><b>Já confirmou: lançar HE</b> (ou BH+). Em viatura, escolha <b>como motorista</b> ou <b>como patrulheiro</b>; a função que falta na guarnição vem primeiro.</li>
+  </ul>
+  <h3>Oferecer a vários de uma vez</h3>
+  <p>No rodapé da lista, <b>“📲 Oferecer a vários (WhatsApp)…”</b>: marque os GMs, copie a mensagem e clique em <b>“Ofereci no WhatsApp”</b>.</p>
+  <h3>Quando o GM responder</h3>
+  <ol class="passos">
+    <li>Clique na caixa laranja da vaga.</li>
+    <li>Em cada nome: <b>✓ Confirmou</b> (em viatura, já com a função), <b>✗ Recusou</b> ou <b>Cancelei o envio</b>.</li>
+    <li>Ao confirmar, a HE entra na escala com o horário certo. A oferta só fecha quando todos responderem.</li>
+  </ol>
+  <figure class="meia"><img src="img/04-oferta-aguardando.jpg" alt=""><figcaption>Vaga com HE oferecida e o menu de resposta.</figcaption></figure>
+  <div class="atencao">Nenhuma hora extra entra na escala sem a confirmação do GM. Só use “Já confirmou: lançar HE” se ele realmente confirmou.</div>
+</section>
+
+<section class="capitulo">
+  <h2>6. Postos, viaturas e imprevistos do dia</h2>
+  <p>Clique com o botão direito no nome do posto ou da viatura (ou clique nele para abrir o cartão do dia).</p>
+  <table>
+    <tr><th style="width:32%">Situação</th><th>O que fazer</th></tr>
+    <tr><td>Viatura quebrou</td><td><b>Pôr em manutenção (FA) hoje</b>. A guarnição vai para À disposição. Escolha mostrar como FA ou ocultar da escala e da folha.</td></tr>
+    <tr><td>Posto não vai funcionar</td><td><b>Fechar o posto hoje</b>, mostrando como FECHADO ou ocultando. Os ocultos ficam na linha “Ocultos hoje”, de onde dá para mostrar de novo.</td></tr>
+    <tr><td>Trocar a viatura do dia</td><td><b>Usar outra viatura hoje</b>: a lista mostra as livres da frota (QAP, sem guarnição, sem FA e sem reserva). A escala passa a mostrar só o número novo.</td></tr>
+    <tr><td>Tirar uma viatura só hoje</td><td><b>Excluir viatura › Só neste dia</b>. “Em todos os dias” exclui do cadastro e dos padrões.</td></tr>
+    <tr><td>Reservar uma viatura</td><td><b>Reservar viatura…</b> (acima do quadro ou na aba Viaturas), com motivo e período. Aparece no quadro e no verso da folha.</td></tr>
+    <tr><td>Área ou vagas diferentes hoje</td><td>No cartão do posto, aba “Só neste dia”.</td></tr>
+    <tr><td>Posto extra só hoje</td><td><b>+ Posto / viatura</b> e marque “Só em dd/mm”.</td></tr>
+    <tr><td>Avisos do dia</td><td>Em Lançamentos › Avisos: aparecem no quadro e, se marcado, na folha. Clique em “lido” para esconder.</td></tr>
+  </table>
+  <h3>GMs à disposição</h3>
+  <p>Clique no GM: o menu mostra <b>Voltar para o posto de origem</b> (mesmo que a viatura siga em FA) e as vagas abertas no horário dele. Também dá para arrastar até qualquer posto. Hora extra para quem está à disposição só depois de ir para um posto.</p>
+  <h3>Ordenar seções e postos</h3>
+  <p>Arraste pela alça <b>⠿</b> à esquerda do nome, ou use o botão direito: “Mover para o topo”, “Mover para… antes de X”, “Mover para a seção…”.</p>
+</section>
+
+<section class="capitulo">
+  <h2>7. Operações</h2>
+  <p>Eventos, reforços especiais, jogos: um anexo da escala que aparece no quadro e na folha só nos dias da operação.</p>
+  <ol class="passos">
+    <li>No Quadro do dia, clique em <b>+ Operação</b>.</li>
+    <li>Preencha nome, local, datas, horário de início e fim e observação.</li>
+    <li>Adicione as viaturas da frota ou outras equipes (ex.: EQUIPE A PÉ 1).</li>
+    <li>Se a viatura já estiver na escala naquele horário, o painel avisa e deixa marcado <b>“Levar a guarnição da escala junto”</b>: no horário da operação eles vão para ela e depois voltam, sem abrir furo na viatura de origem.</li>
+    <li>Clique em <b>Criar operação</b>. Use “+ pôr GM” nas equipes para completar.</li>
+  </ol>
+  <figure><img src="img/09-operacao.jpg" alt=""><figcaption>Painel de nova operação.</figcaption></figure>
+  <p>Nas sugestões de uma vaga de operação, aparece primeiro quem termina o serviço até 2h antes do início. A HE fica no horário da operação.</p>
+  <h3>Excluir uma operação</h3>
+  <p>Botão direito no nome da operação › <b>Excluir a operação…</b> (ou o botão no painel dela). Todos os escalados nela voltam ao lugar de origem; remanejamentos e HEs da operação são desfeitos.</p>
+</section>
+
+<section class="capitulo">
+  <h2>8. Finalizar a escala</h2>
+  <p>Depois que o dia passou (ou quando a escala está pronta), finalize. É isso que leva as horas extras para o controle do mês e libera a folha para inspetor, logística e reserva.</p>
+  <ol class="passos">
+    <li>No Quadro do dia, clique em <b>Finalizar escala…</b>.</li>
+    <li>Confira a lista de horas extras. <b>Desmarque</b> quem não fez.</li>
+    <li>Clique em <b>Finalizar e lançar no controle</b>.</li>
+  </ol>
+  <figure><img src="img/10-finalizar.jpg" alt=""><figcaption>Painel de finalizar a escala.</figcaption></figure>
+  <ul>
+    <li>A HE fixa da semanal entra automaticamente.</li>
+    <li>Errou? Clique em <b>reabrir</b> ao lado de “✓ Escala finalizada”.</li>
+    <li>Dia passado sem finalizar aparece na faixa Atenção.</li>
+  </ul>
+</section>
+
+<section class="capitulo">
+  <h2>9. Padrões, efetivo e inspetores</h2>
+  <p>Os padrões são o modelo de onde saem todos os dias. Ficam em <b>roxo</b> para não confundir com o Quadro do dia. Toda mudança vale <b>a partir da data</b> mostrada no alto.</p>
+  <figure><img src="img/12-padroes.jpg" alt=""><figcaption>Padrão ímpar, com dia e noite de cada posto.</figcaption></figure>
+  <h3>Abas</h3>
+  <ul>
+    <li><b>Padrão ímpar / par:</b> quem trabalha nos dias ímpares e pares do mês (12x36), de dia e de noite.</li>
+    <li><b>Semanal:</b> segunda a sexta, com horário e HE fixa de cada GM.</li>
+    <li><b>Inspetores:</b> escala mensal de dia e de noite, rodízio e substituição no período (férias, curso).</li>
+    <li><b>Efetivo:</b> todos os GMs. Mude direto na linha: escala, posto, função, grupamentos (ex.: GESCOM), CNH e observação.</li>
+  </ul>
+  <div class="duas"><figure><img src="img/14-efetivo.jpg" alt=""><figcaption>Efetivo.</figcaption></figure><figure><img src="img/15-inspetores.jpg" alt=""><figcaption>Inspetores de serviço.</figcaption></figure></div>
+  <h3>Criar posto, viatura, moto, seção ou grupamento</h3>
+  <ol class="passos">
+    <li>Clique em <b>+ Posto / viatura</b> (ou “+ posto/viatura” na seção).</li>
+    <li>Escolha um <b>Modelo</b>: Viatura 12x36, dia e noite, moto, posto fixo, <b>posto semanal (seg–sex)</b>, <b>Reforço / EJA</b> (horário e dias, coberto com HE), ou <b>copie um posto existente</b>.</li>
+    <li>Dê o nome, escolha a seção e se ele existe <b>nos dois padrões</b> ou <b>só no ímpar / só no par</b>.</li>
+  </ol>
+  <figure class="meia"><img src="img/13-novo-posto.jpg" alt=""><figcaption>Janela Adicionar com o modelo Reforço / EJA.</figcaption></figure>
+  <ul>
+    <li>Atalho: botão direito num posto › <b>Copiar como modelo</b>; depois, botão direito numa seção › <b>Colar modelo aqui</b>.</li>
+    <li><b>Grupamento</b> (motos, GOC…): só aparece no quadro quando tem GM escalado. Nos padrões, os postos sem GM ficam recolhidos (“mostrar N sem GM”).</li>
+    <li>Postos excluídos podem ser reativados ou apagados da lista em <b>Postos excluídos</b>.</li>
+  </ul>
+  <h3>Colocar ou mudar um GM no padrão</h3>
+  <p>Clique em “+ pôr GM” na célula do dia ou da noite, ou clique no GM para mudar lotação, horário fixo, função e equipe (botão direito também). O botão <b>+ Adicionar GM</b> cadastra alguém novo.</p>
+</section>
+
+<section class="capitulo">
+  <h2>10. Lançamentos</h2>
+  <figure><img src="img/16-lancamentos.jpg" alt=""><figcaption>Lançamentos, seção de férias.</figcaption></figure>
+  <table>
+    <tr><th style="width:26%">Seção</th><th>Para quê</th></tr>
+    <tr><td>Férias</td><td>Um lançamento tira o GM da escala em todo o período.</td></tr>
+    <tr><td>Cursos</td><td>Afastamento por curso, com período.</td></tr>
+    <tr><td>Folgas</td><td>Folgas do mês. Importa do <b>Sistema de Folgas</b> (somente leitura) e avisa as mudanças, respeitando a janela de escolha (dia 15 ao 25). Também aceita CSV.</td></tr>
+    <tr><td>Trocas de serviço</td><td>Quem sai, quem cobre e a devolução.</td></tr>
+    <tr><td>Atestados e licenças</td><td>Afastamentos por período.</td></tr>
+    <tr><td>Avisos e observações</td><td>Aparecem ao abrir o dia; podem sair na folha; marcados como lidos.</td></tr>
+    <tr><td>Todos</td><td>Tudo junto, com busca por GM ou REQ.</td></tr>
+  </table>
+  <div class="dica">O selo das folgas no topo avisa quando o Sistema de Folgas tem alterações ainda não aplicadas. Clique nele para ver e aplicar.</div>
+</section>
+
+<section class="capitulo">
+  <h2>11. Mês e horas</h2>
+  <p>O controle de hora extra de cada GM no mês.</p>
+  <figure><img src="img/17-mes.jpg" alt=""><figcaption>Mês e horas: horas que vieram do mês anterior, indicadores e a tabela por GM.</figcaption></figure>
+  <table>
+    <tr><th style="width:24%">Coluna</th><th>O que é</th></tr>
+    <tr><td>HE controle</td><td>Horas dos dias já finalizados. Dá para digitar um ajuste; “⋯” mostra dia a dia.</td></tr>
+    <tr><td>Prevista</td><td>HE da escala nos dias ainda não finalizados (só previsão).</td></tr>
+    <tr><td>Transp.</td><td>Horas que passaram do teto no mês anterior.</td></tr>
+    <tr><td>Paga</td><td>O que será pago no mês, até o teto de 60h.</td></tr>
+    <tr><td>Próx. mês</td><td>O que passa para o mês seguinte.</td></tr>
+    <tr><td>22–05h</td><td>Parte noturna, informativa para o RH.</td></tr>
+    <tr><td>BH</td><td>Saldo de banco de horas.</td></tr>
+  </table>
+  <ul>
+    <li><b>Horas que vieram do mês anterior:</b> confira os valores e clique em <b>Confirmar</b>. Corrija só quem teve diferença.</li>
+    <li>Filtros por equipe, ordem (mais HE no mês) e busca por GM.</li>
+    <li>O calendário à direita mostra o mês de cada GM: serviço, troca, HE, BH+, folga, férias, afastamentos e compensação.</li>
+  </ul>
+</section>
+
+<section class="capitulo">
+  <h2>12. Folha</h2>
+  <p>O documento oficial do dia, no formato que vai para os inspetores.</p>
+  <figure><img src="img/18-folha.jpg" alt=""><figcaption>Frente da folha.</figcaption></figure>
+  <ul>
+    <li>Cabeçalho com os brasões, inspetor chefe, inspetores do dia e da noite e as datas.</li>
+    <li>Na viatura, <b>M</b> (motorista) e <b>P</b> (patrulheiro) antes do nome; HE+ e REQ.</li>
+    <li>No verso: banco de horas, folgas/faltas, trocas, atestados/licenças/cursos, férias e viaturas reservadas, separados em diurno e noturno.</li>
+    <li><b>Imprimir / salvar PDF</b>: papel ofício, frente e verso.</li>
+  </ul>
+  <figure class="meia"><img src="img/19-folha-verso.jpg" alt=""><figcaption>Verso da folha.</figcaption></figure>
+  <div class="dica">Não saem na folha: viatura em FA sem guarnição, viatura sem ninguém escalado, postos ocultos, “SEG A SEX” no fim de semana e os avisos internos (“sem motorista”, “horários diferentes”).</div>
+</section>
+
+<section class="capitulo">
+  <h2>13. Viaturas (logística)</h2>
+  <figure><img src="img/20-frota.jpg" alt=""><figcaption>Frota por modelo, com situação, finalidade, guarnição e reserva.</figcaption></figure>
+  <ul>
+    <li>Marque cada viatura como <b>QAP</b>, <b>FA</b> ou <b>FA permanente</b>.</li>
+    <li><b>reservar…</b>: motivo e período; a reserva aparece no quadro e na folha. O × cancela.</li>
+    <li>A coluna “Guarnição” mostra quem está na viatura hoje, pela escala.</li>
+    <li>Viatura em FA com guarnição escalada gera aviso no quadro do escalante.</li>
+    <li>“+ viatura” acrescenta um prefixo ao modelo; “Novo modelo” cria um grupo.</li>
+  </ul>
+</section>
+
+<section class="capitulo">
+  <h2>14. Ajustes e acessos por setor</h2>
+  <h3>Ajustes (escalante)</h3>
+  <ul>
+    <li><b>Alternância das equipes 12x36:</b> um dia de referência e quais equipes trabalham nele.</li>
+    <li>Cabeçalho da folha, brasões, inspetor chefe, teto de HE.</li>
+    <li><b>Histórico de alterações:</b> quem mudou o quê e quando (não pode ser apagado).</li>
+  </ul>
+  <h3>Acessos</h3>
+  <figure class="meia"><img src="img/21-acessos.jpg" alt=""><figcaption>Acessos em Ajustes.</figcaption></figure>
+  <table>
+    <tr><th style="width:26%">Perfil</th><th style="width:44%">Vê</th><th>Pode mudar</th></tr>
+    <tr><td>Escalante</td><td>Tudo</td><td>Tudo</td></tr>
+    <tr><td>Inspetor de serviço</td><td>A folha de qualquer dia já finalizado</td><td>Nada</td></tr>
+    <tr><td>Logística</td><td>Viaturas e a folha de hoje e amanhã, se finalizada</td><td>Só as viaturas</td></tr>
+    <tr><td>Reserva de armamento</td><td>A folha de hoje e amanhã, se finalizada</td><td>Nada</td></tr>
+  </table>
+  <ol class="passos">
+    <li>Em <b>Ajustes › Acessos</b>, digite uma senha (mínimo 6 caracteres) para o setor e clique em <b>Definir</b>.</li>
+    <li>Passe a senha só para o setor. Cada pessoa entra com o próprio nome e essa senha.</li>
+    <li>Para trocar, defina outra: quem usava a antiga é desconectado em até 1 minuto. <b>tirar acesso</b> bloqueia o setor.</li>
+  </ol>
+  <p>Enquanto o dia não está finalizado, quem só visualiza vê o aviso abaixo no lugar da folha. Use <b>“ver como…”</b> para conferir a tela de cada setor.</p>
+  <figure class="meia"><img src="img/22-perfil-aguardando.jpg" alt=""><figcaption>O que o inspetor vê antes da finalização.</figcaption></figure>
+</section>
+
+<section class="capitulo">
+  <h2>15. No celular</h2>
+  <div class="duas">
+    <figure class="celular" style="grid-column: 1"><img style="width:70%" src="img/23-celular.jpg" alt=""><figcaption>Quadro do dia no celular.</figcaption></figure>
+    <div>
+      <ul>
+        <li>Cada posto vira um cartão, com os quatro turnos em linhas.</li>
+        <li><b>Toque</b> no nome ou no horário para editar.</li>
+        <li><b>Toque longo</b> abre o mesmo menu do botão direito.</li>
+        <li>A barra de datas fica fixa no alto, numa linha só.</li>
+        <li>As janelas abrem de baixo para cima.</li>
+        <li>Quem só visualiza (inspetor, logística, reserva) recebe a folha atualizada sozinha a cada poucos minutos e ao voltar para a aba.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="capitulo">
+  <h2>16. Atalhos e perguntas frequentes</h2>
+  <h3>Atalhos de teclado</h3>
+  <table>
+    <tr><th style="width:30%">Tecla</th><th>Faz</th></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>Desfaz a última alteração</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Busca um GM (de novo: busca do navegador)</td></tr>
+    <tr><td><kbd>/</kbd></td><td>Vai para a barra “Lançar”</td></tr>
+    <tr><td>Setas</td><td>Andam pelas células do quadro</td></tr>
+    <tr><td><kbd>Enter</kbd> ou <kbd>F2</kbd></td><td>Edita a célula ou o GM selecionado</td></tr>
+    <tr><td><kbd>Delete</kbd></td><td>Tira o GM selecionado do dia</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>Ctrl</kbd>+<kbd>V</kbd></td><td>Copia um GM e cola em outra célula</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>Fecha menus e janelas</td></tr>
+    <tr><td><kbd>Shift</kbd> + botão direito</td><td>Menu normal do navegador</td></tr>
+  </table>
+  <h3>Perguntas frequentes</h3>
+  <p><b>Mudei algo no quadro e o padrão não mudou.</b> Correto: o quadro do dia vale só para aquele dia. Para mudar todos os dias, use Padrões.</p>
+  <p><b>Um posto da semanal não mostra furo no fim de semana.</b> Postos marcados seg–sex não têm vaga no fim de semana. Postos de todos os dias com GM da semanal mostram a vaga dele para cobrir no sábado e no domingo.</p>
+  <p><b>A HE não aparece no controle do mês.</b> Só entram as horas de dias finalizados. Finalize o dia (capítulo 8).</p>
+  <p><b>O inspetor diz que não vê a folha.</b> O dia ainda não foi finalizado, ou a reserva/logística está tentando ver um dia além de amanhã.</p>
+  <p><b>A viatura aparece com “sem motorista”.</b> Há patrulheiro e ninguém como motorista. Botão direito no GM › Função › Motorista.</p>
+  <p><b>Lancei algo errado.</b> <kbd>Ctrl</kbd>+<kbd>Z</kbd>, o “Desfazer” do aviso, ou apague em Lançamentos.</p>
+  <p><b>Apareceu “A escala foi alterada em outro computador”.</b> Outra pessoa salvou antes. A tela já está com a versão nova: confira e refaça a sua última mudança, se precisar.</p>
+  <h3>Palavras usadas no sistema</h3>
+  <table>
+    <tr><th style="width:24%">Termo</th><th>Significado</th></tr>
+    <tr><td>Furo / vaga</td><td>Posto ou viatura sem GM num turno</td></tr>
+    <tr><td>HE / BH+</td><td>Hora extra paga / crédito no banco de horas</td></tr>
+    <tr><td>QAP / FA</td><td>Viatura em condições / fora de atividade</td></tr>
+    <tr><td>Remanejar</td><td>Levar um GM de um posto (ou da disposição) para outro, no dia</td></tr>
+    <tr><td>Padrão ímpar / par</td><td>Equipes 12x36 que trabalham nos dias ímpares / pares do mês</td></tr>
+    <tr><td>Semanal</td><td>Expediente de segunda a sexta</td></tr>
+    <tr><td>Finalizar</td><td>Confirmar o dia e levar as HEs para o controle</td></tr>
+  </table>
+</section>
+
+</body>
+</html>
