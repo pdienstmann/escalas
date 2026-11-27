@@ -838,6 +838,8 @@ table.acessos { min-width: 0; } table.acessos td { vertical-align: middle; }
 .of-tag { display: inline-block; font-size: .68rem; font-weight: 700; padding: 0 .35rem; border-radius: 9px; margin-right: .3rem; white-space: nowrap; background: #fff1d6; color: #8a5300; border: 1px solid #f0c36a; }
 .of-tag.recusou { background: #fde4e4; color: #a12626; border-color: #f2a7a7; } .of-tag.confirmou { background: #dff3e3; color: #1d6b32; border-color: #9fd3ad; }
 .of-tag.antiga { background: transparent; color: var(--muted); border-color: var(--line-strong); font-weight: 500; }
+.vtr-livres { display: flex; flex-wrap: wrap; gap: .3rem; margin: .2rem 0 .4rem; }
+.chip-vtr { border: 1px solid #9fd3ad; background: #eef9f0; color: #1d6b32; border-radius: 6px; padding: .2rem .5rem; font-size: .82rem; cursor: pointer; } .chip-vtr span { color: var(--muted); font-size: .74rem; } .chip-vtr:hover { background: #dff3e3; }
 /* finalizar escala e controle de HE */
 .btn.fin { border-color: var(--accent); color: var(--accent); font-weight: 600; padding: .2rem .6rem; }
 .fin-ok { color: var(--ok, #2e7d32); font-weight: 600; } .fin-ok .link { font-weight: 400; margin-left: .3rem; }
@@ -3450,6 +3452,13 @@ function guarnicaoNaEscala(prefixo, cd) {
   const d = nomes("dia"), n = nomes("noite");
   return [d.length ? d.join("/") : "", n.length ? `noite: ${n.join("/")}` : ""].filter(Boolean).join(" · ");
 }
+// Viaturas que a logística marcou QAP e que não estão em uso na escala do dia (mesmo tipo; mesmo modelo primeiro)
+function viaturasLivres(p, cd) {
+  const atual = viaturaNaFrota(numeroDe(nomeNoDia(p, cd))), moto = p.tipo === "moto";
+  const emFA = new Set(cd.fa.filter((o) => o.tipo === "FA").map((o) => numeroDe(nomeNoDia(postoPorId(o.posto) || {}, cd))));
+  return (data.frota || []).filter((v) => v.situacao === "QAP" && !emFA.has(String(v.prefixo)) && ehMoto(v.modelo) === moto && String(v.prefixo) !== numeroDe(nomeNoDia(p, cd)) && !guarnicaoNaEscala(v.prefixo, cd))
+    .sort((a, b) => ((b.modelo === atual?.modelo) - (a.modelo === atual?.modelo)) || String(a.prefixo).localeCompare(String(b.prefixo)));
+}
 function vFrota() {
   const fr = data.frota || [], f = (ui.frota ||= { sit: "", busca: "" }), cd = calcularDia(data, ui.dia);
   const conta = (k) => fr.filter((v) => v.situacao === k).length;
@@ -3605,7 +3614,8 @@ function popPosto(s) {
         <div class="linha"><label>Até <input type="date" id="pp-ate" value="${ui.dia}" min="${ui.dia}"></label>
         <button class="btn grande perigo-leve" data-act="posto-fechar" data-tipo="${ehViatura(p) ? "FA" : "FECHADO"}">${ehViatura(p) ? "Pôr em manutenção (FA)" : "Fechar o posto"}</button></div>
         <p class="dica">Quem estiver escalado aqui vai para <b>À disposição</b>, para ser remanejado.</p></div>`}
-      ${ehViatura(p) && !fa ? `<div class="bloco"><b>Usar outra viatura neste dia</b><div class="linha"><label>Número <input id="pp-prefixo" inputmode="numeric" placeholder="ex.: 1290" value="${esc(aj.prefixo ? aj.prefixo.nome.replace(/^\D+/, "") : "")}" size="8"></label>
+      ${ehViatura(p) && !fa ? `<div class="bloco"><b>Usar outra viatura neste dia</b>${(() => { const lv = viaturasLivres(p, cd);
+        return (data.frota || []).length ? `<p class="dica">Disponíveis (QAP na aba Viaturas e sem guarnição hoje):</p><div class="vtr-livres">${lv.length ? lv.slice(0, 16).map((v) => `<button class="chip-vtr" data-act="pp-usar" data-pref="${esc(v.prefixo)}" title="${esc(v.modelo)}${v.finalidade ? " · " + esc(v.finalidade) : ""}"><b>${esc(v.prefixo)}</b> <span>${esc(v.modelo || "")}</span></button>`).join("") : `<span class="meta">Nenhuma viatura livre na frota hoje.</span>`}</div>` : `<p class="dica">Cadastre a frota na aba Viaturas para ver aqui as disponíveis.</p>`; })()}<div class="linha"><label>Número <input id="pp-prefixo" inputmode="numeric" placeholder="ex.: 1290" value="${esc(aj.prefixo ? aj.prefixo.nome.replace(/^\D+/, "") : "")}" size="8"></label>
         <button class="btn" data-act="posto-prefixo">Salvar</button>${aj.prefixo ? `<button class="link" data-act="posto-prefixo-reset" data-oc="${aj.prefixo.id}">Voltar à ${esc(p.nome)}</button>` : ""}</div></div>` : ""}
       ${!fa ? `<div class="bloco"><b>${ehViatura(p) ? "Área / finalidade" : "Complemento"} neste dia</b><div class="linha"><label class="cresce"><input id="pp-area" value="${esc(subNoDia(p, cd))}" placeholder="ex.: CANUDOS 2 · OPERAÇÃO VERÃO"></label>
         <button class="btn" data-act="posto-area">Salvar só para ${ddmm(ui.dia)}</button>${aj.area ? `<button class="link" data-act="posto-prefixo-reset" data-oc="${aj.area.id}">Voltar ao normal (${esc(p.sub || "vazio")})</button>` : ""}</div></div>` : ""}
@@ -3941,7 +3951,8 @@ function itensPosto(p) {
     { t: `Editar ${ehViatura(p) ? "viatura" : "posto"} neste dia…`, act: "mn-posto", d: { aba: "dia" }, padrao: true },
     fa ? { t: "Voltar a funcionar a partir de hoje", act: "mn-reabrir", d: { oc: fa.id } }
       : { t: ehViatura(p) ? "Pôr em manutenção (FA) hoje" : "Fechar o posto hoje", act: "mn-fechar", d: { tipo: ehViatura(p) ? "FA" : "FECHADO" } },
-    ...(ehViatura(p) && !fa ? [{ t: "Usar outra viatura hoje…", act: "mn-posto", d: { aba: "dia" } }] : []),
+    ...(ehViatura(p) && !fa ? [(() => { const lv = viaturasLivres(p, cd).slice(0, 12);
+      return { t: "Usar outra viatura hoje", sub: [...lv.map((v) => ({ t: `${v.prefixo} · ${v.modelo || ""}`, act: "mn-usar-vtr", d: { posto: p.id, pref: String(v.prefixo) } })), ...(lv.length ? [{ sep: true }] : [{ t: (data.frota || []).length ? "Nenhuma livre na frota hoje" : "Frota não cadastrada (aba Viaturas)", act: "ed-nada", desab: true }]), { t: "Digitar o número…", act: "mn-posto", d: { aba: "dia" } }] }; })()] : []),
     { sep: true },
     { t: "Cadastro (nome, zona, vagas)…", act: "mn-posto", d: { aba: "sempre" } },
     { t: "Subir", act: "mn-mover", d: { d: "-1" }, desab: i <= 0 },
@@ -4568,7 +4579,8 @@ function escolherEditor(i) {
     const dd = { dia: ui.dia, posto: ctx.posto, gm: X, ini: fmtHm(a), fim: fmtHm(b), req: reqEd, nat: ctx.nat || "he" };
     fecharEditor();
     abrirMenu([{ t: `${nomeGm(X)} · ${postoPorId(ctx.posto).nome} ${dd.ini}–${dd.fim}`, act: "ed-nada", desab: true }, { sep: true },
-      { t: "📲 Oferecer a ele (WhatsApp)", act: "pend-oferecer", d: { ...dd, ini: fmtHm(vi), fim: fmtHm(vf) }, padrao: true }, { t: "Copiar mensagem da vaga", act: "pend-copiar", d: { ...dd, ini: fmtHm(vi), fim: fmtHm(vf) } }, { sep: true },
+      { t: "📋 Copiar mensagem e marcar como oferecida", act: "pend-copiar-of", d: { ...dd, ini: fmtHm(vi), fim: fmtHm(vf) }, padrao: true },
+      { t: "📲 Só marcar como oferecida", act: "pend-oferecer", d: { ...dd, ini: fmtHm(vi), fim: fmtHm(vf) } }, { t: "Só copiar a mensagem", act: "pend-copiar", d: { ...dd, ini: fmtHm(vi), fim: fmtHm(vf) } }, { sep: true },
       { t: "Já confirmou: lançar HE", act: "pend-he", d: { ...dd, nat: "he" } }, { t: "Já confirmou: lançar como BH+", act: "pend-he", d: { ...dd, nat: "bh" } },
       { t: "Cancelar", act: "dr-cancelar" }], r.left, r.bottom + 2, el, {});
     return;
@@ -5683,6 +5695,8 @@ document.addEventListener("click", (e) => {
       return;
     }
     case "posto-reabrir": { const p = postoPorId(ui.pop.posto), oc = data.ocorrencias.find((o) => o.id === el.dataset.oc); fecharPop(); mudar(`${p.nome} volta a funcionar a partir de ${ddmm(ui.dia)}`, () => encerrarEm(oc, ui.dia)); return; }
+    case "pp-usar": $("#pp-prefixo").value = el.dataset.pref; // segue para salvar
+    // falls through
     case "posto-prefixo": {
       const p = postoPorId(ui.pop.posto), v = $("#pp-prefixo").value.trim().toUpperCase();
       if (!v) { toast("Digite o número da viatura."); return; }
@@ -5731,6 +5745,13 @@ document.addEventListener("click", (e) => {
     case "perfil-sair": ui.perfilTeste = ""; render(); toast("De volta ao acesso do escalante."); return;
     case "perfil-ver": { ui.perfilTeste = el.dataset.perfil; ui.view = PERFIS[el.dataset.perfil].views[0]; location.hash = ui.view; render(); toast(`Vendo como ${PERFIS[el.dataset.perfil].nome}. Para voltar, clique em "voltar ao escalante" no alto.`); return; }
     case "acesso-salvar": case "acesso-remover": salvarAcesso(el.dataset.perfil, el.dataset.act === "acesso-remover"); return;
+    case "mn-usar-vtr": { const p = postoPorId(el.dataset.posto), pref = el.dataset.pref, nome = `${p.tipo === "moto" ? "MT" : "VTR"} ${pref}`, atual = calcularDia(data, ui.dia).ajustesPosto.get(p.id)?.prefixo; fecharMenu();
+      mudar(`${nome} no lugar da ${p.nome} em ${ddmm(ui.dia)}`, () => { if (atual) atual.nome = nome; else data.ocorrencias.push({ id: novoId(), tipo: "PREFIXO", posto: p.id, de: ui.dia, ate: ui.dia, nome }); }); return; }
+    case "pend-copiar-of": { fecharMenu(); const x = el.dataset, txt = mensagemOferta({ posto: x.posto, de: x.dia, ini: x.ini, fim: x.fim, nat: x.nat || "he" });
+      try { navigator.clipboard?.writeText(txt).catch(() => {}); } catch { /* segue */ }
+      if (!navigator.clipboard?.writeText) copiarTexto(txt);
+      if (ofertar(x.posto, x.dia, x.ini, x.fim, [x.gm], x.nat || "he")) toast(`Mensagem copiada e ${nomeGm(x.gm)} marcado como aguardando resposta. É só colar no WhatsApp.`, true);
+      return; }
     case "mn-nova-aba": fecharMenu(); window.open(location.pathname + location.search + el.dataset.href, "_blank"); return;
     case "mn-ed-escolher": { fecharMenu(); escolherEditor(Number(el.dataset.i)); return; }
     case "mn-proxy": { const b = ui.proxies?.[Number(el.dataset.i)]; fecharMenu(); if (b?.isConnected) b.click(); return; }
