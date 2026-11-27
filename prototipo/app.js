@@ -247,9 +247,10 @@ function vQuadro() {
   const grupos = {};
   for (const a of cd.afastados) (grupos[a.tipo] ||= []).push(a);
   const blocosFora = ["FOLGA", "FALTA", "FERIAS", "LICENCA", "ATESTADO", "CURSO", "BH_COMP", "TROCA"].filter((k) => grupos[k]).map((k) => `
-    <section class="fora-g t-${k}"><h4>${k === "TROCA" ? "Trocas (titular fora)" : TIPOS[k]} <span class="n">${grupos[k].length}</span></h4><ul>
-    ${grupos[k].map((a) => `<li><button class="link" data-act="gm" data-gm="${a.gm}">${esc(nomeGm(a.gm))}</button>
-      <span class="meta">${equipe(gmPorId(a.gm)?.equipe)?.id || ""}${a.oc.ate && a.oc.ate !== a.oc.de ? ` · volta ${ddmm(somaDias(a.oc.ate, 1))}` : ""}${a.tipo === "TROCA" ? ` · coberto por ${esc(nomeGm(a.oc.substituto))}` : ""}${a.oc.req ? ` · REQ ${esc(a.oc.req)}` : ""}</span></li>`).join("")}</ul></section>`).join("");
+    <section class="fora-g t-${k}"><h4>${k === "TROCA" ? "Trocas (titular fora)" : TIPOS[k]} <span class="n">${grupos[k].length}</span></h4>${(() => { const sep = separarTurno(grupos[k], ui.dia);
+      const li = (a) => `<li><button class="link" data-act="gm" data-gm="${a.gm}">${esc(nomeGm(a.gm))}</button>
+      <span class="meta">${POR_PERIODO.has(a.tipo) && a.oc.ate && a.oc.ate !== a.oc.de ? `${ddmm(a.oc.de)} a ${ddmm(a.oc.ate)} · volta ${ddmm(somaDias(a.oc.ate, 1))}` : a.oc.ate && a.oc.ate !== a.oc.de ? `volta ${ddmm(somaDias(a.oc.ate, 1))}` : ""}${a.tipo === "TROCA" ? ` coberto por ${esc(nomeGm(a.oc.substituto))}` : ""}${a.oc.req ? ` · REQ ${esc(a.oc.req)}` : ""}</span></li>`;
+      return `<div class="fora-turnos">${[["dia", "Diurno"], ["noite", "Noturno"]].map(([k2, t]) => `<div class="fora-col ${k2}"><h5>${t} <span class="n">${sep[k2].length}</span></h5>${sep[k2].length ? `<ul>${sep[k2].map(li).join("")}</ul>` : `<p class="meta">—</p>`}</div>`).join("")}</div>`; })()}</section>`).join("");
   const disp = cd.disposicao.length ? `<section class="disposicao"><h3>À disposição <span class="n">${new Set(cd.disposicao.map((d) => d.gm)).size}</span></h3>
     <p class="dica">Sem posto neste dia (viatura parada ou posto fechado). Use "Cobrir" para mandá-los a um furo.</p><div class="chips">
     ${[...new Set(cd.disposicao.map((d) => d.gm))].map((id) => { const ds = cd.disposicao.filter((x) => x.gm === id), d = ds.find((x) => x.nat !== "he") || ds[0], he = ds.filter((x) => x.nat === "he").reduce((t, x) => t + x.fim - x.ini, 0);
@@ -1062,8 +1063,11 @@ function vFolha() {
   const grupo = (tipos, titulo, colRet, cor) => {
     const g = cd.afastados.filter((a) => tipos.includes(a.tipo));
     if (!g.length) return "";
-    return `<tr class="sec"><th>${titulo} <span class="quad ${cor}"></span></th><th colspan="4">GM</th><th colspan="4">${colRet}</th></tr>
-      ${g.map((a) => `<tr><th class="p"></th><td colspan="4" class="c">${esc(nomeGm(a.gm))} <span class="sub">${a.gm && equipe(gmPorId(a.gm).equipe)?.periodo === "noite" ? "(noite)" : "(dia)"}</span></td><td colspan="4" class="c r">${a.tipo === "TROCA" ? `coberto por ${esc(nomeGm(a.oc.substituto))}` : a.oc.ate && a.oc.ate !== a.oc.de ? `${ddmm(a.oc.de)} a ${ddmm(a.oc.ate)}` : a.oc.req ? `REQ ${esc(a.oc.req)}` : ddmm(a.oc.de)}</td></tr>`).join("")}`;
+    const { dia: gd, noite: gn } = separarTurno(g, ui.dia), linhas = Math.max(gd.length, gn.length);
+    const nome = (a) => a ? `${esc(nomeGm(a.gm))}${tipos.length > 1 && POR_PERIODO.has(a.tipo) ? ` <span class="sub">(${esc(TIPOS[a.tipo].toLowerCase())})</span>` : ""}` : "";
+    const ret = (a) => !a ? "" : a.tipo === "TROCA" ? `coberto por ${esc(nomeGm(a.oc.substituto))}` : a.oc.ate && a.oc.ate !== a.oc.de ? `${ddmm(a.oc.de)} a ${ddmm(a.oc.ate)}` : a.oc.req ? `REQ ${esc(a.oc.req)}` : ddmm(a.oc.de);
+    return `<tr class="sec"><th>${titulo} <span class="quad ${cor}"></span></th><th colspan="2">DIURNO</th><th colspan="2">${colRet}</th><th colspan="2">NOTURNO</th><th colspan="2">${colRet}</th></tr>
+      ${Array.from({ length: linhas }, (_, i) => `<tr><th class="p"></th><td colspan="2" class="c">${nome(gd[i])}</td><td colspan="2" class="c r">${ret(gd[i])}</td><td colspan="2" class="c">${nome(gn[i])}</td><td colspan="2" class="c r">${ret(gn[i])}</td></tr>`).join("")}`;
   };
   const enquadrado = window.self !== window.top;
   return `<div class="barra nao-imprimir"><div class="datas"><button class="ic" data-act="dia" data-n="-1" aria-label="Dia anterior">‹</button><input type="date" id="q-dia" value="${ui.dia}" aria-label="Data"><button class="ic" data-act="dia" data-n="1" aria-label="Próximo dia">›</button></div>
@@ -1086,8 +1090,8 @@ function vFolha() {
       ${grupo(["BH_COMP"], "BANCO DE HORAS / COMPENSAÇÃO", "REQ.", "q-bh")}
       ${grupo(["FOLGA", "FALTA"], "FOLGAS / FALTAS", "DATA", "q-folga")}
       ${grupo(["TROCA"], "TROCAS DE SERVIÇO", "SITUAÇÃO")}
-      ${grupo(["ATESTADO", "LICENCA", "CURSO"], "ATESTADO / LICENÇAS / CURSOS", "RETORNO", "q-atest")}
-      ${grupo(["FERIAS"], "FÉRIAS", "RETORNO", "q-ferias")}
+      ${grupo(["ATESTADO", "LICENCA", "CURSO"], "ATESTADO / LICENÇAS / CURSOS", "PERÍODO", "q-atest")}
+      ${grupo(["FERIAS"], "FÉRIAS", "PERÍODO", "q-ferias")}
     </table>
   </article></div>`;
 }
@@ -1258,6 +1262,15 @@ const icoFuncao = (f) => ICO_FUNCAO[f] || "";
 const emVtr = (postoId) => postoPorId(postoId)?.tipo === "vtr";
 // na folha, a letra num quadradinho (M = motorista, P = patrulheiro), mais fácil de ler impresso
 const funcaoFolha = (d) => (emVtr(d.posto) && ICO_FUNCAO[d.funcao] ? `<span class="fn-l" title="${d.funcao}">${d.funcao[0]}</span>` : "");
+// Afastados (folga, falta, férias…): separados em diurno e noturno; férias, atestados, licenças e cursos
+// por período (quem saiu primeiro em cima), o resto em ordem alfabética.
+const POR_PERIODO = new Set(["FERIAS", "LICENCA", "ATESTADO", "CURSO"]);
+function periodoGm(gmId, dia) { const eq = equipe(vigente(gmPorId(gmId), dia)?.equipe); return eq?.periodo === "noite" ? "noite" : "dia"; }
+function ordenarAfastados(lista) {
+  const nome = (a) => nomeGm(a.gm);
+  return [...lista].sort((a, b) => (POR_PERIODO.has(a.tipo) && POR_PERIODO.has(b.tipo) ? (a.oc.de || "").localeCompare(b.oc.de || "") || (a.oc.ate || a.oc.de || "").localeCompare(b.oc.ate || b.oc.de || "") : 0) || nome(a).localeCompare(nome(b)));
+}
+function separarTurno(lista, dia) { const o = ordenarAfastados(lista); return { dia: o.filter((a) => periodoGm(a.gm, dia) === "dia"), noite: o.filter((a) => periodoGm(a.gm, dia) === "noite") }; }
 // HE em viatura: escolher motorista ou patrulheiro. A função que falta na guarnição naquele horário vem primeiro.
 function funcaoQueFalta(posto, dia, ini, fim) {
   const [a, b] = typeof ini === "number" ? [ini, fim] : intervalo(ini, fim);
