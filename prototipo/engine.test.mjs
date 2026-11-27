@@ -511,3 +511,13 @@ test("GM das 18h às 06h não cobre o 3º turno (13–19) por 1h: o turno vira f
   const fs = calcularDia(data, d).furos.filter((f) => f.posto === "lar").map((f) => f.turno).sort();
   assert.deepEqual(fs, ["t2", "t3"]);
 });
+
+test("posto com habilitação: quem tem a tag aparece primeiro (HE e remanejar)", () => {
+  const data = base(), d = diaDe(data, "D1");
+  data.postos.find((p) => p.id === "hosp").habilitacao = "SALA";
+  const z = data.gms.find((g) => g.equipe === "D2"); z.grupos = ["SALA"];
+  data._versao++;
+  const s = sugerir(data, d, "hosp", 420, 1140).he.filter((x) => !x.bloqueado);
+  assert.equal(s[0].gm.id, z.id);
+  assert.match(s[0].notas.join(), /habilitado: SALA/);
+});

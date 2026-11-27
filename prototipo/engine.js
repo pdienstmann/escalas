@@ -330,7 +330,7 @@ export function afastamentoNoDia(data, gmId, dia) {
 // · 2 outros GMs do mesmo turno · 3 mesmo posto, turno oposto · 4 o resto. Dentro de cada grupo: abaixo do teto e menos horas.
 export function prioridadeHE(x, teto) {
   const grupo = x.doGrupo ? -2 : x.eja ? -1 : x.estende ? (x.noPostoHoje ? -0.6 : -0.5) : x.noPostoHoje ? 1 : x.mesmoPosto && x.mesmoPeriodo ? 0 : x.mesmoPeriodo ? 2 : x.mesmoPosto ? 3 : 4;
-  return [x.bloqueado ? 1 : 0, x.foraVtr ? 1 : 0, grupo, x.disponivel ? 0 : 1, x.heMes + x.transporte >= teto ? 1 : 0, x.heMes + x.transporte];
+  return [x.bloqueado ? 1 : 0, x.semHabilitacao ? 1 : 0, x.foraVtr ? 1 : 0, grupo, x.disponivel ? 0 : 1, x.heMes + x.transporte >= teto ? 1 : 0, x.heMes + x.transporte];
 }
 // dia (07–19) ou noite (19–07) de um horário em minutos
 export const periodoDoHorario = (m) => { const x = ((m % 1440) + 1440) % 1440; return x >= 420 && x < 1140 ? "dia" : "noite"; };
@@ -394,6 +394,8 @@ export function sugerir(data, dia, postoId, ini, fim) {
   const livreParaRemanejar = (d) => d.nat !== "he" && d.nat !== "bh" && (d.posto === null || reserva.has(d.posto));
   // numa operação dá para puxar gente da própria escala do dia (o posto de origem fica com vaga)
   const op = secaoOperacao(data, postoId), grupoVaga = grupoDoPosto(data, postoId);
+  // habilitação que o posto prefere (ex.: SALA = tem os logins dos sistemas): quem tem a tag vem antes
+  const hab = data.postos.find((x) => x.id === postoId)?.habilitacao || "";
   const daEscala = (d) => op && d.nat !== "he" && d.nat !== "bh" && d.posto && d.posto !== postoId && !secaoOperacao(data, d.posto);
   const remanejar = [], he = [];
   const afastados = new Set(data.ocorrencias.filter((o) => (["FERIAS", "LICENCA", "ATESTADO", "CURSO"].includes(o.tipo) && ocorrenciaCobre(o, dia)) || (DE_UM_DIA.includes(o.tipo) && o.de === dia)).map((o) => o.gm));
@@ -409,7 +411,8 @@ export function sugerir(data, dia, postoId, ini, fim) {
     const l = livro.get(gm.id) || { he: 0, transporte: 0 };
     const lotPosto = vigente(gm, dia).lotacao?.posto;
     const tipoVaga = data.postos.find((x) => x.id === postoId)?.tipo, tipoDele = data.postos.find((x) => x.id === lotPosto)?.tipo;
-    const base = { foraVtr: tipoVaga === "vtr" && tipoDele !== "vtr", gm, heMes: l.he, transporte: l.transporte, mesmoPosto: lotPosto === postoId, noPostoHoje: minhas.some((d) => d.posto === postoId && d.nat !== "he"), mesmoPeriodo: !minhas.length && mesmoPeriodo(data, gm, dia, ini), disponivel, doGrupo };
+    const habilitado = !!hab && gmDoGrupo(gm, hab);
+    const base = { habilitado, semHabilitacao: !!hab && !habilitado, foraVtr: tipoVaga === "vtr" && tipoDele !== "vtr", gm, heMes: l.he, transporte: l.transporte, mesmoPosto: lotPosto === postoId, noPostoHoje: minhas.some((d) => d.posto === postoId && d.nat !== "he"), mesmoPeriodo: !minhas.length && mesmoPeriodo(data, gm, dia, ini), disponivel, doGrupo };
     const sobre = minhas.filter((d) => sobrepoe(d.ini, d.fim, ini, fim) > 0);
     if (sobre.length) {
       if (sobre.every(livreParaRemanejar)) {
@@ -439,13 +442,14 @@ export function sugerir(data, dia, postoId, ini, fim) {
     else if (eb - ea < fim - ini && !base.estende) notas.push(`trabalha hoje · estende ${fmtHm(ea)}–${fmtHm(eb)}`);
     if (disponivel) notas.unshift("se ofereceu para HE");
     if (doGrupo) notas.unshift(`do ${grupoVaga}`);
+    if (habilitado) notas.unshift(`habilitado: ${hab}`);
     if (total >= teto) notas.push("já passou do teto de HE");
     else if (total + (fim - ini) > teto) notas.push("vai passar do teto de HE");
     if (gm.naoFazHE) notas.push("não realiza HE");
     he.push({ ...base, notas, bloqueado: !!gm.naoFazHE });
   }
   he.sort(compararPrioridade((data.config?.tetoHE ?? 60) * 60));
-  remanejar.sort((a, b) => (a.daEscala ? 1 : 0) - (b.daEscala ? 1 : 0) || (a.origem === "À disposição" ? 0 : 1) - (b.origem === "À disposição" ? 0 : 1) || a.gm.nome.localeCompare(b.gm.nome));
+  remanejar.sort((a, b) => (b.habilitado ? 1 : 0) - (a.habilitado ? 1 : 0) || (a.daEscala ? 1 : 0) - (b.daEscala ? 1 : 0) || (a.origem === "À disposição" ? 0 : 1) - (b.origem === "À disposição" ? 0 : 1) || a.gm.nome.localeCompare(b.gm.nome));
   return { remanejar, he };
 }
 

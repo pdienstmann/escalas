@@ -1702,6 +1702,8 @@ function popPosto(s) {
       <div class="linha"><label>Tipo <select id="ps-tipo">${[["posto", "Posto fixo"], ["vtr", "Viatura"], ["moto", "Moto"], ["reserva", "Reserva técnica"]].map(([v, l]) => `<option value="${v}" ${(p.tipo || "posto") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
       <label>Funciona <select id="ps-dias"><option value="">todos os dias</option><option value="util" ${p.dias ? "selected" : ""}>seg a sex</option></select></label></div>
       <label>Seção <select id="ps-secao">${data.secoes.map((x) => `<option value="${x.id}" ${x.id === p.secao ? "selected" : ""}>${esc(x.nome)}</option>`).join("")}</select></label>
+      <label>Preferência nas sugestões: quem tem a habilitação <input id="ps-hab" list="ps-tags" value="${esc(p.habilitacao || "")}" placeholder="ex.: SALA (deixe vazio se não precisa)" autocomplete="off"></label>
+      <datalist id="ps-tags">${[...new Set(data.gms.flatMap((g) => g.grupos || []).map((t) => t.toUpperCase()))].sort().map((t) => `<option value="${esc(t)}">`).join("")}</datalist>
       <b>Quantos GMs por turno</b>${stepper("ps-v", p.vagas)}
       <label class="toggle"><input type="checkbox" id="ps-rondas" ${p.rondas ? "checked" : ""}> Quando ninguém estiver aqui, mostrar "VTR/RONDAS FREQUENTES"</label>
       <label class="toggle"><input type="checkbox" id="ps-cargo" ${cargoProprio(p) ? "checked" : ""}> Outro cargo (ex.: operadores do videomonitoramento): quem é lotado aqui só faz HE aqui</label>
@@ -3137,7 +3139,7 @@ function vPadroes() {
             <button class="add" data-act="pad-add" data-posto="${p.id}" data-per="${per}">+ pôr GM</button></td>`;
         };
         const soUm = p.equipes?.length ? `<span class="selo-so-pad" title="Este posto só existe no padrão ${pd.aba === "impar" ? "ímpar" : "par"}">só ${pd.aba === "impar" ? "ímpar" : "par"}</span>` : "";
-        const html = `<tr class="${s.grupamento ? "em-grupo" : ""} ${s.grupamento && !tem ? "grupo-vazio" : ""}"><th scope="row" class="posto"><button class="posto-btn" data-act="pad-posto" data-posto="${p.id}" title="Clique para editar · botão direito: mais opções"><span class="pn">${iconePosto(p)}${esc(p.nome)}</span>${soUm}${p.sub ? `<span class="ps">${esc(p.sub)}</span>` : ""}${p.obs ? `<span class="po">(${esc(p.obs)})</span>` : ""}${s.grupamento && !tem ? `<span class="po">sem GM neste padrão: não aparece no quadro</span>` : ""}<span class="lapis" aria-hidden="true">✎</span></button></th>${cel("dia")}${cel("noite")}</tr>`;
+        const html = `<tr class="${s.grupamento ? "em-grupo" : ""} ${s.grupamento && !tem ? "grupo-vazio" : ""}"><th scope="row" class="posto"><button class="posto-btn" data-act="pad-posto" data-posto="${p.id}" title="Clique para editar · botão direito: mais opções"><span class="pn">${iconePosto(p)}${esc(p.nome)}</span>${soUm}${p.sub ? `<span class="ps">${esc(p.sub)}</span>` : ""}${p.obs ? `<span class="po">(${esc(p.obs)})</span>` : ""}${p.habilitacao ? `<span class="po" title="Quem tem essa habilitação aparece primeiro nas sugestões">prefere: ${esc(p.habilitacao)}</span>` : ""}${s.grupamento && !tem ? `<span class="po">sem GM neste padrão: não aparece no quadro</span>` : ""}<span class="lapis" aria-hidden="true">✎</span></button></th>${cel("dia")}${cel("noite")}</tr>`;
         if (s.grupamento && !tem && !abre) { escondidos++; return ""; } // grupamento sem ninguém neste padrão fica recolhido
         return html;
       }).join("");
@@ -3155,7 +3157,7 @@ function vPadroes() {
   <div class="abas-pad" role="tablist">${abas.map(([k, t]) => `<button role="tab" aria-selected="${pd.aba === k}" data-act="pad-aba" data-aba="${k}">${t}</button>`).join("")}
     ${pd.aba === "inspetores" ? "" : `<span class="add-gm"><button class="btn" data-act="pad-novo">+ Posto / viatura / seção</button><button class="btn pri" data-act="pad-novo-gm">+ Adicionar GM${pd.aba === "semanal" ? " na semanal" : ""}</button></span>`}</div></div>
   ${["impar", "par", "semanal"].includes(pd.aba) && semPadrao(ref).length ? `<p class="aviso-falta">${semPadrao(ref).length} GM${semPadrao(ref).length === 1 ? "" : "s"} sem posto no padrão (fora da escala): ${semPadrao(ref).slice(0, 8).map((g) => `<b>${esc(g.nome)}</b>`).join(", ")}${semPadrao(ref).length > 8 ? "…" : ""} <button class="link" data-act="pad-aba" data-aba="efetivo">ver no Efetivo</button></p>` : ""}
-  <p class="dica">${pd.aba === "efetivo" ? "Cadastro de todos os GMs. Mude direto na linha: escala, posto, função, grupamentos (ex.: GESCOM) e CNH. Os grupamentos fazem o GM aparecer primeiro nas sugestões de HE das vagas daquele grupamento." : pd.aba === "inspetores" ? "Escala mensal dos inspetores de serviço. Clique no nome para trocar (vale só para aquele dia e período). Para férias ou curso, use “Substituir no período”." : pd.aba === "semanal" ? "Quem trabalha de segunda a sexta, com o horário fixo e a HE fixa de cada um. Clique no nome para editar." : `Composição do padrão ${pd.aba === "impar" ? "ímpar" : "par"} em ${nomeMes(mes).toLowerCase()} (quem trabalha nos dias ${pd.aba === "impar" ? "ímpares" : "pares"}), sem folgas e afastamentos. Clique no GM, no posto ou na seção para editar; o botão direito mostra mais opções (novo posto, subir/descer, desativar). Em vermelho: vaga sem GM ou quantidade diferente do outro padrão.`}</p>
+  <p class="dica">${pd.aba === "efetivo" ? "Cadastro de todos os GMs. Mude direto na linha: escala, posto, função, grupamentos e habilitações (ex.: GESCOM, SALA) e CNH. Quem tem a tag aparece primeiro nas sugestões das vagas daquele grupamento, ou do posto que pede essa habilitação (no cadastro do posto: “Preferência nas sugestões”)." : pd.aba === "inspetores" ? "Escala mensal dos inspetores de serviço. Clique no nome para trocar (vale só para aquele dia e período). Para férias ou curso, use “Substituir no período”." : pd.aba === "semanal" ? "Quem trabalha de segunda a sexta, com o horário fixo e a HE fixa de cada um. Clique no nome para editar." : `Composição do padrão ${pd.aba === "impar" ? "ímpar" : "par"} em ${nomeMes(mes).toLowerCase()} (quem trabalha nos dias ${pd.aba === "impar" ? "ímpares" : "pares"}), sem folgas e afastamentos. Clique no GM, no posto ou na seção para editar; o botão direito mostra mais opções (novo posto, subir/descer, desativar). Em vermelho: vaga sem GM ou quantidade diferente do outro padrão.`}</p>
   ${corpo}`;
 }
 // ---------- EFETIVO (cadastro de todos os GMs) ----------
@@ -3174,13 +3176,13 @@ function tabelaEfetivo(ref) {
       ${[["", "Ativos"], ["sem", `Sem posto (${limbo.size})`], ["inativos", "Desativados"]].map(([k, t]) => `<button class="btn ${f.so === k ? "pri" : ""}" data-act="ef-filtro" data-so="${k}">${t}</button>`).join("")}
       <button class="btn" data-act="pad-novo-gm">+ Adicionar GM</button></div>
     <datalist id="ef-grupos">${nomesGrupos().map((n) => `<option value="${esc(n)}">`).join("")}</datalist>
-    <div class="tabela-wrap"><table class="lanc efetivo"><thead><tr><th>GM</th><th>Escala</th><th>Posto</th><th>Função</th><th>Grupamentos</th><th>CNH</th><th>Observação</th><th></th></tr></thead><tbody>
+    <div class="tabela-wrap"><table class="lanc efetivo"><thead><tr><th>GM</th><th>Escala</th><th>Posto</th><th>Função</th><th>Grupamentos e habilitações</th><th>CNH</th><th>Observação</th><th></th></tr></thead><tbody>
     ${lista.map((g) => { const v = vigente(g, ref);
       return `<tr class="${limbo.has(g.id) ? "limbo" : ""} ${g.ativo === false ? "inativo" : ""}"><td><button class="link" data-act="abrir-ficha" data-gm="${g.id}">${esc(g.nome)}</button>${limbo.has(g.id) ? ` <span class="tag furo">sem posto</span>` : ""}</td>
         <td>${sel(g, "equipe", [["", "—"], ...data.equipes.map((e) => [e.id, rotuloEquipe(e, ref, true)])], v.equipe || "")}</td>
         <td><select class="ef-in" data-ef="${g.id}" data-campo="posto"><option value="">— sem posto —</option>${opcoesPosto(v.lotacao?.posto || "")}</select></td>
         <td>${sel(g, "funcao", [["", "—"], ["Motorista", "Motorista"], ["Patrulheiro", "Patrulheiro"]], v.lotacao?.funcao || "")}</td>
-        <td><input class="ef-in" data-ef="${g.id}" data-campo="grupos" list="ef-grupos" value="${esc((g.grupos || []).join(", "))}" placeholder="ex.: GESCOM"></td>
+        <td><input class="ef-in" data-ef="${g.id}" data-campo="grupos" list="ef-grupos" value="${esc((g.grupos || []).join(", "))}" placeholder="ex.: GESCOM, SALA"></td>
         <td>${sel(g, "cnh", [["", "—"], ["A", "A (moto)"], ["B", "B"], ["AB", "AB"], ["D", "D"], ["AD", "AD"]], g.cnh || "")}</td>
         <td><input class="ef-in" data-ef="${g.id}" data-campo="obs" value="${esc(g.obs || "")}" placeholder="opcional"></td>
         <td>${g.ativo === false ? `<button class="link" data-act="ef-reativar" data-gm="${g.id}">reativar</button>` : `<button class="link" data-act="pad-gm" data-gm="${g.id}">mais…</button>`}</td></tr>`; }).join("")}
@@ -3836,9 +3838,9 @@ document.addEventListener("click", (e) => {
     case "posto-salvar": {
       const p = postoPorId(ui.pop.posto), nome = $("#ps-nome").value.trim().toUpperCase();
       if (!nome) { toast("O nome não pode ficar vazio."); return; }
-      const novo = { nome, sub: $("#ps-sub").value.trim().toUpperCase(), tipo: $("#ps-tipo").value, secao: $("#ps-secao").value, vagas: lerStepper("ps-v"), rondas: $("#ps-rondas").checked, cargoProprio: $("#ps-cargo").checked, dias: $("#ps-dias").value ? [1, 2, 3, 4, 5] : undefined };
+      const novo = { nome, sub: $("#ps-sub").value.trim().toUpperCase(), tipo: $("#ps-tipo").value, secao: $("#ps-secao").value, vagas: lerStepper("ps-v"), rondas: $("#ps-rondas").checked, cargoProprio: $("#ps-cargo").checked, dias: $("#ps-dias").value ? (p.dias || [1, 2, 3, 4, 5]) : undefined, habilitacao: $("#ps-hab").value.trim().toUpperCase() };
       fecharPop();
-      mudar(`${nome} atualizado para todos os dias`, () => { Object.assign(p, novo); if (!novo.sub) delete p.sub; if (!novo.dias) delete p.dias; if (novo.tipo === "posto") delete p.tipo; });
+      mudar(`${nome} atualizado para todos os dias${novo.habilitacao ? ` · prefere quem tem ${novo.habilitacao}` : ""}`, () => { Object.assign(p, novo); if (!novo.habilitacao) delete p.habilitacao; if (!novo.sub) delete p.sub; if (!novo.dias) delete p.dias; if (novo.tipo === "posto") delete p.tipo; });
       return;
     }
     case "posto-mover": {
