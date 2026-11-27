@@ -251,7 +251,8 @@ function vQuadro() {
       <span class="meta">${equipe(gmPorId(a.gm)?.equipe)?.id || ""}${a.oc.ate && a.oc.ate !== a.oc.de ? ` · volta ${ddmm(somaDias(a.oc.ate, 1))}` : ""}${a.tipo === "TROCA" ? ` · coberto por ${esc(nomeGm(a.oc.substituto))}` : ""}${a.oc.req ? ` · REQ ${esc(a.oc.req)}` : ""}</span></li>`).join("")}</ul></section>`).join("");
   const disp = cd.disposicao.length ? `<section class="disposicao"><h3>À disposição <span class="n">${new Set(cd.disposicao.map((d) => d.gm)).size}</span></h3>
     <p class="dica">Sem posto neste dia (viatura parada ou posto fechado). Use "Cobrir" para mandá-los a um furo.</p><div class="chips">
-    ${[...new Set(cd.disposicao.map((d) => d.gm))].map((id) => { const d = cd.disposicao.find((x) => x.gm === id); return `<button class="chip" data-act="disp-mandar" data-des="${d.id}" title="Clique para mandar a uma vaga · ou arraste até o posto"><span class="nm">${esc(nomeGm(id))}</span><span class="hr">${fmtHm(d.ini)}/${fmtHm(d.fim)}</span><span class="req">de ${esc(postoPorId(d.postoOriginal)?.nome)}${postoPorId(d.postoOriginal)?.ativo === false ? " (excluída)" : ""}</span></button>`; }).join("")}
+    ${[...new Set(cd.disposicao.map((d) => d.gm))].map((id) => { const ds = cd.disposicao.filter((x) => x.gm === id), d = ds.find((x) => x.nat !== "he") || ds[0], he = ds.filter((x) => x.nat === "he").reduce((t, x) => t + x.fim - x.ini, 0);
+      return `<button class="chip" data-act="disp-mandar" data-des="${d.id}" title="Clique para mandar a uma vaga · ou arraste até o posto"><span class="nm">${esc(nomeGm(id))}</span><span class="hr">${fmtHm(Math.min(...ds.map((x) => x.ini)))}/${fmtHm(Math.max(...ds.map((x) => x.fim)))}</span>${he ? `<span class="tag he" title="Hora extra sem posto: mande para uma vaga ou desfaça pelo botão direito">HE ${fmtHoras(he)}</span>` : ""}<span class="req">de ${esc(postoPorId(d.postoOriginal)?.nome)}${postoPorId(d.postoOriginal)?.ativo === false ? " (excluída)" : ""}</span></button>`; }).join("")}
     </div></section>` : "";
 
   return `
@@ -1925,7 +1926,25 @@ function tirarDoDia(d, m) {
     data.ocorrencias.push({ id: novoId(), tipo: m, gm: quem, de: ui.dia });
   });
 }
+// GM à disposição: as vagas abertas no horário dele (um clique para mandar), voltar ao posto de origem, ficha
+// (estender horário/HE só depois de ir para um posto: HE sem posto não aparece em lugar nenhum)
+function itensDisposicao(d) {
+  const cd = calcularDia(data, ui.dia);
+      const vagas = cd.furos.filter((f) => { const t = TURNOS.find((x) => x.id === f.turno); return sobrepoe(d.ini, d.fim, t.ini, t.fim) >= 60; });
+  const porPosto = new Map(); for (const f of vagas) { if (!porPosto.has(f.posto)) porPosto.set(f.posto, []); porPosto.get(f.posto).push(f.turno); }
+  const itens = [...porPosto].sort((a, b) => (a[0] === d.postoOriginal ? -1 : 0) - (b[0] === d.postoOriginal ? -1 : 0)).slice(0, 12)
+    .map(([posto, ts]) => ({ t: `Mandar para ${postoPorId(posto).nome} (${ts.map((t) => TURNOS.find((x) => x.id === t).nome.split(" ")[0]).join(" e ")} turno)`, act: "disp-ir", d: { posto } }));
+  const orig = d.postoOriginal && postoPorId(d.postoOriginal), faO = orig && cd.fa.find((o) => o.posto === orig.id);
+  return [{ t: `${nomeGm(d.gm)} · à disposição ${fmtHm(d.ini)}–${fmtHm(d.fim)}`, act: "ed-nada", desab: true }, { sep: true },
+    ...(orig && orig.ativo === false ? [{ t: `${orig.nome} está excluída do cadastro`, act: "ed-nada", desab: true }, { t: `Reativar ${orig.nome} e voltar (vale para todos os dias)`, act: "disp-reativar", d: { posto: orig.id } }, { sep: true }]
+      : orig ? [{ t: `Voltar para ${orig.nome}${faO ? ` (fica marcada ${faO.tipo === "FA" ? "em FA" : "fechada"})` : ""}`, act: "disp-voltar", d: { posto: orig.id } }, { sep: true }] : []),
+    ...(itens.length ? itens : [{ t: "Nenhuma vaga aberta no horário dele", act: "ed-nada", desab: true }]),
+    { sep: true }, { t: "Também dá para arrastar até qualquer posto", act: "ed-nada", desab: true },
+    ...(data.ocorrencias.some((o) => o.tipo === "HORARIO" && o.gm === d.gm && o.de === ui.dia) ? [{ sep: true }, { t: "Desfazer a extensão de horário (tirar a HE)", act: "disp-sem-ext", d: { gm: d.gm } }] : []),
+    { sep: true }, { t: "Onde está / situação…", act: "mn-busca-gm", d: { gm: d.gm } }, { t: "Ver ficha do GM", act: "abrir-ficha", d: { gm: d.gm } }];
+}
 function itensGm(d, turnoId) {
+  if (d.posto === null) return itensDisposicao(d);
   const req = valoresCartao(d).req;
   return [
     { t: "Editar horário, REQ e observação…", act: "mn-card", padrao: true },
@@ -3634,20 +3653,11 @@ document.addEventListener("click", (e) => {
       return;
     }
     case "disp-mandar": {
-      // GM à disposição: as vagas abertas no horário dele, para mandar com um clique
-      const d = ui.desMap.get(el.dataset.des), cd = calcularDia(data, ui.dia), r = el.getBoundingClientRect();
-      const vagas = cd.furos.filter((f) => { const t = TURNOS.find((x) => x.id === f.turno); return sobrepoe(d.ini, d.fim, t.ini, t.fim) >= 60; });
-      const porPosto = new Map(); for (const f of vagas) { if (!porPosto.has(f.posto)) porPosto.set(f.posto, []); porPosto.get(f.posto).push(f.turno); }
-      const itens = [...porPosto].sort((a, b) => (a[0] === d.postoOriginal ? -1 : 0) - (b[0] === d.postoOriginal ? -1 : 0)).slice(0, 12)
-        .map(([posto, ts]) => ({ t: `Mandar para ${postoPorId(posto).nome} (${ts.map((t) => TURNOS.find((x) => x.id === t).nome.split(" ")[0]).join(" e ")} turno)`, act: "disp-ir", d: { posto } }));
-      const orig = d.postoOriginal && postoPorId(d.postoOriginal), faO = orig && cd.fa.find((o) => o.posto === orig.id);
-      abrirMenu([{ t: `${nomeGm(d.gm)} · à disposição ${fmtHm(d.ini)}–${fmtHm(d.fim)}`, act: "ed-nada", desab: true }, { sep: true },
-        ...(orig && orig.ativo === false ? [{ t: `${orig.nome} está excluída do cadastro`, act: "ed-nada", desab: true }, { t: `Reativar ${orig.nome} e voltar (vale para todos os dias)`, act: "disp-reativar", d: { posto: orig.id } }, { sep: true }]
-          : orig ? [{ t: `Voltar para ${orig.nome}${faO ? ` (fica marcada ${faO.tipo === "FA" ? "em FA" : "fechada"})` : ""}`, act: "disp-voltar", d: { posto: orig.id } }, { sep: true }] : []),
-        ...(itens.length ? itens : [{ t: "Nenhuma vaga aberta no horário dele", act: "ed-nada", desab: true }]),
-        { sep: true }, { t: "Também dá para arrastar até qualquer posto", act: "ed-nada", desab: true }], r.left, r.bottom + 2, el, { des: d });
+      const d = ui.desMap.get(el.dataset.des), r = el.getBoundingClientRect();
+      abrirMenu(itensDisposicao(d), r.left, r.bottom + 2, el, { des: d });
       return;
     }
+    case "disp-sem-ext": { const gm = el.dataset.gm; fecharMenu(); mudar(`${nomeGm(gm)}: horário voltou ao normal (sem HE)`, () => { data.ocorrencias = data.ocorrencias.filter((o) => !(o.tipo === "HORARIO" && o.gm === gm && o.de === ui.dia)); }); return; }
     case "disp-reativar": { const p = postoPorId(el.dataset.posto); fecharMenu(); mudar(`${p.nome} reativada: a guarnição volta para ela`, () => { delete p.ativo; }); return; }
     case "disp-voltar": { const d = ui.menu.des, p = postoPorId(el.dataset.posto); fecharMenu(); mudar(`${nomeGm(d.gm)} voltou para ${p.nome}`, () => data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: d.gm, de: ui.dia, ate: ui.dia, posto: p.id, ficaNaFA: true })); return; }
     case "disp-ir": { const d = ui.menu.des, p = postoPorId(el.dataset.posto); fecharMenu(); mudar(`${nomeGm(d.gm)} saiu de À disposição para ${p.nome}`, () => data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: d.gm, de: ui.dia, ate: ui.dia, posto: p.id })); return; }
