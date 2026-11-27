@@ -448,3 +448,13 @@ test("viatura da escala levada para a operação: guarnição vai no horário e 
   assert.deepEqual(doGm.map((x) => x[0]), ["noite", "opv", "noite"]);
   assert.ok(!cd.furos.some((f) => f.posto === "noite"), "origem não vira furo");
 });
+
+test("HE em viatura: função escolhida aparece; extensão herda a função do próprio GM", () => {
+  const data = base(), d = diaDe(data, "D1");
+  data.ocorrencias.push({ id: "h1", tipo: "HE", gm: "c", de: d, ini: "07:00", fim: "19:00", posto: "vtr", funcao: "Patrulheiro" });
+  data.ocorrencias.push({ id: "h2", tipo: "HE", gm: "a", de: d, ini: "19:00", fim: "23:00", posto: "vtr" });
+  data._versao++;
+  const des = calcularDia(data, d).designacoes;
+  assert.equal(des.find((x) => x.origem === "h1").funcao, "Patrulheiro");
+  assert.equal(des.find((x) => x.origem === "h2").funcao, "Motorista");
+});

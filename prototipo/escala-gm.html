@@ -1241,6 +1241,8 @@ function calcularDia(data, dia) {
 
   // 6b. Função no dia (motorista / patrulheiro) só para aquele dia
   for (const oc of ocs.filter((o) => o.tipo === "FUNCAO")) for (const d of des) if (d.gm === oc.gm && d.nat !== "he") d.funcao = oc.funcao || "";
+  // HE sem função escolhida, estendendo o próprio serviço na mesma viatura: fica com a função que ele já tem ali
+  for (const d of des) if (d.nat === "he" && !d.funcao) { const m = des.find((x) => x !== d && x.gm === d.gm && x.posto === d.posto && x.funcao); if (m) d.funcao = m.funcao; }
 
   // 7. Conflitos de horário do mesmo GM
   const porGm = new Map();
@@ -3266,6 +3268,17 @@ const icoFuncao = (f) => ICO_FUNCAO[f] || "";
 const emVtr = (postoId) => postoPorId(postoId)?.tipo === "vtr";
 // na folha, a letra num quadradinho (M = motorista, P = patrulheiro), mais fácil de ler impresso
 const funcaoFolha = (d) => (emVtr(d.posto) && ICO_FUNCAO[d.funcao] ? `<span class="fn-l" title="${d.funcao}">${d.funcao[0]}</span>` : "");
+// HE em viatura: escolher motorista ou patrulheiro. A função que falta na guarnição naquele horário vem primeiro.
+function funcaoQueFalta(posto, dia, ini, fim) {
+  const [a, b] = typeof ini === "number" ? [ini, fim] : intervalo(ini, fim);
+  const fs = calcularDia(data, dia).designacoes.filter((x) => x.posto === posto && sobrepoe(x.ini, x.fim, a, b) > 0).map((x) => x.funcao);
+  return fs.includes("Motorista") ? "Patrulheiro" : "Motorista";
+}
+function itensLancarHE(dd, rotulo, nat = "he") {
+  if (!emVtr(dd.posto)) return [{ t: rotulo, act: "pend-he", d: { ...dd, nat } }];
+  const falta = funcaoQueFalta(dd.posto, dd.dia, dd.ini, dd.fim), ordem = falta === "Motorista" ? ["Motorista", "Patrulheiro"] : ["Patrulheiro", "Motorista"];
+  return [{ t: rotulo, sub: [...ordem.map((f) => ({ t: `como ${f.toLowerCase()}${f === falta ? " (falta na guarnição)" : ""}`, act: "pend-he", d: { ...dd, nat, fn: f }, padrao: f === falta })), { t: "sem função", act: "pend-he", d: { ...dd, nat } }] }];
+}
 function vAjustes() {
   const c = data.config;
   const anc = c.ancora || { data: ui.dia, equipes: [] };
@@ -3930,6 +3943,7 @@ function itensGm(d, turnoId) {
   return [
     { t: "Editar horário, REQ e observação…", act: "mn-card", padrao: true },
     { t: "Trocar o GM…", act: "mn-trocar" },
+    ...(ehHeLancada(d) && emVtr(d.posto) ? [{ t: `Função na HE${d.funcao ? ` (${d.funcao.toLowerCase()})` : ""}`, sub: [["Motorista", "Motorista"], ["Patrulheiro", "Patrulheiro"], ["", "Sem função"]].map(([f, t]) => ({ t: `${d.funcao === f ? "✓ " : ""}${t}`, act: "mn-funcao-he", d: { f } })) }] : []),
     ...(ehHeLancada(d) || d.fixa || !emVtr(d.posto) ? [] : [{ t: `Função${d.funcao ? ` (${d.funcao.toLowerCase()})` : ""}`, sub: [
       ...[["Motorista", "Motorista"], ["Patrulheiro", "Patrulheiro"], ["", "Sem função"]].map(([f, t]) => ({ t: `${d.funcao === f ? "✓ " : ""}${t} · só hoje`, act: "mn-funcao", d: { f, escopo: "dia" } })),
       { sep: true },
@@ -4591,7 +4605,7 @@ function escolherEditor(i) {
     abrirMenu([{ t: `${nomeGm(X)} · ${postoPorId(ctx.posto).nome} ${dd.ini}–${dd.fim}`, act: "ed-nada", desab: true }, { sep: true },
       { t: "📋 Copiar mensagem e marcar como oferecida", act: "pend-copiar-of", d: { ...dd, ini: fmtHm(vi), fim: fmtHm(vf) }, padrao: true },
       { t: "📲 Só marcar como oferecida", act: "pend-oferecer", d: { ...dd, ini: fmtHm(vi), fim: fmtHm(vf) } }, { t: "Só copiar a mensagem", act: "pend-copiar", d: { ...dd, ini: fmtHm(vi), fim: fmtHm(vf) } }, { sep: true },
-      { t: "Já confirmou: lançar HE", act: "pend-he", d: { ...dd, nat: "he" } }, { t: "Já confirmou: lançar como BH+", act: "pend-he", d: { ...dd, nat: "bh" } },
+      ...itensLancarHE(dd, "Já confirmou: lançar HE", "he"), ...itensLancarHE(dd, "Já confirmou: lançar como BH+", "bh"),
       { t: "Cancelar", act: "dr-cancelar" }], r.left, r.bottom + 2, el, {});
     return;
   }
@@ -4812,7 +4826,7 @@ function ofertar(posto, dia, ini, fim, gms, nat = "he") {
   });
   return o;
 }
-function responderOferta(id, gm, estado) {
+function responderOferta(id, gm, estado, funcao = "") {
   const o = data.ocorrencias.find((x) => x.id === id), g = o?.gms.find((x) => x.gm === gm);
   if (!g) return;
   if (estado === "recusou" || estado === "cancelada") {
@@ -4824,7 +4838,7 @@ function responderOferta(id, gm, estado) {
   const [oa, ob] = intervalo(o.ini, o.fim), parte = b - a < ob - oa;
   mudar(`${nomeGm(gm)} confirmou: ${o.nat === "bh" ? "BH+" : "HE"} ${fmtHm(a)}–${fmtHm(b)} em ${postoPorId(o.posto).nome}${parte ? ` (estende 6h; o resto continua vaga)` : conf >= o.vagas ? " · vaga preenchida" : ` · falta${o.vagas - conf === 1 ? "" : "m"} ${o.vagas - conf}`}${aguardando(o).length > 1 ? ` · ${aguardando(o).length - 1} ainda aguardando resposta` : ""}`, () => {
     g.estado = "confirmou";
-    data.ocorrencias.push({ id: novoId(), tipo: o.nat === "bh" ? "BH_MAIS" : "HE", gm, de: o.de, ini: fmtHm(a), fim: fmtHm(b), posto: o.posto, req: "", oferta: o.id });
+    data.ocorrencias.push({ id: novoId(), tipo: o.nat === "bh" ? "BH_MAIS" : "HE", gm, de: o.de, ini: fmtHm(a), fim: fmtHm(b), posto: o.posto, req: "", oferta: o.id, ...(funcao ? { funcao } : {}) });
     if (!aguardando(o).length) o.fechada = true; // só fecha quando todos tiverem resposta (confirmou, recusou ou envio cancelado)
   });
 }
@@ -4834,7 +4848,8 @@ function menuOferta(o, el) {
   abrirMenu([{ t: `HE oferecida · ${postoPorId(o.posto).nome} ${o.ini}–${o.fim}${o.vagas > 1 ? ` · ${o.vagas} vagas` : ""}`, act: "ed-nada", desab: true }, { sep: true },
     ...(() => { const cheia = o.gms.filter((x) => x.estado === "confirmou").length >= o.vagas;
       return ag.map((g) => ({ t: `${nomeGm(g.gm)} · aguardando`, sub: [
-        { t: `✓ Confirmou${cheia ? " (vaga já preenchida: lança mesmo assim)" : ""}`, act: "of-resp", d: { id: o.id, gm: g.gm, e: "confirmou" } },
+        ...(emVtr(o.posto) ? (() => { const falta = funcaoQueFalta(o.posto, o.de, o.ini, o.fim); return [falta, falta === "Motorista" ? "Patrulheiro" : "Motorista"].map((f) => ({ t: `✓ Confirmou · ${f.toLowerCase()}${f === falta ? " (falta)" : ""}${cheia ? " — vaga já preenchida" : ""}`, act: "of-resp", d: { id: o.id, gm: g.gm, e: "confirmou", fn: f } })); })()
+          : [{ t: `✓ Confirmou${cheia ? " (vaga já preenchida: lança mesmo assim)" : ""}`, act: "of-resp", d: { id: o.id, gm: g.gm, e: "confirmou" } }]),
         { t: "✗ Recusou", act: "of-resp", d: { id: o.id, gm: g.gm, e: "recusou" } },
         { t: "Cancelei o envio para ele", act: "of-resp", d: { id: o.id, gm: g.gm, e: "cancelada" } }] })); })(),
     ...o.gms.filter((g) => g.estado !== "oferecida").map((g) => ({ t: `${nomeGm(g.gm)}: ${{ confirmou: "✓ confirmou", recusou: "✗ recusou", cancelada: "envio cancelado" }[g.estado] || g.estado}`, act: "ed-nada", desab: true })),
@@ -5324,7 +5339,7 @@ document.addEventListener("click", (e) => {
       const gms = [...ed.oferta]; fecharEditor(); ofertar(posto, ui.dia, vi, vf, gms, nat); return;
     }
     case "oferta-abrir": { const o = data.ocorrencias.find((x) => x.id === el.dataset.id); if (o) menuOferta(o, el); return; }
-    case "of-resp": fecharMenu(); responderOferta(el.dataset.id, el.dataset.gm, el.dataset.e); return;
+    case "of-resp": fecharMenu(); responderOferta(el.dataset.id, el.dataset.gm, el.dataset.e, el.dataset.fn || ""); return;
     case "of-copiar": { const o = data.ocorrencias.find((x) => x.id === el.dataset.id); fecharMenu(); copiarTexto(mensagemOferta(o)); return; }
     case "of-cancelar": { const o = data.ocorrencias.find((x) => x.id === el.dataset.id); fecharMenu(); mudar("Oferta encerrada: envio cancelado para quem não respondeu", () => { for (const g of aguardando(o)) g.estado = "cancelada"; o.fechada = true; }); return; }
     case "of-mais": {
@@ -5453,6 +5468,8 @@ document.addEventListener("click", (e) => {
       });
       return;
     }
+    case "mn-funcao-he": { const d = ui.menu.des, f = el.dataset.f, oc = data.ocorrencias.find((o) => o.id === d.origem); fecharMenu(); if (!oc) return;
+      mudar(`${nomeGm(d.gm)}: ${f ? f.toLowerCase() : "sem função"} na HE`, () => { if (f) oc.funcao = f; else delete oc.funcao; }); return; }
     case "pad-funcao": { const g = gmPorId(el.dataset.gm), f = el.dataset.f, v = vigente(g, ui.padrao.desde); fecharMenu(); mudarLotacao(g, { lotacao: { ...v.lotacao, funcao: f } }, ui.padrao.desde, `${g.nome}: ${f || "sem função"} no padrão a partir de ${ddmm(ui.padrao.desde)}`); return; }
     case "insp-rodizio": {
       const lista = (id) => $(id).value.split(/[,;\n]/).map((x) => x.trim().toUpperCase()).filter(Boolean);
@@ -5932,7 +5949,7 @@ document.addEventListener("click", (e) => {
     case "letra": { const on = document.documentElement.classList.toggle("letra-grande"); try { localStorage.setItem("escala-letra", on ? "1" : ""); } catch { /* ignora */ } el.setAttribute("aria-pressed", String(on)); if (ui.pop) desenharPop(); return; }
     case "remanejar": mudar(`${nomeGm(el.dataset.gm)} remanejado para ${postoPorId(d.posto).nome}`, () => { data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: el.dataset.gm, de: ui.dia, ate: ui.dia, posto: d.posto }); ui.drawer = null; }); break;
     case "pend-rem": fecharMenu(); mudar(`${nomeGm(el.dataset.gm)} remanejado para ${postoPorId(el.dataset.posto).nome} em ${ddmm(el.dataset.dia)}`, () => data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: el.dataset.gm, de: el.dataset.dia, ate: el.dataset.dia, posto: el.dataset.posto })); break;
-    case "pend-he": fecharMenu(); mudar(`${el.dataset.nat === "bh" ? "BH+" : "HE"}: ${nomeGm(el.dataset.gm)} ${el.dataset.ini}–${el.dataset.fim} em ${postoPorId(el.dataset.posto).nome} (${ddmm(el.dataset.dia)})`, () => data.ocorrencias.push({ id: novoId(), tipo: el.dataset.nat === "bh" ? "BH_MAIS" : "HE", gm: el.dataset.gm, de: el.dataset.dia, ini: el.dataset.ini, fim: el.dataset.fim, posto: el.dataset.posto, req: el.dataset.req || "" })); break;
+    case "pend-he": fecharMenu(); mudar(`${el.dataset.nat === "bh" ? "BH+" : "HE"}: ${nomeGm(el.dataset.gm)} ${el.dataset.ini}–${el.dataset.fim} em ${postoPorId(el.dataset.posto).nome} (${ddmm(el.dataset.dia)})`, () => data.ocorrencias.push({ id: novoId(), tipo: el.dataset.nat === "bh" ? "BH_MAIS" : "HE", gm: el.dataset.gm, de: el.dataset.dia, ini: el.dataset.ini, fim: el.dataset.fim, posto: el.dataset.posto, req: el.dataset.req || "", ...(el.dataset.fn ? { funcao: el.dataset.fn } : {}) })); break;
     case "pend-mais": { const k = el.dataset.k; ui.pendMais.has(k) ? ui.pendMais.delete(k) : ui.pendMais.add(k); render(); return; }
     case "pend-pergunta": {
       const x = el.dataset, r = el.getBoundingClientRect(), p = postoPorId(x.posto)?.nome;
@@ -5941,7 +5958,7 @@ document.addEventListener("click", (e) => {
       abrirMenu([{ t: txt, act: "ed-nada", desab: true }, { sep: true },
         ...(x.via === "rem" ? [{ t: "Sim, remanejar", act: "pend-rem", d: dd, padrao: true }]
           : [{ t: "📲 Oferecer a ele (WhatsApp)", act: "pend-oferecer", d: dd, padrao: true }, { t: "Copiar mensagem da vaga", act: "pend-copiar", d: dd }, { sep: true },
-            { t: "Já confirmou: lançar HE", act: "pend-he", d: dd }, { t: "Já confirmou: lançar como BH+", act: "pend-he", d: { ...dd, nat: "bh" } }]),
+            ...itensLancarHE(dd, "Já confirmou: lançar HE", "he"), ...itensLancarHE(dd, "Já confirmou: lançar como BH+", "bh")]),
         ...(x.via === "rem" ? [] : [{ t: "Mudar o horário antes…", act: "pend-abrir", d: { dia: x.dia, posto: x.posto, turno: TURNOS.find((t) => sobrepoe(intervalo(x.ini, x.fim)[0], intervalo(x.ini, x.fim)[1], t.ini, t.fim) > 0)?.id || "t2" } }]),
         { t: "Cancelar", act: "dr-cancelar" }], r.left, r.bottom + 2, el, {});
       return;

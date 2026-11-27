@@ -254,6 +254,8 @@ export function calcularDia(data, dia) {
 
   // 6b. Função no dia (motorista / patrulheiro) só para aquele dia
   for (const oc of ocs.filter((o) => o.tipo === "FUNCAO")) for (const d of des) if (d.gm === oc.gm && d.nat !== "he") d.funcao = oc.funcao || "";
+  // HE sem função escolhida, estendendo o próprio serviço na mesma viatura: fica com a função que ele já tem ali
+  for (const d of des) if (d.nat === "he" && !d.funcao) { const m = des.find((x) => x !== d && x.gm === d.gm && x.posto === d.posto && x.funcao); if (m) d.funcao = m.funcao; }
 
   // 7. Conflitos de horário do mesmo GM
   const porGm = new Map();
