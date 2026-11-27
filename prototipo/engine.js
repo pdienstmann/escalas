@@ -42,6 +42,7 @@ export const TIPOS = {
   FUNCAO: "Função no dia",
   AREA: "Área / nome no dia",
   AVISO: "Aviso / observação",
+  OFERTA: "HE oferecida",
   DISP_HE: "Disponível para HE",
   DISP_FERIAS: "Declarou férias (folgas)",
   SEM_HE_REC: "HE recorrente suspensa no dia",

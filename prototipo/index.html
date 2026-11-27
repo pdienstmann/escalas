@@ -695,6 +695,14 @@ table.quadro tr.secao.operacao th { background: linear-gradient(90deg, var(--op-
 .av-lido { font-size: .75rem; font-weight: 700; color: var(--warn); } .av-lido.ok { color: var(--ok); }
 .form-lanc textarea { font: inherit; padding: .4rem .5rem; border: 1px solid var(--line-strong); border-radius: 6px; resize: vertical; width: 100%; box-sizing: border-box; background: var(--surface); color: inherit; }
 .pt-aviso { font-size: 9px; margin: 2px 0 4px; padding: 2px 4px; border: 1px solid var(--paper-line); }
+/* HE oferecida */
+button.furo.oferecida { background: #f08c00; display: grid; text-align: left; } button.furo.oferecida::before { content: "⏳"; background: none; color: #fff; font-size: .75rem; width: auto; }
+button.furo.oferecida small { font-weight: 500; opacity: .9; font-size: .7rem; }
+table.quadro td:has(> button.furo.oferecida) { background: #fff1db; }
+.ed-of { display: block; margin-top: .2rem; } .ed-of-rodape { display: flex; gap: .5rem; align-items: center; border-top: 1px solid var(--line); margin-top: .3rem; padding-top: .35rem; font-size: .82rem; } .ed-of-rodape .btn { margin-left: auto; }
+#ed-lista li.marcado { background: #fff1db; } #ed-lista .caixa { margin-right: .35rem; color: #f08c00; }
+.oferta-st { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .7rem; background: #fff1db; border-left: 4px solid #f08c00; border-radius: 6px; padding: .35rem .6rem; margin: .3rem 0; font-size: .85rem; }
+.of-tit { font-weight: 700; color: #b35c00; width: 100%; } .of-gm { display: inline-flex; gap: .35rem; align-items: center; } .btn.of-sim { background: var(--ok); color: #fff; border-color: var(--ok); }
 /* finalizar escala e controle de HE */
 .btn.fin { border-color: var(--accent); color: var(--accent); font-weight: 600; padding: .2rem .6rem; }
 .fin-ok { color: var(--ok, #2e7d32); font-weight: 600; } .fin-ok .link { font-weight: 400; margin-left: .3rem; }
