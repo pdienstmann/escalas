@@ -684,6 +684,17 @@ table.quadro tr.secao.operacao th { background: linear-gradient(90deg, var(--op-
 .pacoes .btn .nm-l { display: flex; align-items: center; gap: .2rem; } .pacoes .btn .nm-l .he-pill { margin-left: auto; }
 .ed-rodape { display: flex; justify-content: space-between; gap: .5rem; } .ed-sem, .sem-gm { color: var(--muted); }
 .disposicao button.chip { cursor: grab; } .disposicao button.chip:active { cursor: grabbing; }
+/* avisos do dia */
+.aviso-dia { display: flex; align-items: flex-start; gap: .7rem; background: #fff7cc; border: 1px solid #e0b400; border-left: 6px solid #e0b400; border-radius: 8px; padding: .6rem .8rem; margin: .5rem 0; color: #3d3000; }
+.aviso-dia p { margin: .15rem 0 0; } .aviso-dia .btn { margin-left: auto; white-space: nowrap; } .aviso-dia .av-ico { font-size: 1.2rem; }
+.aviso-dia.lido { background: var(--surface); border-color: var(--line); border-left-color: var(--line-strong); color: var(--muted); } .aviso-dia.lido .link { margin-left: auto; }
+.av-lidos { margin: .3rem 0; font-size: .82rem; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .aviso-dia:not(.lido) { background: #3a3108; color: #ffe98a; } }
+.avisos-lista { list-style: none; padding: 0; margin: 0; display: grid; gap: .5rem; } .avisos-lista li { border: 1px solid var(--line); border-radius: 8px; padding: .5rem .7rem; } .avisos-lista p { margin: .3rem 0 0; white-space: pre-wrap; }
+.av-cab { display: flex; gap: .5rem; align-items: center; } .av-cab .link:first-of-type { margin-left: auto; }
+.av-lido { font-size: .75rem; font-weight: 700; color: var(--warn); } .av-lido.ok { color: var(--ok); }
+.form-lanc textarea { font: inherit; padding: .4rem .5rem; border: 1px solid var(--line-strong); border-radius: 6px; resize: vertical; width: 100%; box-sizing: border-box; background: var(--surface); color: inherit; }
+.pt-aviso { font-size: 9px; margin: 2px 0 4px; padding: 2px 4px; border: 1px solid var(--paper-line); }
 /* finalizar escala e controle de HE */
 .btn.fin { border-color: var(--accent); color: var(--accent); font-weight: 600; padding: .2rem .6rem; }
 .fin-ok { color: var(--ok, #2e7d32); font-weight: 600; } .fin-ok .link { font-weight: 400; margin-left: .3rem; }

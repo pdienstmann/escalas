@@ -151,6 +151,14 @@ function chip(d, t, junto) {
     <span class="nm">${esc(g?.nome)}</span>${d.funcao && (emVtr(d.posto) || !ICO_FUNCAO[d.funcao]) ? `<span class="fn${ICO_FUNCAO[d.funcao] ? " fn-ico" : ""}" title="${esc(d.funcao)} · botão direito › Função para mudar">${ICO_FUNCAO[d.funcao] || esc(d.funcao.slice(0, 3).toUpperCase())}</span>` : ""}
     <span class="hr" ${junto ? `data-junto="${junto.he.id}"` : ""}>${junto ? `${textoCelula(d, t).split("/")[0]}/${fmtHm(junto.he.fim)}` : textoCelula(d, t)}</span>${junto ? `<span class="he-num" title="${fmtHoras(junto.total)} de hora extra fixa">${fmtHE(junto.total)}</span>` : ""}${extras.join("")}${d.obs && ultimo ? `<span class="obs" title="${esc(d.obs)}">${esc(d.obs.length > 34 ? d.obs.slice(0, 33) + "…" : d.obs)}</span>` : ""}</button>`;
 }
+function painelAvisos() {
+  const as = avisosDoDia(ui.dia), novos = as.filter((o) => !avisoLido(o, ui.dia)), lidos = as.filter((o) => avisoLido(o, ui.dia));
+  if (!as.length) return "";
+  return `${novos.map((o) => `<section class="aviso-dia" role="note"><span class="av-ico" aria-hidden="true">📌</span><div><b>Aviso${o.ate && o.ate !== o.de ? ` · ${ddmm(o.de)} a ${ddmm(o.ate)}` : ""}</b><p>${esc(o.texto).replace(/\n/g, "<br>")}</p></div>
+      <button class="btn" data-act="av-lido" data-id="${o.id}">Marcar como lido</button></section>`).join("")}
+    ${lidos.length ? `<p class="av-lidos"><button class="link" data-act="av-ver-lidos">${ui.verLidos ? "esconder" : `${lidos.length} aviso${lidos.length === 1 ? "" : "s"} lido${lidos.length === 1 ? "" : "s"} neste dia`}</button></p>
+      ${ui.verLidos ? lidos.map((o) => `<section class="aviso-dia lido"><div><p>${esc(o.texto).replace(/\n/g, "<br>")}</p></div><button class="link" data-act="av-naolido" data-id="${o.id}">marcar como não lido</button></section>`).join("") : ""}` : ""}`;
+}
 // Faixa "Atenção hoje": tudo o que pede ação no dia, com a cor da gravidade (vermelho = resolver, laranja = conferir)
 function faixaAtencao(cd, furosTotal) {
   const it = [];
@@ -247,6 +255,7 @@ function vQuadro() {
   </div>
   <p class="dica como">Clique no <b>nome</b> ou no <b>horário</b> para editar ali mesmo · <b>botão direito</b> mostra todas as opções · <b>arraste</b> para remanejar · setas, Enter, Delete, Ctrl+C e Ctrl+V também funcionam.</p>
   ${painelPlano()}
+  ${painelAvisos()}
   ${faixaAtencao(cd, furosTotal)}
   ${disp}
   <div class="tabela-wrap"><table class="quadro">
@@ -538,13 +547,13 @@ function descreveOc(o) {
   return o.obs ? esc(o.obs) : "";
 }
 // ---------- LANÇAMENTOS em seções ----------
-const ABAS_LANC = [["ferias", "Férias"], ["cursos", "Cursos"], ["folgas", "Folgas"], ["trocas", "Trocas de serviço"], ["atestados", "Atestados e licenças"], ["todos", "Todos os lançamentos"]];
+const ABAS_LANC = [["ferias", "Férias"], ["cursos", "Cursos"], ["folgas", "Folgas"], ["trocas", "Trocas de serviço"], ["atestados", "Atestados e licenças"], ["avisos", "Avisos e observações"], ["todos", "Todos os lançamentos"]];
 const cobreMes = (o, m) => o.de.slice(0, 7) <= m && (o.ate || o.de).slice(0, 7) >= m;
 const diasEntre = (a, b) => Math.round((parseData(b) - parseData(a)) / 864e5) + 1;
 function vLancamentos() {
   const L = (ui.lanc ||= { aba: "ferias", sel: [] }), m = ui.filtroLanc.mes;
   if (ui.filtroLanc.req) L.aba = "todos"; // "Ver tudo do REQ" abre a lista completa filtrada
-  const corpo = { ferias: lancFerias, cursos: lancCursos, folgas: lancFolgas, trocas: lancTrocas, atestados: lancAtestados, todos: vLancTodos }[L.aba]();
+  const corpo = { ferias: lancFerias, cursos: lancCursos, folgas: lancFolgas, trocas: lancTrocas, atestados: lancAtestados, avisos: lancAvisos, todos: vLancTodos }[L.aba]();
   return `${L.aba === "todos" ? "" : `<div class="barra"><div class="datas"><button class="ic" data-act="lmes" data-n="-1" aria-label="Mês anterior">‹</button><h2 class="titulo-mes">${nomeMes(m)}</h2><button class="ic" data-act="lmes" data-n="1" aria-label="Próximo mês">›</button></div></div>`}
   <div class="abas-pad" role="tablist">${ABAS_LANC.map(([k, t]) => `<button role="tab" aria-selected="${L.aba === k}" data-act="lanc-aba" data-aba="${k}">${t}</button>`).join("")}</div>
   ${corpo}`;
@@ -631,6 +640,23 @@ function lancTrocas() {
         <td class="num">${y ? `${ddmm(y.de)}: ${esc(nomeGm(y.substituto))} cobre ${esc(nomeGm(y.gm))}` : `<span class="meta">sem devolução</span>`}</td><td class="num">${esc(x.req || "")}</td>
         <td>${ui.confirmar === x.id ? `<button class="btn perigo" data-act="tr-apagar" data-par="${esc(x.par || x.id)}">Confirmar</button>` : `<button class="link" data-act="pre-apagar" data-id="${x.id}">Excluir</button>`}</td></tr>`; }).join("")}
       </tbody></table></div>` : `<p class="meta">Nenhuma troca neste mês.</p>`}</section></div>`;
+}
+// Avisos e observações: aparecem no quadro do dia (e, se marcado, na folha) e podem ser dados como lidos
+const avisosDoDia = (dia) => data.ocorrencias.filter((o) => o.tipo === "AVISO" && o.de <= dia && dia <= (o.ate || o.de));
+const avisoLido = (o, dia) => (o.lidos || []).includes(dia);
+function lancAvisos() {
+  const m = ui.filtroLanc.mes, as = data.ocorrencias.filter((o) => o.tipo === "AVISO" && cobreMes(o, m)).sort((a, b) => a.de.localeCompare(b.de));
+  const ed = ui.lanc.avisoEd ? data.ocorrencias.find((o) => o.id === ui.lanc.avisoEd) : null;
+  return `<div class="cols-lanc"><section class="painel form-lanc"><h2>${ed ? "Editar aviso" : "Novo aviso"}</h2>
+    <p class="dica">Fica em destaque no topo do quadro do dia (ou de cada dia do período) até alguém marcar como lido.</p>
+    <div class="linha"><label>De <input type="date" id="av-de" value="${ed?.de || ui.dia}"></label><label>Até <input type="date" id="av-ate" value="${ed?.ate || ed?.de || ui.dia}"></label></div>
+    <label>Aviso <textarea id="av-txt" rows="4" placeholder="ex.: Visita do prefeito à sede às 10h · VTR 1317 vai para revisão às 14h">${esc(ed?.texto || "")}</textarea></label>
+    <label class="toggle"><input type="checkbox" id="av-folha" ${ed?.folha ? "checked" : ""}> Sair também na folha impressa</label>
+    <div class="linha"><button class="btn pri" data-act="av-salvar">${ed ? "Salvar" : "Lançar aviso"}</button>${ed ? `<button class="link" data-act="av-cancelar">cancelar</button>` : ""}</div></section>
+  <section class="painel"><h2>Avisos em ${nomeMes(m).toLowerCase()} <span class="n">${as.length}</span></h2>
+    ${as.length ? `<ul class="avisos-lista">${as.map((o) => { const dias = []; for (let d = o.de; d <= (o.ate || o.de); d = somaDias(d, 1)) dias.push(d); const lidos = dias.filter((d) => avisoLido(o, d)).length;
+      return `<li><div class="av-cab"><span class="num">${ddmm(o.de)}${o.ate && o.ate !== o.de ? ` a ${ddmm(o.ate)}` : ""}</span>${o.folha ? `<span class="tag rem">na folha</span>` : ""}<span class="av-lido ${lidos === dias.length ? "ok" : ""}">${lidos === dias.length ? "✓ lido" : lidos ? `lido em ${lidos} de ${dias.length} dias` : "não lido"}</span>
+        <button class="link" data-act="av-editar" data-id="${o.id}">editar</button>${btnExcluir(o)}</div><p>${esc(o.texto)}</p></li>`; }).join("")}</ul>` : `<p class="meta">Nenhum aviso neste mês.</p>`}</section></div>`;
 }
 function lancAtestados() {
   const m = ui.filtroLanc.mes, as = data.ocorrencias.filter((o) => ["ATESTADO", "LICENCA"].includes(o.tipo) && cobreMes(o, m)).sort((a, b) => a.de.localeCompare(b.de));
@@ -966,6 +992,7 @@ function vFolha() {
       <td class="chefe" rowspan="2">INSP. CHEFE: ${esc(data.config.inspetorChefe || "")}</td>
       <td>INSP. OP. DIA: ${esc(insp("dia"))}</td><td class="data">DATA: ${ddmmaaaa(ui.dia)}</td><td class="data">2º3º4º TURNOS ${SEMANA[diaSemana(ui.dia)]}</td></tr>
       <tr><td>INSP. OP. NOITE: ${esc(insp("noite"))}</td><td class="data">DATA: ${ddmmaaaa(amanha)}</td><td class="data">1º TURNO ${SEMANA[diaSemana(amanha)]}</td></tr></table>
+    ${avisosDoDia(ui.dia).filter((o) => o.folha).map((o) => `<p class="pt-aviso"><b>OBSERVAÇÃO:</b> ${esc(o.texto).replace(/\n/g, "<br>")}</p>`).join("")}
     <table class="pt">${corpo}</table>
     <div class="quebra"></div>
     <table class="pt verso">
@@ -2818,6 +2845,20 @@ document.addEventListener("click", (e) => {
       return;
     }
     case "tr-apagar": { const par = el.dataset.par; ui.confirmar = null; mudar("Troca excluída", () => { data.ocorrencias = data.ocorrencias.filter((o) => !(o.tipo === "TROCA" && (o.par === par || o.id === par))); }); return; }
+    case "av-salvar": {
+      const de = $("#av-de").value, ate = $("#av-ate").value || de, texto = $("#av-txt").value.trim(), folha = $("#av-folha").checked, ed = ui.lanc.avisoEd && data.ocorrencias.find((o) => o.id === ui.lanc.avisoEd);
+      if (!texto) { toast("Escreva o aviso."); $("#av-txt").focus(); return; }
+      if (!de || ate < de) { toast("Confira as datas."); return; }
+      mudar(`Aviso ${ed ? "atualizado" : "lançado"} para ${ddmm(de)}${ate !== de ? ` a ${ddmm(ate)}` : ""}`, () => {
+        if (ed) Object.assign(ed, { de, ate, texto, folha }); else data.ocorrencias.push({ id: novoId(), tipo: "AVISO", de, ate, texto, folha, lidos: [] });
+        ui.lanc.avisoEd = null;
+      });
+      return;
+    }
+    case "av-editar": ui.lanc.avisoEd = el.dataset.id; render(); $("#av-txt")?.focus(); return;
+    case "av-cancelar": ui.lanc.avisoEd = null; render(); return;
+    case "av-lido": case "av-naolido": { const o = data.ocorrencias.find((x) => x.id === el.dataset.id), lido = el.dataset.act === "av-lido"; mudar(lido ? "Aviso marcado como lido" : "Aviso voltou a aparecer", () => { o.lidos = lido ? [...new Set([...(o.lidos || []), ui.dia])] : (o.lidos || []).filter((d) => d !== ui.dia); }); return; }
+    case "av-ver-lidos": ui.verLidos = !ui.verLidos; render(); return;
     case "lc-mais": { const c = el.dataset.curso, o = data.ocorrencias.find((x) => x.tipo === "CURSO" && x.curso === c); ui.lanc.sel = []; redesenharSel(); $("#lc-nome").value = c; if (o) { $("#lc-local").value = o.local || ""; $("#lg-de").value = o.de; $("#lg-ate").value = o.ate || o.de; } $("#lg-gm").focus(); return; }
     case "fg-cancelar": ui.lanc.import = null; render(); return;
     case "folgas-mud": {
