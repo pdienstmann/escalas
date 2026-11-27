@@ -1491,6 +1491,7 @@ const MODELOS_POSTO = {
   moto: { t: "Moto (1 GM de dia)", tipo: "moto", dia: 1, noite: 0 },
   posto: { t: "Posto fixo 12x36 (1 GM de dia)", tipo: "posto", dia: 1, noite: 0 },
   postodn: { t: "Posto fixo dia e noite (1 + 1)", tipo: "posto", dia: 1, noite: 1 },
+  semanal: { t: "Posto fixo semanal (seg–sex, expediente)", tipo: "posto", dia: 1, noite: 0, dias: [1, 2, 3, 4, 5] },
   eja: { t: "Reforço / EJA (seg–sex, horário fixo, coberto com HE)", tipo: "posto", reforco: { ini: "19:00", fim: "23:00" }, dias: [1, 2, 3, 4, 5], n: 1 },
 };
 function modeloDoPosto(chave) {
@@ -1516,10 +1517,12 @@ function blocoNovoPosto(sec, s) {
       ${ref ? `<div class="np-ref"><div class="linha"><div><span class="meta">Horário do reforço</span><label class="np-hr"><input id="np-ri" value="${esc(m.reforco.ini)}" size="5" aria-label="Início"> às <input id="np-rf" value="${esc(m.reforco.fim)}" size="5" aria-label="Fim"></label></div><label>GMs <input type="number" id="np-n" min="1" max="9" value="${m.n || 1}" size="3"></label></div>
         <div class="np-dias" role="group" aria-label="Dias da semana">${[1, 2, 3, 4, 5, 6, 0].map((d) => `<label class="dia-chk"><input type="checkbox" value="${d}" ${diasSel.has(d) ? "checked" : ""}> ${SEMANA[d].slice(0, 3)}</label>`).join("")}</div>
         <p class="dica">Vaga coberta com hora extra: as sugestões trazem primeiro quem é do dia e estende (EJA começa quando o serviço do GM termina).</p></div>`
-      : `<div class="linha"><label>GMs de dia <input type="number" id="np-dia" min="0" max="9" value="${m.dia}" size="3"></label><label>GMs de noite <input type="number" id="np-noite" min="0" max="9" value="${m.noite}" size="3"></label></div>`}
+      : `<div class="linha"><label>GMs de dia <input type="number" id="np-dia" min="0" max="9" value="${m.dia}" size="3"></label><label>GMs de noite <input type="number" id="np-noite" min="0" max="9" value="${m.noite}" size="3"></label></div>
+        ${m.dias ? `<div class="np-dias" role="group" aria-label="Dias da semana">${[1, 2, 3, 4, 5, 6, 0].map((d) => `<label class="dia-chk"><input type="checkbox" value="${d}" ${diasSel.has(d) ? "checked" : ""}> ${SEMANA[d].slice(0, 3)}</label>`).join("")}</div>
+        <p class="dica">Só existe nos dias marcados: nos outros não aparece vaga nem furo. Quem cobre normalmente é do efetivo semanal (Padrões › Semanal).</p>` : ""}`}
       <label>Área / complemento <input id="np-sub" placeholder="opcional" value="${esc(m.sub || "")}"></label>
       ${ui.view === "quadro" ? `<label class="toggle"><input type="checkbox" id="np-so"> Só em ${ddmm(ui.dia)} (extra deste dia, não entra no padrão)</label>` : ""}
-      ${ref ? "" : escolhaPadrao()}
+      ${ref || m.dias ? "" : escolhaPadrao()}
       <button class="btn pri" data-act="posto-criar">Criar</button></div>`;
 }
 function popNovo(s) {
@@ -3776,11 +3779,13 @@ document.addEventListener("click", (e) => {
         if (!dias.length) { toast("Marque pelo menos um dia da semana."); return; }
       }
       const nRef = Number($("#np-n")?.value) || 1;
+      if (!reforco && $(".np-dias")) { dias = [...document.querySelectorAll(".np-dias input:checked")].map((x) => Number(x.value)).sort(); if (!dias.length) { toast("Marque pelo menos um dia da semana."); return; } }
       fecharPop();
       (ui.padVazios ||= new Set()).add(sec);
       mudar(`${nome} criado${so ? ` só para ${ddmm(so)}` : soPad ? ` só no padrão ${soPad === "impar" ? "ímpar" : "par"}` : reforco ? ` (reforço ${reforco.ini}–${reforco.fim})` : " nos dois padrões"}. Clique em "+ pôr GM" para escalar alguém.`, () => {
         const p = { id: "p" + novoId(), secao: sec, nome, vagas: reforco ? vagaDoReforco(reforco.ini, reforco.fim, nRef) : { t2: nd, t3: nd, t4: nn, t1: nn } };
         if (reforco) { p.reforco = reforco; if (dias.length < 7) p.dias = dias; if (mod.rondas) p.rondas = true; }
+        if (!reforco && dias?.length && dias.length < 7) { p.dias = dias; if (!mod.obs) p.obs = dias.join() === "1,2,3,4,5" ? "SEG A SEX" : dias.map((d) => SEMANA[d].slice(0, 3)).join(", "); }
         if (mod.obs) p.obs = mod.obs;
         if (eqsPad?.length && !so) p.equipes = eqsPad;
         if (tipo !== "posto") p.tipo = tipo;
