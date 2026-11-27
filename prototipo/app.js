@@ -1338,9 +1338,15 @@ function posicionarPop() {
   p.classList.remove("embaixo");
   const W = p.offsetWidth, h = p.offsetHeight;
   const ax = s.anc.x - scrollX, ay = s.anc.y - scrollY;
+  const fora = ay + s.anc.h < 0 || ay > innerHeight;
+  if (s.fixo || fora) { // âncora fora da tela (ex.: Ctrl+F com a escala rolada): abre no alto da área visível
+    const topo = (document.querySelector("header.app")?.getBoundingClientRect().bottom || 0) + 12;
+    p.style.left = Math.max(12, (innerWidth - W) / 2) + "px"; p.style.top = Math.min(Math.max(12, topo), Math.max(12, innerHeight - h - 12)) + "px"; return;
+  }
   const x = Math.min(Math.max(12, ax), innerWidth - W - 12);
   let y = ay + s.anc.h + 6;
   if (y + h > innerHeight - 12) y = Math.max(12, ay - h - 6);
+  y = Math.max(12, Math.min(y, innerHeight - h - 12)); // nunca fora da tela
   p.style.left = x + "px"; p.style.top = y + "px";
 }
 function fecharPop() { ui.pop = null; const p = $("#pop"); if (p) { p.hidden = true; p.innerHTML = ""; } }
@@ -3940,7 +3946,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && ui.colando && $("#menu").hidden && !ed.modo) { pararColar(); return; }
   if (e.key === "Escape" && ui.pop) { fecharPop(); return; }
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "f" && ["quadro", "padroes"].includes(ui.view) && ui.pop?.modo !== "buscagm") {
-    e.preventDefault(); fecharMenu(); abrirPop("buscagm", $("[data-act=busca-gm]") || document.body, { q: "" }); setTimeout(() => $("#bg-in")?.focus(), 30); return; // Ctrl+F de novo = busca normal do navegador
+    e.preventDefault(); fecharMenu(); abrirPop("buscagm", $("[data-act=busca-gm]") || document.body, { q: "", fixo: true }); setTimeout(() => $("#bg-in")?.focus(), 30); return; // Ctrl+F de novo = busca normal do navegador
   }
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z" && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName || "")) { e.preventDefault(); $("#btn-desfazer").click(); return; }
   if (e.key === "Enter" && ui.pop?.modo === "card" && /p-ini|p-fim|c-req|c-obs/.test(e.target.id)) { $("[data-act=card-salvar]").click(); return; }

@@ -742,7 +742,8 @@ table.efetivo tr.limbo td { background: var(--furo-bg); } table.efetivo tr.inati
 /* reordenar arrastando */
 .alca { cursor: grab; color: var(--muted); opacity: .35; padding: 0 .2rem; user-select: none; font-size: .9rem; vertical-align: middle; }
 tr:hover > th > .alca { opacity: .9; } .alca:active { cursor: grabbing; }
-th.posto { white-space: normal; } th.posto > .alca { float: left; margin-top: .25rem; }
+table.quadro th.posto { position: relative; padding-left: 1.15rem; } th.posto > .alca { position: absolute; left: 2px; top: .55rem; padding: 0; font-size: .8rem; }
+tr.secao th > .alca { margin-left: -.5rem; }
 @media print { .alca { display: none; } }
 body.ordenando tr.drop-antes > * { box-shadow: inset 0 3px 0 var(--accent); }
 /* buscar GM */
