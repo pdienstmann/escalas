@@ -843,6 +843,7 @@ table.acessos { min-width: 0; } table.acessos td { vertical-align: middle; }
 .pop .bloco, .pop .bloco label, .pop .linha > * { min-width: 0; }
 .pop select { max-width: 100%; min-width: 0; } .pop .bloco > label > select, .pop .bloco > label > input:not([type=checkbox]):not([type=radio]) { width: 100%; box-sizing: border-box; }
 .pop-corpo { overflow-x: hidden; }
+.ocultos { font-size: .82rem; color: var(--muted); margin: 0; } .ocultos .link { font-size: .82rem; }
 /* finalizar escala e controle de HE */
 .btn.fin { border-color: var(--accent); color: var(--accent); font-weight: 600; padding: .2rem .6rem; }
 .fin-ok { color: var(--ok, #2e7d32); font-weight: 600; } .fin-ok .link { font-weight: 400; margin-left: .3rem; }
@@ -2222,6 +2223,7 @@ function vQuadro() {
       const furosP = cd.furos.filter((f) => f.posto === p.id);
       if (ui.soFuros && !furosP.length) continue;
       const desP = cd.designacoes.filter((d) => d.posto === p.id);
+      if (faPostos.get(p.id)?.oculto && !desP.length) continue; // fechado e ocultado: só aparece na linha "ocultos"
       const naoHoje = p.dias && !p.dias.includes(diaSemana(ui.dia));
       let cels;
       if (faPostos.has(p.id)) {
@@ -2294,6 +2296,7 @@ function vQuadro() {
   </div>
   <p class="dica como">Clique no <b>nome</b> ou no <b>horário</b> para editar ali mesmo · <b>botão direito</b> mostra todas as opções · <b>arraste</b> para remanejar · setas, Enter, Delete, Ctrl+C e Ctrl+V também funcionam.</p>
   ${painelPlano()}
+  ${(() => { const oc = cd.fa.filter((o) => o.oculto && !cd.designacoes.some((d) => d.posto === o.posto)); return oc.length ? `<p class="ocultos">Ocultos hoje (não saem na escala nem na folha): ${oc.map((o) => `<button class="link" data-act="pop-posto" data-posto="${o.posto}" title="Clique para mostrar de novo ou reabrir">${esc(postoPorId(o.posto)?.nome || "")} <span class="meta">(${o.tipo === "FA" ? "FA" : "fechado"})</span></button>`).join(", ")}</p>` : ""; })()}
   ${painelAvisos()}
   ${faixaAtencao(cd, furosTotal)}
   ${disp}
@@ -3060,7 +3063,7 @@ function vFolha() {
   let corpo = "", corpoVerso = "";
   for (const s of data.secoes) {
     if (!opNoDia(s, ui.dia)) continue;
-    const ps = data.postos.filter((p) => p.secao === s.id && postoDoDia(p, ui.dia) && (faPostos.get(p.id)?.tipo !== "FA" || cd.designacoes.some((d) => d.posto === p.id)) // viatura em FA não sai na folha (a não ser que a guarnição fique nela)
+    const ps = data.postos.filter((p) => p.secao === s.id && postoDoDia(p, ui.dia) && ((faPostos.get(p.id)?.tipo !== "FA" && !faPostos.get(p.id)?.oculto) || cd.designacoes.some((d) => d.posto === p.id)) // viatura em FA não sai na folha (a não ser que a guarnição fique nela)
       && (p.rondas || faPostos.has(p.id) || cd.designacoes.some((d) => d.posto === p.id) || cd.furos.some((f) => f.posto === p.id))); // nem posto vazio sem vaga
     if (!ps.length) continue;
     const verso = ps.every((p) => p.tipo === "reserva");
@@ -3629,10 +3632,12 @@ function popPosto(s) {
   let corpo;
   if (s.aba === "dia") {
     corpo = `${fa ? `<p class="estado">${fa.tipo === "FA" ? "Viatura em manutenção (FA)" : "Posto fechado"} ${fa.ate && fa.ate !== fa.de ? `de ${ddmm(fa.de)} até ${ddmm(fa.ate)}` : "neste dia"}</p>
-        <button class="btn pri grande" data-act="posto-reabrir" data-oc="${fa.id}">Voltar a funcionar a partir de ${ddmm(ui.dia)}</button>`
+        <button class="btn pri grande" data-act="posto-reabrir" data-oc="${fa.id}">Voltar a funcionar a partir de ${ddmm(ui.dia)}</button>
+        <button class="btn" data-act="posto-ocultar" data-oc="${fa.id}">${fa.oculto ? "Mostrar de novo na escala e na folha" : "Ocultar da escala e da folha"}</button>`
       : `<div class="bloco"><b>${ehViatura(p) ? "Viatura parada?" : "Posto não vai funcionar?"}</b>
         <div class="linha"><label>Até <input type="date" id="pp-ate" value="${ui.dia}" min="${ui.dia}"></label>
         <button class="btn grande perigo-leve" data-act="posto-fechar" data-tipo="${ehViatura(p) ? "FA" : "FECHADO"}">${ehViatura(p) ? "Pôr em manutenção (FA)" : "Fechar o posto"}</button></div>
+        <label class="toggle"><input type="checkbox" id="pp-ocultar"> Ocultar da escala e da folha enquanto estiver ${ehViatura(p) ? "em FA" : "fechado"}</label>
         <p class="dica">Quem estiver escalado aqui vai para <b>À disposição</b>, para ser remanejado.</p></div>`}
       ${ehViatura(p) && !fa ? `<div class="bloco"><b>Usar outra viatura neste dia</b>${(() => { const lv = viaturasLivres(p, cd);
         return (data.frota || []).length ? `<p class="dica">Disponíveis (QAP na aba Viaturas e sem guarnição hoje):</p><div class="vtr-livres">${lv.length ? lv.slice(0, 16).map((v) => `<button class="chip-vtr" data-act="pp-usar" data-pref="${esc(v.prefixo)}" title="${esc(v.modelo)}${v.finalidade ? " · " + esc(v.finalidade) : ""}"><b>${esc(v.prefixo)}</b> <span>${esc(v.modelo || "")}</span></button>`).join("") : `<span class="meta">Nenhuma viatura livre na frota hoje.</span>`}</div>` : `<p class="dica">Cadastre a frota na aba Viaturas para ver aqui as disponíveis.</p>`; })()}<div class="linha"><label>Número <input id="pp-prefixo" inputmode="numeric" placeholder="ex.: 1290" value="${esc(aj.prefixo ? aj.prefixo.nome.replace(/^\D+/, "") : "")}" size="8"></label>
@@ -3989,7 +3994,10 @@ function itensPosto(p) {
   return [
     { t: `Editar ${ehViatura(p) ? "viatura" : "posto"} neste dia…`, act: "mn-posto", d: { aba: "dia" }, padrao: true },
     fa ? { t: "Voltar a funcionar a partir de hoje", act: "mn-reabrir", d: { oc: fa.id } }
-      : { t: ehViatura(p) ? "Pôr em manutenção (FA) hoje" : "Fechar o posto hoje", act: "mn-fechar", d: { tipo: ehViatura(p) ? "FA" : "FECHADO" } },
+      : { t: ehViatura(p) ? "Pôr em manutenção (FA) hoje" : "Fechar o posto hoje", sub: [
+        { t: ehViatura(p) ? "Mostrar como FA no quadro" : "Mostrar como FECHADO na escala", act: "mn-fechar", d: { tipo: ehViatura(p) ? "FA" : "FECHADO" }, padrao: true },
+        { t: "Ocultar da escala e da folha", act: "mn-fechar", d: { tipo: ehViatura(p) ? "FA" : "FECHADO", oculto: "1" } }] },
+    ...(fa ? [{ t: fa.oculto ? "Mostrar de novo na escala e na folha" : "Ocultar da escala e da folha", act: "mn-ocultar", d: { oc: fa.id } }] : []),
     ...(ehViatura(p) && !fa ? [(() => { const lv = viaturasLivres(p, cd).slice(0, 12);
       return { t: "Usar outra viatura hoje", sub: [...lv.map((v) => ({ t: `${v.prefixo} · ${v.modelo || ""}`, act: "mn-usar-vtr", d: { posto: p.id, pref: String(v.prefixo) } })), ...(lv.length ? [{ sep: true }] : [{ t: (data.frota || []).length ? "Nenhuma livre na frota hoje" : "Frota não cadastrada (aba Viaturas)", act: "ed-nada", desab: true }]), { t: "Digitar o número…", act: "mn-posto", d: { aba: "dia" } }] }; })()] : []),
     { sep: true },
@@ -5335,7 +5343,9 @@ document.addEventListener("click", (e) => {
     case "mn-ficha": { const d = ui.menu.des; fecharMenu(); ui.gm = d.gm; ui.mes = mesDe(ui.dia); ui.view = "ficha"; ui.drawer = null; location.hash = "ficha"; render(); window.scrollTo(0, 0); return; }
     case "mn-req": { const r = el.dataset.req; fecharMenu(); ui.filtroLanc.req = r; ui.view = "lancamentos"; location.hash = "lancamentos"; render(); return; }
     case "mn-posto": { const alvo = ui.menu.alvo, posto = ui.menu.posto; fecharMenu(); abrirPop("posto", alvo, { posto, aba: el.dataset.aba }); return; }
-    case "mn-fechar": { const p = postoPorId(ui.menu.posto), tipo = el.dataset.tipo; fecharMenu(); mudar(`${p.nome} ${tipo === "FA" ? "em manutenção" : "fechado"} neste dia. Quem estava lá foi para À disposição.`, () => data.ocorrencias.push({ id: novoId(), tipo, posto: p.id, de: ui.dia, ate: ui.dia })); return; }
+    case "mn-fechar": { const p = postoPorId(ui.menu.posto), tipo = el.dataset.tipo, oculto = !!el.dataset.oculto; fecharMenu(); mudar(`${p.nome} ${tipo === "FA" ? "em manutenção" : "fechado"} neste dia${oculto ? " e oculto da escala e da folha" : ""}. Quem estava lá foi para À disposição.`, () => data.ocorrencias.push({ id: novoId(), tipo, posto: p.id, de: ui.dia, ate: ui.dia, ...(oculto ? { oculto: true } : {}) })); return; }
+    case "mn-ocultar": case "posto-ocultar": { const oc = data.ocorrencias.find((o) => o.id === el.dataset.oc), p = postoPorId(oc?.posto); fecharMenu(); fecharPop(); if (!oc) return;
+      mudar(oc.oculto ? `${p.nome} volta a aparecer na escala e na folha` : `${p.nome} oculto da escala e da folha`, () => { if (oc.oculto) delete oc.oculto; else oc.oculto = true; }); return; }
     case "mn-reabrir": { const p = postoPorId(ui.menu.posto), oc = data.ocorrencias.find((o) => o.id === el.dataset.oc); fecharMenu(); mudar(`${p.nome} volta a funcionar a partir de ${ddmm(ui.dia)}`, () => encerrarEm(oc, ui.dia)); return; }
     case "mn-mover": {
       const p = postoPorId(ui.menu.posto), d = Number(el.dataset.d), irmaos = data.postos.filter((x) => x.secao === p.secao), viz = irmaos[irmaos.indexOf(p) + d];
@@ -5727,8 +5737,8 @@ document.addEventListener("click", (e) => {
     case "posto-fechar": {
       const s = ui.pop, p = postoPorId(s.posto), ate = $("#pp-ate")?.value || ui.dia, tipo = el.dataset.tipo;
       if (ate < ui.dia) { toast("A data final é anterior ao dia aberto."); return; }
-      fecharPop();
-      mudar(`${p.nome} ${tipo === "FA" ? "em manutenção" : "fechado"} ${ate !== ui.dia ? `até ${ddmm(ate)}` : "neste dia"}. Quem estava lá foi para À disposição.`, () => data.ocorrencias.push({ id: novoId(), tipo, posto: p.id, de: ui.dia, ate }));
+      const oculto = !!$("#pp-ocultar")?.checked; fecharPop();
+      mudar(`${p.nome} ${tipo === "FA" ? "em manutenção" : "fechado"} ${ate !== ui.dia ? `até ${ddmm(ate)}` : "neste dia"}${oculto ? " e oculto da escala e da folha" : ""}. Quem estava lá foi para À disposição.`, () => data.ocorrencias.push({ id: novoId(), tipo, posto: p.id, de: ui.dia, ate, ...(oculto ? { oculto: true } : {}) }));
       return;
     }
     case "posto-reabrir": { const p = postoPorId(ui.pop.posto), oc = data.ocorrencias.find((o) => o.id === el.dataset.oc); fecharPop(); mudar(`${p.nome} volta a funcionar a partir de ${ddmm(ui.dia)}`, () => encerrarEm(oc, ui.dia)); return; }
