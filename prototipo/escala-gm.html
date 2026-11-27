@@ -740,6 +740,8 @@ table.efetivo select:hover, table.efetivo input:hover, table.efetivo select:focu
 table.efetivo tr.limbo td { background: var(--furo-bg); } table.efetivo tr.inativo td { opacity: .6; }
 .ed-chip.on.rem { background: var(--accent); color: #fff; border-color: var(--accent); }
 .oferta-pend { display: block; width: 100%; margin-top: .2rem; border: 1px dashed #f08c00; background: #fff1db; color: #b35c00; border-radius: 5px; padding: .25rem .35rem; text-align: left; font: 600 .75rem var(--f-grid); cursor: pointer; }
+.ex-lista { list-style: none; padding: 0; margin: 0; display: grid; gap: .6rem; } .ex-lista li { border: 1px solid var(--line); border-radius: 8px; padding: .55rem .7rem; display: grid; gap: .35rem; }
+.ex-lista select { max-width: 16rem; }
 /* finalizar escala e controle de HE */
 .btn.fin { border-color: var(--accent); color: var(--accent); font-weight: 600; padding: .2rem .6rem; }
 .fin-ok { color: var(--ok, #2e7d32); font-weight: 600; } .fin-ok .link { font-weight: 400; margin-left: .3rem; }
@@ -1964,7 +1966,7 @@ const mesAnterior = (m) => { const [y, mm] = m.split("-").map(Number); return mm
 const equipe = (id) => data.equipes.find((e) => e.id === id);
 const opcoesGm = (sel = "", filtro = () => true) => [...data.gms].filter(filtro).sort((a, b) => a.nome.localeCompare(b.nome))
   .map((g) => `<option value="${g.id}" ${g.id === sel ? "selected" : ""}>${esc(g.nome)} · ${g.equipe}</option>`).join("");
-const opcoesPosto = (sel = "") => data.secoes.map((s) => `<optgroup label="${esc(s.nome)}">${data.postos.filter((p) => p.secao === s.id && (p.ativo !== false || p.id === sel))
+const opcoesPosto = (sel = "") => data.secoes.map((s) => `<optgroup label="${esc(s.nome)}">${data.postos.filter((p) => p.secao === s.id && !p.apagado && (p.ativo !== false || p.id === sel))
   .map((p) => `<option value="${p.id}" ${p.id === sel ? "selected" : ""}>${esc(p.nome)}${p.sub ? " · " + esc(p.sub) : ""}${p.ativo === false ? " (excluído)" : ""}</option>`).join("")}</optgroup>`).join("");
 function rotuloLotacao(g) {
   if (!g.lotacao) return "sem lotação";
@@ -2192,6 +2194,7 @@ function vDrawer() {
   if (d.tipo === "gmnovo") return drawerGmNovo(d);
   if (d.tipo === "resetdia") return drawerResetDia(d);
   if (d.tipo === "operacao") return drawerOperacao(d);
+  if (d.tipo === "excluidos") return drawerExcluidos(d);
   if (d.tipo === "folgasmud") return drawerFolgasMud();
   return "";
 }
@@ -2227,6 +2230,23 @@ function drawerOperacao(d) {
     <button class="btn pri largo" data-act="op-salvar">${s ? "Salvar operação" : "Criar operação"}</button>
     ${s ? `<p class="dica">Para excluir a operação, clique com o botão direito no nome dela no quadro › Excluir seção.</p>` : ""}
   </div></div>`;
+}
+// ---------- POSTOS EXCLUÍDOS ----------
+// Reativar, passar os GMs que ainda estão lotados nele para outro posto, ou tirar da lista de vez
+const postosExcluidos = () => data.postos.filter((p) => p.ativo === false && !p.apagado && !p.so && !p.de);
+const lotadosEm = (postoId, dia) => data.gms.filter((g) => g.ativo !== false && vigente(g, dia).lotacao?.posto === postoId);
+function drawerExcluidos() {
+  const dia = ui.padrao?.desde || ui.dia, ex = postosExcluidos();
+  const ativos = data.postos.filter((p) => p.ativo !== false && !p.so && !p.de);
+  return `<div class="dw-head"><div><p class="eyebrow">Cadastro</p><h2>Postos e viaturas excluídos</h2>
+    <p class="meta">Excluídos não aparecem na escala. Quem ainda estiver lotado num deles fica "sem posto" — passe para outro posto ou reative.</p></div>
+    <button class="ic" data-act="fechar" aria-label="Fechar">×</button></div>
+  <div class="dw-body">${ex.length ? `<ul class="ex-lista">${ex.map((p) => { const lot = lotadosEm(p.id, dia), igual = ativos.find((x) => norm(x.nome) === norm(p.nome));
+    return `<li><div class="ex-cab"><b>${esc(p.nome)}</b>${p.sub ? ` <span class="meta">${esc(p.sub)}</span>` : ""} <span class="meta">· ${esc(data.secoes.find((x) => x.id === p.secao)?.nome || "")}</span></div>
+      ${lot.length ? `<p class="aviso-mini">${lot.length} GM${lot.length === 1 ? "" : "s"} ainda lotado${lot.length === 1 ? "" : "s"} aqui: ${lot.map((g) => esc(g.nome)).join(", ")}</p>
+        <div class="linha"><select data-ex-dest="${p.id}">${ativos.map((x) => `<option value="${x.id}" ${igual?.id === x.id ? "selected" : ""}>${esc(x.nome)}${x.sub ? " · " + esc(x.sub) : ""}</option>`).join("")}</select><button class="btn" data-act="ex-passar" data-posto="${p.id}">Passar para este posto</button></div>` : `<p class="meta">Ninguém lotado aqui.</p>`}
+      <div class="linha"><button class="btn" data-act="ex-reativar" data-posto="${p.id}">Reativar</button>${lot.length ? "" : `<button class="link perigo-txt" data-act="ex-apagar" data-posto="${p.id}">Apagar da lista</button>`}</div></li>`; }).join("")}</ul>`
+    : `<p class="tudo-ok">Nenhum posto excluído.</p>`}</div>`;
 }
 // ---------- RESET DAS ALTERAÇÕES DO DIA ----------
 // Só o que foi mexido no próprio dia (HE, BH+, horário, remanejamento, função, ajustes do posto, inspetor, extras).
@@ -4469,6 +4489,7 @@ function vPadroes() {
       <thead><tr><th>POSTO</th><th class="dia">DIA (2º e 3º turno)</th><th class="noite">NOITE (4º e 1º turno)</th></tr></thead><tbody>${corpo}</tbody></table></div>`;
   }
   return `<div class="pad-fixo"><div class="faixa-modelo"><b>Modelo da escala</b><span>Aqui você muda o <u>padrão</u>: vale para <b style="all:unset;font-weight:700">todos os dias a partir de ${ddmm(pd.desde)}</b>. Para mexer só num dia, use o Quadro do dia.</span><a class="link" href="#quadro" data-nav="quadro">ir para o Quadro do dia</a></div><div class="barra"><div class="datas"><button class="ic" data-act="pad-mes" data-n="-1" aria-label="Mês anterior">‹</button><h2 class="titulo-mes">${nomeMes(mes)}</h2><button class="ic" data-act="pad-mes" data-n="1" aria-label="Próximo mês">›</button></div>
+    ${postosExcluidos().length ? `<button class="link" data-act="ex-abrir">Postos excluídos (${postosExcluidos().length})</button>` : ""}
     <label class="desde">Mudanças valem a partir de <input type="date" id="pad-desde" value="${pd.desde}"></label></div>
   <div class="abas-pad" role="tablist">${abas.map(([k, t]) => `<button role="tab" aria-selected="${pd.aba === k}" data-act="pad-aba" data-aba="${k}">${t}</button>`).join("")}
     ${pd.aba === "inspetores" ? "" : `<span class="add-gm"><button class="btn" data-act="pad-novo">+ Posto / viatura / seção</button><button class="btn pri" data-act="pad-novo-gm">+ Adicionar GM${pd.aba === "semanal" ? " na semanal" : ""}</button></span>`}</div></div>
@@ -5046,6 +5067,16 @@ document.addEventListener("click", (e) => {
     case "disp-reativar": { const p = postoPorId(el.dataset.posto); fecharMenu(); mudar(`${p.nome} reativada: a guarnição volta para ela`, () => { delete p.ativo; }); return; }
     case "disp-voltar": { const d = ui.menu.des, p = postoPorId(el.dataset.posto); fecharMenu(); mudar(`${nomeGm(d.gm)} voltou para ${p.nome}`, () => data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: d.gm, de: ui.dia, ate: ui.dia, posto: p.id, ficaNaFA: true })); return; }
     case "disp-ir": { const d = ui.menu.des, p = postoPorId(el.dataset.posto); fecharMenu(); mudar(`${nomeGm(d.gm)} saiu de À disposição para ${p.nome}`, () => data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: d.gm, de: ui.dia, ate: ui.dia, posto: p.id })); return; }
+    case "ex-abrir": ui.drawer = { tipo: "excluidos" }; render(); return;
+    case "ex-reativar": { const p = postoPorId(el.dataset.posto); mudar(`${p.nome} reativado`, () => { delete p.ativo; }); return; }
+    case "ex-apagar": { const p = postoPorId(el.dataset.posto); mudar(`${p.nome} tirado da lista (o histórico continua)`, () => { p.apagado = true; }); return; }
+    case "ex-passar": {
+      const p = postoPorId(el.dataset.posto), dest = postoPorId(document.querySelector(`[data-ex-dest="${p.id}"]`).value), dia = ui.padrao?.desde || ui.dia, lot = lotadosEm(p.id, dia);
+      mudar(`${lot.length} GM${lot.length === 1 ? "" : "s"} de ${p.nome} passa${lot.length === 1 ? "" : "m"} para ${dest.nome} a partir de ${ddmm(dia)}`, () => {
+        for (const g of lot) { const antes = vigente(g, somaDias(dia, -1)); g.historico = [...(g.historico || []).filter((h) => h.ate < somaDias(dia, -1)), { ate: somaDias(dia, -1), equipe: antes.equipe, lotacao: antes.lotacao, dias: antes.dias }]; g.lotacao = { ...g.lotacao, posto: dest.id }; }
+      });
+      return;
+    }
     case "rst-abrir": ui.drawer = { tipo: "resetdia", fora: [] }; render(); return;
     case "rst-ok": {
       const fora = new Set(ui.drawer.fora || []), { ocs, extras } = alteracoesDoDia(ui.dia);
