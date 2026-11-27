@@ -423,3 +423,12 @@ test("vaga de grupamento: os GMs do grupamento aparecem primeiro nas sugestões"
   assert.equal(s[0]?.gm.id, "n");
   assert.match(s[0].notas.join(), /do MOTOS · GESCOM/);
 });
+
+test("posto só de um padrão: nos dias do outro padrão não existe (sem furo)", () => {
+  const data = base();
+  data.postos.push({ id: "so1", nome: "VTR SÓ D1", vagas: { t2: 1, t3: 1 }, equipes: ["D1"] });
+  data._versao++;
+  const d1 = diaDe(data, "D1"), d2 = diaDe(data, "D2");
+  assert.ok(calcularDia(data, d1).furos.some((f) => f.posto === "so1"));
+  assert.ok(!calcularDia(data, d2).furos.some((f) => f.posto === "so1"));
+});

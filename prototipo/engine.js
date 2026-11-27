@@ -241,7 +241,7 @@ export function calcularDia(data, dia) {
   // 6. Viatura fora de atividade: guarnição vai para "à disposição"
   const fa = new Map();
   for (const oc of ocs.filter((o) => o.tipo === "FA" || o.tipo === "FECHADO")) fa.set(oc.posto, oc);
-  for (const p of data.postos) if (!postoAtivoEm(p, dia)) fa.set(p.id, { tipo: "INATIVO", posto: p.id, de: dia }); // extras de um dia ("so") e de operação (de/ate)
+  for (const p of data.postos) if (!postoAtivoEm(p, dia) || (p.equipes?.length && !p.equipes.some((e) => equipesHoje.includes(e)))) fa.set(p.id, { tipo: "INATIVO", posto: p.id, de: dia }); // só de um padrão; extras de um dia ("so") e de operação (de/ate)
   // ajustes do dia em postos: viatura substituta e vagas diferentes
   const ajustesPosto = new Map();
   for (const oc of ocs.filter((o) => o.tipo === "PREFIXO" || o.tipo === "VAGAS" || o.tipo === "AREA")) {

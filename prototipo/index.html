@@ -372,7 +372,7 @@ button.eq:hover { border-color: var(--accent); }
 .mn-seta { font-size: 1rem; line-height: 1; }
 .mn-sep { height: 1px; background: var(--line); margin: 4px 6px; }
 .mn-sub { position: relative; }
-.mn-fly { display: none; position: absolute; left: calc(100% + 2px); top: -5px; min-width: 14rem; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 6px; padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,.22); }
+.mn-fly { display: none; position: absolute; left: calc(100% + 2px); top: -5px; min-width: 14rem; max-height: 70vh; overflow-y: auto; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 6px; padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,.22); }
 .menu.abre-esq .mn-fly { left: auto; right: calc(100% + 2px); }
 @media (hover: hover) { .mn-sub:hover > .mn-fly { display: block; } }
 .mn-sub.aberto > .mn-fly, .mn-sub:focus-within > .mn-fly { display: block; }
@@ -739,6 +739,31 @@ table.efetivo tr.limbo td { background: var(--furo-bg); } table.efetivo tr.inati
 .transp-t { max-width: 520px; } .transp-t input { width: 5rem; text-align: right; font: inherit; font-family: var(--f-num); padding: .15rem .3rem; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface); color: inherit; }
 .transp-ok { margin: 0 0 .6rem; color: var(--ok); font-weight: 600; font-size: .85rem; }
 .lembretes li { line-height: 1.55; } .lembretes .ver-todos { font-weight: 700; margin-left: .2rem; } .lembretes small.meta { font-size: .72rem; }
+/* reordenar arrastando */
+.alca { cursor: grab; color: var(--muted); opacity: .35; padding: 0 .2rem; user-select: none; font-size: .9rem; vertical-align: middle; }
+tr:hover > th > .alca { opacity: .9; } .alca:active { cursor: grabbing; }
+th.posto { white-space: normal; } th.posto > .alca { float: left; margin-top: .25rem; }
+@media print { .alca { display: none; } }
+body.ordenando tr.drop-antes > * { box-shadow: inset 0 3px 0 var(--accent); }
+/* buscar GM */
+.bg-in { width: 100%; box-sizing: border-box; font: inherit; font-size: 1rem; padding: .45rem .6rem; border: 1px solid var(--line-strong); border-radius: 6px; margin-bottom: .5rem; background: var(--surface); color: inherit; }
+.bg-lista { list-style: none; margin: 0; padding: 0; display: grid; gap: .25rem; } .bg-lista .pessoa { width: 100%; text-align: left; display: grid; }
+.bg-card { display: grid; gap: .45rem; } .bg-cab { display: flex; align-items: center; gap: .4rem; } .bg-nome { font-size: 1.1rem; }
+.bg-onde { background: var(--accent-soft); border-left: 4px solid var(--accent); padding: .35rem .55rem; border-radius: 6px; } .bg-onde.fora { background: var(--warn-bg); border-left-color: var(--warn); }
+.bg-dl { display: grid; grid-template-columns: auto 1fr; gap: .15rem .7rem; margin: 0; font-size: .85rem; } .bg-dl dt { color: var(--muted); } .bg-dl dd { margin: 0; }
+.piscar { animation: piscar 0.6s ease-in-out 4; outline: 3px solid var(--gm-ouro, #d4af37); outline-offset: 2px; }
+@keyframes piscar { 50% { outline-color: transparent; } }
+fieldset.np-padrao{border:1px solid var(--borda,#ccd);border-radius:8px;padding:6px 10px;margin:8px 0;display:grid;gap:4px}
+fieldset.np-padrao legend{font-weight:600;font-size:.85rem;padding:0 4px}
+.selo-so-pad{display:inline-block;margin-left:6px;font-size:.68rem;font-weight:700;padding:1px 6px;border-radius:9px;background:#efe6ff;color:#5b2ea6;vertical-align:middle}
+tr.grupo-vazio th.posto,tr.grupo-vazio td{opacity:.7}
+.np-ref { border-left: 3px solid var(--accent); padding-left: .6rem; margin: .3rem 0; }
+.np-dias { display: flex; flex-wrap: wrap; gap: .25rem .4rem; margin: .3rem 0; } .np-dias .dia-chk { font-size: .8rem; white-space: nowrap; }
+.np-ref .np-hr { display: flex !important; align-items: center; gap: .35rem; } .np-ref .np-hr input { width: 4.6rem; text-align: center; }
+.np-ref #np-n { width: 3.5rem; }
+fieldset.np-padrao label.toggle { display: flex; align-items: flex-start; gap: .45rem; font-size: .85rem; color: var(--ink); }
+fieldset.np-padrao input[type=radio] { margin-top: .2rem; flex: none; }
+fieldset.np-padrao legend { text-transform: none; letter-spacing: 0; }
 /* finalizar escala e controle de HE */
 .btn.fin { border-color: var(--accent); color: var(--accent); font-weight: 600; padding: .2rem .6rem; }
 .fin-ok { color: var(--ok, #2e7d32); font-weight: 600; } .fin-ok .link { font-weight: 400; margin-left: .3rem; }
