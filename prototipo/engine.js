@@ -156,8 +156,12 @@ export function calcularDia(data, dia) {
     if (!lot) continue;
     // horário que alterna: em dias de certas equipes (ex.: padrão par) o semanal cumpre outro horário
     const segs = lot.alternativa && lot.alternativa.quando.some((e) => equipesHoje.includes(e)) ? lot.alternativa.segmentos : lot.segmentos;
+    let ultimoFim = null;
     for (const s of segs) {
-      const [ini, fim] = intervalo(s.ini, s.fim);
+      let [ini, fim] = intervalo(s.ini, s.fim);
+      // trecho depois da meia-noite de um serviço noturno (ex.: 18–06 + HE 06–07): é na manhã seguinte
+      if (ultimoFim !== null && ini < ultimoFim && ini + 1440 >= ultimoFim) { ini += 1440; fim += 1440; }
+      ultimoFim = fim;
       base.push({ id: `b${seq++}`, gm: gm.id, posto: lot.posto, funcao: lot.funcao || "", ini, fim,
         nat: s.tipo === "he" ? "he" : "normal", fixa: s.tipo === "he", req: s.tipo === "he" ? "HE fixa" : "", origem: "base" });
     }
@@ -213,6 +217,7 @@ export function calcularDia(data, dia) {
     for (const d of des) {
       if (d.gm !== oc.gm || d.nat === "he" || sobrepoe(d.ini, d.fim, ra, rb) <= 0) { novos.push(d); continue; }
       const mover = (x) => {
+        if (oc.ficaNaFA) x.ficaNaFA = true; // voltou para a própria viatura mesmo em FA
         x.posto = oc.posto; if (oc.funcao) x.funcao = oc.funcao; x.remanejado = true; x.remanej = oc.id;
         x.req = oc.req || x.req || "";
         if (oc.obs && !OBS_AUTO_REMANEJ.has(oc.obs)) x.obs = oc.obs;
@@ -244,7 +249,7 @@ export function calcularDia(data, dia) {
     if (oc.tipo === "PREFIXO") a.prefixo = oc; else if (oc.tipo === "AREA") a.area = oc; else a.vagas = oc;
     ajustesPosto.set(oc.posto, a);
   }
-  for (const d of des) if (d.posto && fa.has(d.posto)) { d.postoOriginal = d.posto; d.posto = null; }
+  for (const d of des) if (d.posto && fa.has(d.posto) && !(d.ficaNaFA && fa.get(d.posto).tipo !== "INATIVO")) { d.postoOriginal = d.posto; d.posto = null; }
 
   // 6b. Função no dia (motorista / patrulheiro) só para aquele dia
   for (const oc of ocs.filter((o) => o.tipo === "FUNCAO")) for (const d of des) if (d.gm === oc.gm && d.nat !== "he") d.funcao = oc.funcao || "";

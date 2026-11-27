@@ -400,3 +400,12 @@ test("quem se ofereceu para HE no sistema de folgas vem antes no mesmo grupo", (
   assert.ok(ids.indexOf("o2") < ids.indexOf("o1"));
   assert.match(s.find((x) => x.gm.id === "o2").notas.join(), /se ofereceu/);
 });
+
+test("serviço noturno com HE fixa depois da meia-noite (18–06 + 06–07): a HE é na manhã seguinte", () => {
+  const data = base();
+  data.gms.find((g) => g.id === "n").lotacao.segmentos = [{ ini: "18:00", fim: "06:00" }, { ini: "06:00", fim: "07:00", tipo: "he" }];
+  data._versao++;
+  const d = diaDe(data, "N1");
+  const ds = calcularDia(data, d).designacoes.filter((x) => x.gm === "n").map((x) => [x.ini, x.fim, x.nat]);
+  assert.deepEqual(ds, [[1080, 1800, "normal"], [1800, 1860, "he"]]);
+});

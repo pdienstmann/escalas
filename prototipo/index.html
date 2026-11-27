@@ -703,6 +703,29 @@ table.quadro td:has(> button.furo.oferecida) { background: #fff1db; }
 #ed-lista li.marcado { background: #fff1db; } #ed-lista .caixa { margin-right: .35rem; color: #f08c00; }
 .oferta-st { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .7rem; background: #fff1db; border-left: 4px solid #f08c00; border-radius: 6px; padding: .35rem .6rem; margin: .3rem 0; font-size: .85rem; }
 .of-tit { font-weight: 700; color: #b35c00; width: 100%; } .of-gm { display: inline-flex; gap: .35rem; align-items: center; } .btn.of-sim { background: var(--ok); color: #fff; border-color: var(--ok); }
+/* cabeçalho: brasão centralizado na altura das duas linhas (comando + abas) */
+@media (min-width: 900px) {
+  header.app { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "marca cmd ferr exemplo" "marca abas abas abas"; column-gap: 1.1rem; row-gap: .35rem; align-items: center; }
+  header.app .marca { grid-area: marca; align-self: center; padding-right: .4rem; border-right: 1px solid rgba(255,255,255,.18); }
+  header.app nav.abas { grid-area: abas; } header.app .cmd { grid-area: cmd; } header.app .ferr { grid-area: ferr; } header.app .exemplo { grid-area: exemplo; }
+  header.app .marca .escudo { width: 40px; height: 46px; } header.app .marca .escudo:has(img) { width: 48px; height: 48px; }
+}
+.marca .escudo:has(img) { display: flex; align-items: center; justify-content: center; }
+/* sugestões do campo Lançar: texto escuro dentro da caixa branca (o cabeçalho é azul) */
+header.app .cmd-prev { color: var(--ink); }
+.fa-guarn { display: inline-flex; flex-wrap: wrap; gap: .3rem; vertical-align: middle; } .fa-guarn .chip { width: auto; background: var(--surface); border-color: var(--line); }
+.modelos-hf { display: flex; flex-wrap: wrap; gap: .3rem; align-items: center; margin: .2rem 0 .3rem; } .modelos-hf .rot { font-size: .75rem; color: var(--muted); margin-right: .2rem; }
+/* ===== quadro: seções e postos bem separados, sem poluir ===== */
+table.quadro tr.secao th { padding-top: 1.1rem; padding-bottom: .45rem; font-size: .78rem; letter-spacing: .1em; border-top: 2px solid var(--line-strong); }
+table.quadro tr.secao:first-child th, table.quadro thead + tbody tr.secao:first-child th { border-top: 0; }
+table.quadro tbody tr:not(.secao) > * { border-bottom: 1px solid var(--line); }
+table.quadro tbody tr.alt > td { background-image: linear-gradient(rgba(23,33,45,.035), rgba(23,33,45,.035)); }
+table.quadro tbody tr.alt > th.posto { background: color-mix(in srgb, var(--surface) 94%, var(--ink)); }
+table.quadro th.posto { border-left: 3px solid transparent; }
+table.quadro tr.tipo-vtr > th.posto { border-left-color: var(--accent); } table.quadro tr.tipo-moto > th.posto { border-left-color: #0b7285; }
+table.quadro tr.tipo-reserva > th.posto { border-left-color: var(--res-bg); }
+table.quadro tbody tr:not(.secao):hover > td, table.quadro tbody tr:not(.secao):hover > th.posto { background-image: linear-gradient(rgba(26,86,184,.06), rgba(26,86,184,.06)); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) table.quadro tbody tr.alt > td { background-image: linear-gradient(rgba(255,255,255,.03), rgba(255,255,255,.03)); } }
 /* finalizar escala e controle de HE */
 .btn.fin { border-color: var(--accent); color: var(--accent); font-weight: 600; padding: .2rem .6rem; }
 .fin-ok { color: var(--ok, #2e7d32); font-weight: 600; } .fin-ok .link { font-weight: 400; margin-left: .3rem; }

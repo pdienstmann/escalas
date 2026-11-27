@@ -710,6 +710,29 @@ table.quadro td:has(> button.furo.oferecida) { background: #fff1db; }
 #ed-lista li.marcado { background: #fff1db; } #ed-lista .caixa { margin-right: .35rem; color: #f08c00; }
 .oferta-st { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .7rem; background: #fff1db; border-left: 4px solid #f08c00; border-radius: 6px; padding: .35rem .6rem; margin: .3rem 0; font-size: .85rem; }
 .of-tit { font-weight: 700; color: #b35c00; width: 100%; } .of-gm { display: inline-flex; gap: .35rem; align-items: center; } .btn.of-sim { background: var(--ok); color: #fff; border-color: var(--ok); }
+/* cabeçalho: brasão centralizado na altura das duas linhas (comando + abas) */
+@media (min-width: 900px) {
+  header.app { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "marca cmd ferr exemplo" "marca abas abas abas"; column-gap: 1.1rem; row-gap: .35rem; align-items: center; }
+  header.app .marca { grid-area: marca; align-self: center; padding-right: .4rem; border-right: 1px solid rgba(255,255,255,.18); }
+  header.app nav.abas { grid-area: abas; } header.app .cmd { grid-area: cmd; } header.app .ferr { grid-area: ferr; } header.app .exemplo { grid-area: exemplo; }
+  header.app .marca .escudo { width: 40px; height: 46px; } header.app .marca .escudo:has(img) { width: 48px; height: 48px; }
+}
+.marca .escudo:has(img) { display: flex; align-items: center; justify-content: center; }
+/* sugestões do campo Lançar: texto escuro dentro da caixa branca (o cabeçalho é azul) */
+header.app .cmd-prev { color: var(--ink); }
+.fa-guarn { display: inline-flex; flex-wrap: wrap; gap: .3rem; vertical-align: middle; } .fa-guarn .chip { width: auto; background: var(--surface); border-color: var(--line); }
+.modelos-hf { display: flex; flex-wrap: wrap; gap: .3rem; align-items: center; margin: .2rem 0 .3rem; } .modelos-hf .rot { font-size: .75rem; color: var(--muted); margin-right: .2rem; }
+/* ===== quadro: seções e postos bem separados, sem poluir ===== */
+table.quadro tr.secao th { padding-top: 1.1rem; padding-bottom: .45rem; font-size: .78rem; letter-spacing: .1em; border-top: 2px solid var(--line-strong); }
+table.quadro tr.secao:first-child th, table.quadro thead + tbody tr.secao:first-child th { border-top: 0; }
+table.quadro tbody tr:not(.secao) > * { border-bottom: 1px solid var(--line); }
+table.quadro tbody tr.alt > td { background-image: linear-gradient(rgba(23,33,45,.035), rgba(23,33,45,.035)); }
+table.quadro tbody tr.alt > th.posto { background: color-mix(in srgb, var(--surface) 94%, var(--ink)); }
+table.quadro th.posto { border-left: 3px solid transparent; }
+table.quadro tr.tipo-vtr > th.posto { border-left-color: var(--accent); } table.quadro tr.tipo-moto > th.posto { border-left-color: #0b7285; }
+table.quadro tr.tipo-reserva > th.posto { border-left-color: var(--res-bg); }
+table.quadro tbody tr:not(.secao):hover > td, table.quadro tbody tr:not(.secao):hover > th.posto { background-image: linear-gradient(rgba(26,86,184,.06), rgba(26,86,184,.06)); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) table.quadro tbody tr.alt > td { background-image: linear-gradient(rgba(255,255,255,.03), rgba(255,255,255,.03)); } }
 /* finalizar escala e controle de HE */
 .btn.fin { border-color: var(--accent); color: var(--accent); font-weight: 600; padding: .2rem .6rem; }
 .fin-ok { color: var(--ok, #2e7d32); font-weight: 600; } .fin-ok .link { font-weight: 400; margin-left: .3rem; }
@@ -1009,8 +1032,12 @@ function calcularDia(data, dia) {
     if (!lot) continue;
     // horário que alterna: em dias de certas equipes (ex.: padrão par) o semanal cumpre outro horário
     const segs = lot.alternativa && lot.alternativa.quando.some((e) => equipesHoje.includes(e)) ? lot.alternativa.segmentos : lot.segmentos;
+    let ultimoFim = null;
     for (const s of segs) {
-      const [ini, fim] = intervalo(s.ini, s.fim);
+      let [ini, fim] = intervalo(s.ini, s.fim);
+      // trecho depois da meia-noite de um serviço noturno (ex.: 18–06 + HE 06–07): é na manhã seguinte
+      if (ultimoFim !== null && ini < ultimoFim && ini + 1440 >= ultimoFim) { ini += 1440; fim += 1440; }
+      ultimoFim = fim;
       base.push({ id: `b${seq++}`, gm: gm.id, posto: lot.posto, funcao: lot.funcao || "", ini, fim,
         nat: s.tipo === "he" ? "he" : "normal", fixa: s.tipo === "he", req: s.tipo === "he" ? "HE fixa" : "", origem: "base" });
     }
@@ -1066,6 +1093,7 @@ function calcularDia(data, dia) {
     for (const d of des) {
       if (d.gm !== oc.gm || d.nat === "he" || sobrepoe(d.ini, d.fim, ra, rb) <= 0) { novos.push(d); continue; }
       const mover = (x) => {
+        if (oc.ficaNaFA) x.ficaNaFA = true; // voltou para a própria viatura mesmo em FA
         x.posto = oc.posto; if (oc.funcao) x.funcao = oc.funcao; x.remanejado = true; x.remanej = oc.id;
         x.req = oc.req || x.req || "";
         if (oc.obs && !OBS_AUTO_REMANEJ.has(oc.obs)) x.obs = oc.obs;
@@ -1097,7 +1125,7 @@ function calcularDia(data, dia) {
     if (oc.tipo === "PREFIXO") a.prefixo = oc; else if (oc.tipo === "AREA") a.area = oc; else a.vagas = oc;
     ajustesPosto.set(oc.posto, a);
   }
-  for (const d of des) if (d.posto && fa.has(d.posto)) { d.postoOriginal = d.posto; d.posto = null; }
+  for (const d of des) if (d.posto && fa.has(d.posto) && !(d.ficaNaFA && fa.get(d.posto).tipo !== "INATIVO")) { d.postoOriginal = d.posto; d.posto = null; }
 
   // 6b. Função no dia (motorista / patrulheiro) só para aquele dia
   for (const oc of ocs.filter((o) => o.tipo === "FUNCAO")) for (const d of des) if (d.gm === oc.gm && d.nat !== "he") d.funcao = oc.funcao || "";
@@ -2010,7 +2038,7 @@ function chip(d, t, junto) {
   const reserva = postoPorId(d.posto)?.tipo === "reserva" ? "reserva" : "";
   return `<button class="chip ${cls || ""} ${reserva} ${d.conflito ? "conflito" : ""} ${d.alterado && ultimo ? "alterado" : ""}" data-act="card" data-des="${d.id}" title="Clique para mudar horário, REQ, observação ou trocar o GM">
     <span class="nm">${esc(g?.nome)}</span>${d.funcao && (emVtr(d.posto) || !ICO_FUNCAO[d.funcao]) ? `<span class="fn${ICO_FUNCAO[d.funcao] ? " fn-ico" : ""}" title="${esc(d.funcao)} · botão direito › Função para mudar">${ICO_FUNCAO[d.funcao] || esc(d.funcao.slice(0, 3).toUpperCase())}</span>` : ""}
-    <span class="hr" ${junto ? `data-junto="${junto.he.id}"` : ""}>${junto ? `${textoCelula(d, t).split("/")[0]}/${fmtHm(junto.he.fim)}` : textoCelula(d, t)}</span>${junto ? `<span class="he-num" title="${fmtHoras(junto.total)} de hora extra fixa">${fmtHE(junto.total)}</span>` : ""}${extras.join("")}${d.obs && ultimo ? `<span class="obs" title="${esc(d.obs)}">${esc(d.obs.length > 34 ? d.obs.slice(0, 33) + "…" : d.obs)}</span>` : ""}</button>`;
+    <span class="hr" ${junto ? `data-junto="${junto.he.id}"` : ""}>${junto ? `${textoCelula(d, t).split("/")[0]}/${fmtHm(junto.he.fim)}` : textoCelula(d, t)}</span>${(() => { const n = d.nat === "he" ? 0 : numeroHeNaColuna(d, t, junto, [...(ui.desMap?.values() || [])]); return n ? `<span class="he-num" title="${fmtHoras(n)} de hora extra fixa">${fmtHE(n)}</span>` : ""; })()}${extras.join("")}${d.obs && ultimo ? `<span class="obs" title="${esc(d.obs)}">${esc(d.obs.length > 34 ? d.obs.slice(0, 33) + "…" : d.obs)}</span>` : ""}</button>`;
 }
 function painelAvisos() {
   const as = avisosDoDia(ui.dia), novos = as.filter((o) => !avisoLido(o, ui.dia)), lidos = as.filter((o) => avisoLido(o, ui.dia));
@@ -2048,6 +2076,7 @@ function vQuadro() {
     if (!opNoDia(s, ui.dia)) continue;
     const postos = data.postos.filter((p) => p.secao === s.id && postoDoDia(p, ui.dia));
     let corpo = "";
+    let nLinha = 0;
     for (const p of postos) {
       const furosP = cd.furos.filter((f) => f.posto === p.id);
       if (ui.soFuros && !furosP.length) continue;
@@ -2056,7 +2085,8 @@ function vQuadro() {
       let cels;
       if (faPostos.has(p.id)) {
         const o = faPostos.get(p.id);
-        cels = `<td colspan="4" class="fa-cel"><button class="link" data-act="pop-posto" data-posto="${p.id}">${o.tipo === "FA" ? "Viatura em manutenção (FA)" : "Posto fechado"}${o.ate && o.ate !== o.de ? ` até ${ddmm(o.ate)}` : " neste dia"}</button>${o.obs ? " · " + esc(o.obs) : ""} — quem estava aqui foi para <b>À disposição</b></td>`;
+        const voltaram = desP.filter((d) => d.ficaNaFA);
+        cels = `<td colspan="4" class="fa-cel"><button class="link" data-act="pop-posto" data-posto="${p.id}">${o.tipo === "FA" ? "Viatura em manutenção (FA)" : "Posto fechado"}${o.ate && o.ate !== o.de ? ` até ${ddmm(o.ate)}` : " neste dia"}</button>${o.obs ? " · " + esc(o.obs) : ""}${voltaram.length ? ` — guarnição mantida no posto: <span class="fa-guarn">${voltaram.map((d) => chip(d, TURNOS.find((t) => naColuna(d, t)) || TURNOS[0])).join("")}</span>` : " — quem estava aqui foi para <b>À disposição</b>"}</td>`;
       } else {
         cels = TURNOS.map((t) => {
           const aqui = desP.filter((d) => naColuna(d, t)).sort((a, b) => a.ini - b.ini);
@@ -2073,7 +2103,7 @@ function vQuadro() {
       }
       const aj = cd.ajustesPosto.get(p.id) || {};
       const ninguem = !p.rondas && !faPostos.has(p.id) && !cd.designacoes.some((d) => d.posto === p.id);
-      corpo += `<tr class="${s.grupamento ? "em-grupo" : ""} ${ninguem ? "ninguem" : ""}"><th scope="row" class="posto"><button class="posto-btn" data-act="pop-posto" data-posto="${p.id}" title="Clique para mudar este ${ehViatura(p) ? "viatura" : "posto"}">
+      corpo += `<tr class="${s.grupamento ? "em-grupo" : ""} ${ninguem ? "ninguem" : ""} ${nLinha++ % 2 ? "alt" : ""} tipo-${p.tipo || "posto"}"><th scope="row" class="posto"><button class="posto-btn" data-act="pop-posto" data-posto="${p.id}" title="Clique para mudar este ${ehViatura(p) ? "viatura" : "posto"}">
         <span class="pn">${iconePosto(p)}${esc(nomeNoDia(p, cd))}</span>${subNoDia(p, cd) ? `<span class="ps ${aj.area ? "dia" : ""}">${esc(subNoDia(p, cd))}</span>` : ""}${p.so ? `<span class="tag rem">só neste dia</span>` : ""}${p.obs ? `<span class="po">(${esc(p.obs)})</span>` : ""}
         ${aj.vagas ? `<span class="tag rem" title="Clique no nome para voltar ao normal">${aj.vagas.obs === "vaga dispensada" ? "vaga dispensada hoje" : "vagas do dia alteradas"}</span>` : ""}${(() => { const fv = viaturaNaFrota(numeroDe(nomeNoDia(p, cd))); if (!fv || fv.situacao === "QAP" || faPostos.has(p.id)) return ""; const alt = (data.frota || []).filter((x) => x.situacao === "QAP" && x.modelo === fv.modelo && !guarnicaoNaEscala(x.prefixo, cd)).map((x) => x.prefixo); return `<span class="tag fa-log" title="A logística marcou a ${esc(fv.prefixo)} como ${SIT[fv.situacao][0]}.${alt.length ? ` Livres do mesmo modelo: ${alt.join(", ")}.` : ""} Botão direito › Usar outra viatura hoje.">logística: ${fv.situacao === "FAP" ? "FA perm." : "FA"}</span>`; })()}${ninguem ? `<span class="tag vazio" title="Ninguém escalado neste dia. Botão direito: excluir ou mudar as vagas.">ninguém escalado</span>` : ""}<span class="lapis" aria-hidden="true">✎</span></button></th>${cels}</tr>`;
     }
@@ -2814,7 +2844,7 @@ function vFolha() {
   const insp = (per) => eqs.filter((e) => e.periodo === per).map((e) => (cd.inspetores.has(e.id) ? cd.inspetores.get(e.id) : e.inspetor)).filter(Boolean).join(", ");
   const faPostos = new Map(cd.fa.map((o) => [o.posto, o]));
   const cel = (p, t) => {
-    if (faPostos.has(p.id)) return `<td colspan="2" class="c">${faPostos.get(p.id).tipo === "FA" ? "FA" : "FECHADO"}</td>`;
+    if (faPostos.has(p.id) && !cd.designacoes.some((d) => d.posto === p.id && naColuna(d, t))) return `<td colspan="2" class="c">${faPostos.get(p.id).tipo === "FA" ? "FA" : "FECHADO"}</td>`;
     const todos = cd.designacoes.filter((d) => d.posto === p.id && naColuna(d, t)).sort((a, b) => a.ini - b.ini);
     const { mostrar: aqui, junto } = juntarHeFixa(todos, t, cd.designacoes);
     if (!aqui.length) {
@@ -2825,12 +2855,13 @@ function vFolha() {
     const fixaSo = (d) => d.fixa && !d.recorrente ? "" : d.nat;
     return `<td class="gn">${aqui.map((d) => `<div class="${fixaSo(d)} ${p.tipo === "reserva" ? "reserva" : ""}">${funcaoFolha(d)}${esc(nomeGm(d.gm))}${d.nat === "he" ? (d.fixa ? "" : " HE+") : d.nat === "bh" ? " BH+" : ""}${d.req && !d.fixa ? `<span class="r req-l">REQ ${esc(d.req)}</span>` : ""}</div>`).join("")}</td>
       <td class="gh">${aqui.map((d) => { const j = junto.get(d); const hr = j ? `${textoCelula(d, t).split("/")[0]}/${fmtHm(j.he.fim)}` : textoCelula(d, t);
-        return `<div class="${fixaSo(d)}">(${hr})${j ? ` <span class="r he-n">${fmtHE(j.total)}</span>` : d.recorrente ? ` <span class="r he-n">HE+</span>` : d.fixa ? ` <span class="r he-n">${fmtHE(d.fim - d.ini)}</span>` : ""}</div>`; }).join("")}</td>`;
+        const nHe = d.nat === "he" ? 0 : numeroHeNaColuna(d, t, j, cd.designacoes);
+        return `<div class="${fixaSo(d)}">(${hr})${nHe ? ` <span class="r he-n">${fmtHE(nHe)}</span>` : j ? "" : d.recorrente ? ` <span class="r he-n">HE+</span>` : d.fixa ? ` <span class="r he-n">${fmtHE(d.fim - d.ini)}</span>` : ""}</div>`; }).join("")}</td>`;
   };
   let corpo = "", corpoVerso = "";
   for (const s of data.secoes) {
     if (!opNoDia(s, ui.dia)) continue;
-    const ps = data.postos.filter((p) => p.secao === s.id && postoDoDia(p, ui.dia) && faPostos.get(p.id)?.tipo !== "FA" // viatura em FA não sai na folha
+    const ps = data.postos.filter((p) => p.secao === s.id && postoDoDia(p, ui.dia) && (faPostos.get(p.id)?.tipo !== "FA" || cd.designacoes.some((d) => d.posto === p.id)) // viatura em FA não sai na folha (a não ser que a guarnição fique nela)
       && (p.rondas || faPostos.has(p.id) || cd.designacoes.some((d) => d.posto === p.id) || cd.furos.some((f) => f.posto === p.id))); // nem posto vazio sem vaga
     if (!ps.length) continue;
     const verso = ps.every((p) => p.tipo === "reserva");
@@ -4088,6 +4119,17 @@ document.addEventListener("keydown", (e) => {
 // ---------- HE FIXA COMO NO PADRÃO, ÍCONES, SEÇÕES, ESTENDER ----------
 // "FULANO (13:00/19:00) 3HE": o trecho normal e a HE fixa colada nele aparecem juntos, com o número em vermelho.
 const fmtHE = (min) => `${String(Math.round((min / 60) * 10) / 10).replace(".", ",")}HE`;
+// Serviço que atravessa turnos (ex.: 18–06 + HE fixa 06–07): o número vermelho fica na coluna onde o serviço COMEÇA,
+// e o horário estendido (…/07:00) na coluna onde termina.
+function totalHeFixaColada(d, todas) {
+  if (!todas.some((x) => x.gm === d.gm && x.fixa && !x.recorrente && x.ini === d.fim)) return 0;
+  return todas.filter((x) => x.gm === d.gm && x.fixa && !x.recorrente).reduce((s, x) => s + x.fim - x.ini, 0);
+}
+function numeroHeNaColuna(d, t, junto, todas) {
+  const ps = partesVisuais(d);
+  if (ps.length < 2) return junto?.total || 0;
+  return ps[0].t === t ? totalHeFixaColada(d, todas) : 0;
+}
 function juntarHeFixa(lista, t, todas) {
   const fora = new Set(), junto = new Map();
   for (const he of lista.filter((d) => d.fixa && !d.recorrente)) {
@@ -4277,6 +4319,7 @@ function formHorarioFixo(g, desde) {
     <div class="linha"><label>Escala <select id="hf-eq">${data.equipes.map((e) => `<option value="${e.id}" ${e.id === g.equipe ? "selected" : ""}>${esc(rotuloEquipe(e, desde))}</option>`).join("")}</select></label>
       <label>Função <input id="hf-fn" value="${esc(lot.funcao || "")}" placeholder="Motorista, Patrulheiro…" size="12"></label></div>
     <label>Posto ou viatura <select id="hf-posto">${opcoesPosto(lot.posto)}</select></label>
+    <div class="modelos-hf"><span class="rot">Modelos</span>${modelosHorario().map((m, i) => `<button type="button" class="ed-chip" data-act="hf-modelo" data-i="${i}" title="${esc(m.hor)}${m.he ? ` · ${m.he}HE` : ""}">${esc(m.nome)}</button>`).join("")}<button type="button" class="link" data-act="hf-salvar-modelo">+ salvar este como modelo</button></div>
     <div class="linha"><label class="cresce">Horário <input id="hf-hor" value="${esc(atual.faixas)}" placeholder="ex.: 07-12 13-19" autocomplete="off"></label>
       <label>HE fixa por dia (h) <input id="hf-he" type="number" min="0" max="12" step="0.5" value="${atual.heMin / 60}" size="4"></label></div>
     <div id="hf-dias" class="dias-sem" ${sem ? "" : "hidden"}><span class="rot">Dias</span>${[1, 2, 3, 4, 5, 6, 0].map((n) => `<label class="dia-chk"><input type="checkbox" value="${n}" ${dias.includes(n) ? "checked" : ""}>${DIAS_SEM[n]}</label>`).join("")}</div>
@@ -4299,6 +4342,13 @@ function drawerGmNovo(d) {
     ${formHorarioFixo(g0, ui.padrao?.desde || ui.dia).replace('data-act="hf-salvar">Salvar', 'data-act="ng-salvar">Adicionar')}
   </div>`;
 }
+// Modelos de horário (12h dia, 12h noite, noite com HE fixa no fim…); dá para salvar novos
+const MODELOS_PADRAO = [
+  { nome: "12h dia (07–19)", hor: "07-19", he: 0 }, { nome: "12h noite (19–07)", hor: "19-07", he: 0 },
+  { nome: "Noite 18–06 + 1HE (06–07)", hor: "18-07", he: 1 }, { nome: "Dia 06–18", hor: "06-18", he: 0 },
+  { nome: "Expediente 07–12 · 13–16 + 2HE", hor: "07-12 13-18", he: 2 },
+];
+const modelosHorario = () => [...MODELOS_PADRAO, ...(data.config.modelosHorario || [])];
 function previaHorarioFixo() {
   const el = $("#hf-previa");
   if (!el) return null;
@@ -4507,6 +4557,14 @@ document.addEventListener("click", (e) => {
     }
     case "pad-desativar-ok": { const g = gmPorId(el.dataset.gm); fecharMenu(); mudar(`${g.nome} desativado`, () => { g.ativo = false; }); return; }
     case "pad-add": abrirEditor("padrao", el, { posto: el.dataset.posto, per: el.dataset.per }); return;
+    case "hf-modelo": { const m = modelosHorario()[Number(el.dataset.i)]; $("#hf-hor").value = m.hor; $("#hf-he").value = m.he; previaHorarioFixo(); return; }
+    case "hf-salvar-modelo": {
+      const hor = $("#hf-hor").value.trim(), he = Number($("#hf-he").value || 0);
+      if (!lerFaixas(hor)) { toast("Escreva um horário válido antes (ex.: 18-07)."); return; }
+      const nome = prompt("Nome do modelo", `${hor.replace(/ /g, " · ")}${he ? ` + ${he}HE` : ""}`)?.trim(); if (!nome) return;
+      mudar(`Modelo "${nome}" salvo`, () => { data.config.modelosHorario = [...(data.config.modelosHorario || []), { nome, hor, he }]; });
+      previaHorarioFixo(); return;
+    }
     case "hf-salvar": {
       const g = gmPorId(ui.drawer.gm), r = previaHorarioFixo(), desde = $("#hf-desde").value;
       if (!r) return;
@@ -4905,11 +4963,14 @@ document.addEventListener("click", (e) => {
       const porPosto = new Map(); for (const f of vagas) { if (!porPosto.has(f.posto)) porPosto.set(f.posto, []); porPosto.get(f.posto).push(f.turno); }
       const itens = [...porPosto].sort((a, b) => (a[0] === d.postoOriginal ? -1 : 0) - (b[0] === d.postoOriginal ? -1 : 0)).slice(0, 12)
         .map(([posto, ts]) => ({ t: `Mandar para ${postoPorId(posto).nome} (${ts.map((t) => TURNOS.find((x) => x.id === t).nome.split(" ")[0]).join(" e ")} turno)`, act: "disp-ir", d: { posto } }));
+      const orig = d.postoOriginal && postoPorId(d.postoOriginal), faO = orig && cd.fa.find((o) => o.posto === orig.id);
       abrirMenu([{ t: `${nomeGm(d.gm)} · à disposição ${fmtHm(d.ini)}–${fmtHm(d.fim)}`, act: "ed-nada", desab: true }, { sep: true },
+        ...(orig ? [{ t: `Voltar para ${orig.nome}${faO ? ` (fica marcada ${faO.tipo === "FA" ? "em FA" : "fechada"})` : ""}`, act: "disp-voltar", d: { posto: orig.id } }, { sep: true }] : []),
         ...(itens.length ? itens : [{ t: "Nenhuma vaga aberta no horário dele", act: "ed-nada", desab: true }]),
         { sep: true }, { t: "Também dá para arrastar até qualquer posto", act: "ed-nada", desab: true }], r.left, r.bottom + 2, el, { des: d });
       return;
     }
+    case "disp-voltar": { const d = ui.menu.des, p = postoPorId(el.dataset.posto); fecharMenu(); mudar(`${nomeGm(d.gm)} voltou para ${p.nome}`, () => data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: d.gm, de: ui.dia, ate: ui.dia, posto: p.id, ficaNaFA: true })); return; }
     case "disp-ir": { const d = ui.menu.des, p = postoPorId(el.dataset.posto); fecharMenu(); mudar(`${nomeGm(d.gm)} saiu de À disposição para ${p.nome}`, () => data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: d.gm, de: ui.dia, ate: ui.dia, posto: p.id })); return; }
     case "rst-abrir": ui.drawer = { tipo: "resetdia", fora: [] }; render(); return;
     case "rst-ok": {
