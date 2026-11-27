@@ -2554,6 +2554,10 @@ function atualizarLista() {
     const r = box.getBoundingClientRect(), extra = r.height - lst.getBoundingClientRect().height;
     const cabe = box.classList.contains("cima") ? r.bottom - 8 : innerHeight - r.top - 8;
     if (r.height > cabe) lst.style.maxHeight = Math.max(140, cabe - extra) + "px";
+    // ainda não cabe (tela baixa, muitos filtros): a caixa inteira rola por dentro, sem passar da borda
+    box.style.maxHeight = ""; box.style.overflowY = "";
+    const r2 = box.getBoundingClientRect();
+    if (r2.height > cabe) { box.style.maxHeight = Math.max(200, cabe) + "px"; box.style.overflowY = "auto"; }
   }
   document.getElementById(`ed-op-${ed.sel}`)?.scrollIntoView({ block: "nearest" });
 }
@@ -2565,7 +2569,7 @@ function atualizarRodapeOferta() {
 function escolherEditor(i) {
   const x = ed.lista[i];
   if (!x || x.bloqueado) return;
-  if (ed.oferta) { const s0 = ed.oferta; s0.has(x.gm.id) ? s0.delete(x.gm.id) : s0.add(x.gm.id); atualizarLista(); atualizarRodapeOferta(); $("#ed-in").focus(); return; }
+  if (ed.oferta) { const s0 = ed.oferta; s0.has(x.gm.id) ? s0.delete(x.gm.id) : s0.add(x.gm.id); atualizarRodapeOferta(); atualizarLista(); $("#ed-in").focus(); return; }
   const { modo, d, ctx, el } = ed, X = x.gm.id, reqEd = $("#ed-req")?.value.trim() || "";
   // cobrir vaga com HE: primeiro oferecer (WhatsApp); lançar direto só se ele já confirmou
   if (modo === "add" && x.via !== "rem") {
@@ -3300,7 +3304,7 @@ document.addEventListener("click", (e) => {
     case "ed-oferecer": {
       ed.oferta = new Set();
       const box = $(".ed-lista-box"); if (box && !$("#ed-of-rodape")) box.insertAdjacentHTML("beforeend", `<div id="ed-of-rodape" class="ed-of-rodape"></div>`);
-      el.remove(); atualizarLista(); atualizarRodapeOferta(); $("#ed-in").focus(); return;
+      el.remove(); atualizarRodapeOferta(); atualizarLista(); $("#ed-in").focus(); return;
     }
     case "ed-copiar": case "ed-ofertar": {
       const { posto, turno } = ed.ctx, [vi, vf] = ed.ctx.ini != null ? [ed.ctx.ini, ed.ctx.fim] : intervaloVaga(posto, turno), nat = ed.ctx.nat || "he";
