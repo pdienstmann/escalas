@@ -9,9 +9,9 @@
 | Perfil | Vê | Pode mudar |
 |---|---|---|
 | Escalante (senha `SENHA`) | tudo | tudo |
-| Inspetor de serviço | a folha de qualquer dia já finalizado | nada |
-| Logística | viaturas; a folha de hoje e amanhã, se finalizada | só as viaturas (QAP/FA) |
-| Reserva de armamento | a folha de hoje e amanhã, se finalizada | nada |
+| Inspetor de serviço | a folha dos dias finalizados: anteriores e até 10 dias adiante | nada |
+| Logística | viaturas; a folha de hoje até 10 dias adiante, se finalizada | só as viaturas (QAP/FA) |
+| Reserva de armamento | a folha de hoje até 10 dias adiante, se finalizada | nada |
 
 O escalante define uma senha por setor em **Ajustes → Acessos** (mínimo 6 caracteres). O servidor guarda só o hash
 (PBKDF2, tabela `acessos`) e confere as permissões em cada gravação; quem só visualiza não recebe controle de HE,

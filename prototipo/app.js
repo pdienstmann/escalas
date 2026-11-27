@@ -1055,7 +1055,7 @@ function vFicha() {
 function vFolha() {
   if (soVer() && !diaFinalizado(data, ui.dia)) { // quem só visualiza não vê escala ainda em montagem
     const fins = (data.controle || []).filter((c) => c.tipo === "FECHADO").map((c) => c.dia).sort(), lim = P().dias == null ? "9999" : somaDias(hojeBase(), P().dias);
-    const ult = fins.filter((d) => d <= lim && (P().dias == null || d >= hojeBase())).pop();
+    const ult = fins.filter((d) => d <= lim && (P().passado || d >= hojeBase())).pop();
     return `<div class="barra nao-imprimir"><div class="datas"><button class="ic" data-act="dia" data-n="-1" aria-label="Dia anterior">‹</button><input type="date" id="q-dia" value="${ui.dia}" aria-label="Data"><button class="ic" data-act="dia" data-n="1" aria-label="Próximo dia">›</button></div></div>
       <section class="painel aguardando-fin"><h2>A escala de ${SEMANA[diaSemana(ui.dia)].toLowerCase()} ${ddmm(ui.dia)} ainda não foi finalizada</h2>
       <p>A folha aparece aqui assim que o escalante finalizar a escala deste dia.</p>
@@ -1822,9 +1822,10 @@ const SERVIDOR = typeof window !== "undefined" ? window.ESCALA_SERVIDOR : null;
 const PERFIS = {
   escalante: { nome: "Escalante", views: null, edita: "tudo" },
   // quem só visualiza vê apenas a FOLHA, e só dos dias que o escalante já finalizou
-  inspetor: { nome: "Inspetor de serviço", views: ["folha"], edita: "", dias: null },
-  logistica: { nome: "Logística", views: ["frota", "folha"], edita: "frota", dias: 1 },
-  reserva: { nome: "Reserva de armamento", views: ["folha"], edita: "", dias: 1 },
+  // até 10 dias adiante (se finalizada); o inspetor também vê os dias anteriores
+  inspetor: { nome: "Inspetor de serviço", views: ["folha"], edita: "", dias: 10, passado: true },
+  logistica: { nome: "Logística", views: ["frota", "folha"], edita: "frota", dias: 10 },
+  reserva: { nome: "Reserva de armamento", views: ["folha"], edita: "", dias: 10 },
 };
 const perfilAtual = () => { const p = SERVIDOR?.perfil; return p && p !== "escalante" ? p : ui.perfilTeste || "escalante"; };
 const P = () => PERFIS[perfilAtual()] || PERFIS.escalante;
@@ -1834,7 +1835,7 @@ const podeView = (v) => !P().views || P().views.includes(v);
 function limitarDia() {
   const n = P().dias; if (n == null) return;
   const h = hojeBase(), fim = somaDias(h, n);
-  if (ui.dia < h) ui.dia = h; else if (ui.dia > fim) ui.dia = fim;
+  if (ui.dia < h && !P().passado) ui.dia = h; else if (ui.dia > fim) ui.dia = fim;
   ui.mes = mesDe(ui.dia);
 }
 // ações que quem só visualiza pode usar (navegar, buscar, imprimir)
@@ -1952,7 +1953,7 @@ async function iniciarServidor() {
 // Acessos: uma senha por perfil, definida pelo escalante. A senha nunca volta para a tela (o servidor guarda só o hash).
 function painelAcessos() {
   const ver = Object.entries(PERFIS).filter(([k]) => k !== "escalante");
-  const desc = { inspetor: "vê a folha de qualquer dia já finalizado", logistica: "edita as viaturas (QAP/FA) e vê a folha de hoje e amanhã, se finalizada", reserva: "vê a folha de hoje e amanhã, se finalizada" };
+  const desc = { inspetor: "vê a folha dos dias já finalizados: os anteriores e até 10 dias adiante", logistica: "edita as viaturas (QAP/FA) e vê a folha de hoje a 10 dias adiante, se finalizada", reserva: "vê a folha de hoje a 10 dias adiante, se finalizada" };
   return `<section class="painel ajustes"><h2>Acessos</h2>
     <p class="dica">Cada setor entra com o próprio nome e a senha do setor. Quem entra como inspetor, logística ou reserva <b>não consegue mudar a escala</b>${SERVIDOR ? "" : " (na versão do servidor)"}. Trocar a senha de um setor desconecta quem estava usando a antiga.</p>
     <table class="lanc acessos"><tbody>${ver.map(([k, v]) => `<tr><td><b>${esc(v.nome)}</b><br><span class="meta">${desc[k]}</span></td>
