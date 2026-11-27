@@ -858,6 +858,14 @@ body[data-view="quadro"] main > .barra:first-child, body[data-view="folha"] main
 .tag-res { display: inline-flex; align-items: center; gap: .2rem; font-size: .72rem; background: #ede7fb; color: #4b2a8f; border: 1px solid #c9b8f0; border-radius: 9px; padding: 0 .1rem 0 .45rem; margin-right: .3rem; }
 .tag-res .ic.mini { padding: 0 .25rem; min-width: 0; height: auto; border: 0; background: none; }
 .ocultos.reservadas b { color: #4b2a8f; }
+/* O que falta resolver: cartões do mesmo tamanho, ações numa linha própria */
+.pacoes .btn.hebtn, .pacoes .btn.rem { width: 15.5rem; min-width: 0; }
+.pacoes .btn .nm-l b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pacoes .btn small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pend-extras.pacoes { display: grid; grid-template-columns: repeat(auto-fill, 15.5rem); gap: .4rem; border-left: 0; padding: .2rem 0 0; margin: 0; }
+.pend-acoes { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+.pend-acoes .btn.mini { font-size: .78rem; padding: .2rem .7rem; width: auto; flex: none; display: inline-flex; }
+.pend-acoes .sem-gm { color: var(--muted); }
 /* finalizar escala e controle de HE */
 .btn.fin { border-color: var(--accent); color: var(--accent); font-weight: 600; padding: .2rem .6rem; }
 .fin-ok { color: var(--ok, #2e7d32); font-weight: 600; } .fin-ok .link { font-weight: 400; margin-left: .3rem; }
