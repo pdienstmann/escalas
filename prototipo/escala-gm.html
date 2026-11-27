@@ -1288,10 +1288,11 @@ function calcularDia(data, dia) {
   // 8. Furos: vagas por turno não preenchidas
   // Posto que funciona todos os dias e tem GM da semanal lotado: cada um conta como vaga no horário dele
   // (no fim de semana ele não trabalha e a vaga aparece para cobrir), mesmo que o cadastro não tenha vaga naquele turno.
-  const vagaSemanal = new Map();
+  const vagaSemanal = new Map(), soSemanal = new Map(); // posto -> todos os lotados são da semanal?
   for (const g of data.gms) {
     if (g.ativo === false) continue;
     const v = vigente(g, dia), eq = data.equipes.find((e) => e.id === v.equipe);
+    if (v.lotacao?.posto) soSemanal.set(v.lotacao.posto, (soSemanal.get(v.lotacao.posto) ?? true) && eq?.tipo === "semanal");
     if (eq?.tipo !== "semanal" || !v.lotacao?.posto) continue;
     const segs = (v.lotacao.segmentos || []).map((sg) => intervalo(sg.ini, sg.fim));
     const m = vagaSemanal.get(v.lotacao.posto) || {};
@@ -1300,15 +1301,20 @@ function calcularDia(data, dia) {
   }
   const furos = [];
   for (const p of data.postos) {
-    const ajV = ajustesPosto.get(p.id)?.vagas, impl = !ajV && !p.rondas && !p.dias ? vagaSemanal.get(p.id) : null;
+    const fimDeSemana = [0, 6].includes(diaSemana(dia));
+    const ajV = ajustesPosto.get(p.id)?.vagas, impl = !ajV && !p.rondas && !p.dias && fimDeSemana ? vagaSemanal.get(p.id) : null; // só no fim de semana: nos dias úteis o nº de GMs varia
     if (fa.has(p.id) || !(ajV || p.vagas || impl)) continue;
     if (p.dias && !p.dias.includes(diaSemana(dia))) continue;
+    // departamento de segunda a sexta só com GMs da semanal: o número de GMs varia de um dia para outro, sem furo
+    if (p.dias && p.tipo !== "vtr" && soSemanal.get(p.id)) continue;
     for (const t of TURNOS) {
       const vagas = Math.max((ajV?.vagas || p.vagas || {})[t.id] || 0, impl?.[t.id] || 0);
       if (!vagas) continue;
       // conta quem está no posto por pelo menos metade do turno (18h–06h não cobre o 13–19 por causa de 1h)
       const minimo = Math.min(180, (t.fim - t.ini) / 2);
-      const ocupantes = new Set(des.filter((d) => (d.posto === p.id || d.levouVtr === p.id) && sobrepoe(d.ini, d.fim, t.ini, t.fim) >= minimo).map((d) => d.gm));
+      const somaGm = new Map(); // soma os pedaços do serviço de cada GM (07–12 + 12:30–15:30 + 15:30–18)
+      for (const d of des) if (d.posto === p.id || d.levouVtr === p.id) somaGm.set(d.gm, (somaGm.get(d.gm) || 0) + sobrepoe(d.ini, d.fim, t.ini, t.fim));
+      const ocupantes = new Set([...somaGm].filter(([, m]) => m >= minimo).map(([g]) => g));
       if (ocupantes.size < vagas) furos.push({ posto: p.id, turno: t.id, faltam: vagas - ocupantes.size });
     }
   }
@@ -1346,7 +1352,9 @@ function afastamentoNoDia(data, gmId, dia) {
 // Ordem: 0 escala oposta do mesmo posto e do mesmo turno (dia/noite) · 1 quem já está no posto hoje (estende)
 // · 2 outros GMs do mesmo turno · 3 mesmo posto, turno oposto · 4 o resto. Dentro de cada grupo: abaixo do teto e menos horas.
 function prioridadeHE(x, teto) {
-  const grupo = x.doGrupo ? -2 : x.eja ? -1 : x.estende ? (x.noPostoHoje ? -0.6 : -0.5) : x.noPostoHoje ? 1 : x.mesmoPosto && x.mesmoPeriodo ? 0 : x.mesmoPeriodo ? 2 : x.mesmoPosto ? 3 : 4;
+  // "já está no posto hoje" só ajuda em vaga curta (estender); numa de 12h quem é do outro turno vai para depois do mesmo turno
+  const noPosto = x.noPostoHoje && !x.vagaLonga;
+  const grupo = x.doGrupo ? -2 : x.eja ? -1 : x.estende ? (x.noPostoHoje ? -0.6 : -0.5) : noPosto ? 1 : x.mesmoPosto && x.mesmoPeriodo ? 0 : x.mesmoPeriodo ? 2 : x.mesmoPosto || x.noPostoHoje ? 3 : 4;
   return [x.bloqueado ? 1 : 0, x.semHabilitacao ? 1 : 0, x.foraVtr ? 1 : 0, grupo, x.disponivel ? 0 : 1, x.heMes + x.transporte >= teto ? 1 : 0, x.heMes + x.transporte];
 }
 // dia (07–19) ou noite (19–07) de um horário em minutos
@@ -1429,7 +1437,7 @@ function sugerir(data, dia, postoId, ini, fim) {
     const lotPosto = vigente(gm, dia).lotacao?.posto;
     const tipoVaga = data.postos.find((x) => x.id === postoId)?.tipo, tipoDele = data.postos.find((x) => x.id === lotPosto)?.tipo;
     const habilitado = !!hab && gmDoGrupo(gm, hab);
-    const base = { habilitado, semHabilitacao: !!hab && !habilitado, foraVtr: tipoVaga === "vtr" && tipoDele !== "vtr", gm, heMes: l.he, transporte: l.transporte, mesmoPosto: lotPosto === postoId, noPostoHoje: minhas.some((d) => d.posto === postoId && d.nat !== "he"), mesmoPeriodo: !minhas.length && mesmoPeriodo(data, gm, dia, ini), disponivel, doGrupo };
+    const base = { vagaLonga: fim - ini > 360, habilitado, semHabilitacao: !!hab && !habilitado, foraVtr: tipoVaga === "vtr" && tipoDele !== "vtr", gm, heMes: l.he, transporte: l.transporte, mesmoPosto: lotPosto === postoId, noPostoHoje: minhas.some((d) => d.posto === postoId && d.nat !== "he"), mesmoPeriodo: !minhas.length && mesmoPeriodo(data, gm, dia, ini), disponivel, doGrupo };
     const sobre = minhas.filter((d) => sobrepoe(d.ini, d.fim, ini, fim) > 0);
     if (sobre.length) {
       if (sobre.every(livreParaRemanejar)) {

@@ -521,3 +521,29 @@ test("posto com habilitação: quem tem a tag aparece primeiro (HE e remanejar)"
   assert.equal(s[0].gm.id, z.id);
   assert.match(s[0].notas.join(), /habilitado: SALA/);
 });
+
+test("GM da semanal com o serviço em pedaços (12:30–15:30 + 15:30–18:00) cobre o 3º turno", () => {
+  const data = base();
+  data.postos.push({ id: "dgp", nome: "DGP", vagas: { t2: 1, t3: 1, t4: 0, t1: 0 }, dias: [1, 2, 3, 4, 5] });
+  data.gms.push({ id: "v", nome: "V", equipe: "SEM", lotacao: { posto: "dgp", segmentos: [{ ini: "07:00", fim: "12:00" }, { ini: "12:30", fim: "15:30" }, { ini: "15:30", fim: "18:00" }] } });
+  data._versao++;
+  assert.equal(calcularDia(data, "2026-11-30").furos.filter((f) => f.posto === "dgp").length, 0);
+});
+
+test("departamento seg–sex só com GMs da semanal: sem furo mesmo com um a menos", () => {
+  const data = base();
+  data.postos.push({ id: "dep", nome: "DEP", vagas: { t2: 2, t3: 2, t4: 0, t1: 0 }, dias: [1, 2, 3, 4, 5] });
+  data.gms.push({ id: "w1", nome: "W1", equipe: "SEM", lotacao: { posto: "dep", segmentos: [{ ini: "07:00", fim: "18:00" }] } });
+  data._versao++;
+  assert.equal(calcularDia(data, "2026-11-30").furos.filter((f) => f.posto === "dep").length, 0);
+});
+
+test("vaga de 12h de dia: quem é do turno da noite no mesmo posto não passa na frente do mesmo turno", () => {
+  const data = base(), d = diaDe(data, "D1");
+  data.equipes.push({ id: "N2", tipo: "alternado", paridade: 0, periodo: "noite" });
+  data.gms.push({ id: "nn", nome: "NN", equipe: "N2", lotacao: { posto: "hosp", segmentos: [{ ini: "19:00", fim: "07:00" }] } });
+  data._versao++;
+  const s = sugerir(data, d, "hosp", 420, 1140).he.filter((x) => !x.bloqueado);
+  const iN = s.findIndex((x) => x.gm.id === "nn"), iMesmo = s.findIndex((x) => x.mesmoPeriodo);
+  assert.ok(iMesmo >= 0 && iN > iMesmo, `mesmo turno (${iMesmo}) antes do GM da noite (${iN})`);
+});
