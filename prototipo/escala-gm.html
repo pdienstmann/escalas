@@ -1947,8 +1947,8 @@ const mesAnterior = (m) => { const [y, mm] = m.split("-").map(Number); return mm
 const equipe = (id) => data.equipes.find((e) => e.id === id);
 const opcoesGm = (sel = "", filtro = () => true) => [...data.gms].filter(filtro).sort((a, b) => a.nome.localeCompare(b.nome))
   .map((g) => `<option value="${g.id}" ${g.id === sel ? "selected" : ""}>${esc(g.nome)} · ${g.equipe}</option>`).join("");
-const opcoesPosto = (sel = "") => data.secoes.map((s) => `<optgroup label="${esc(s.nome)}">${data.postos.filter((p) => p.secao === s.id)
-  .map((p) => `<option value="${p.id}" ${p.id === sel ? "selected" : ""}>${esc(p.nome)}${p.sub ? " · " + esc(p.sub) : ""}</option>`).join("")}</optgroup>`).join("");
+const opcoesPosto = (sel = "") => data.secoes.map((s) => `<optgroup label="${esc(s.nome)}">${data.postos.filter((p) => p.secao === s.id && (p.ativo !== false || p.id === sel))
+  .map((p) => `<option value="${p.id}" ${p.id === sel ? "selected" : ""}>${esc(p.nome)}${p.sub ? " · " + esc(p.sub) : ""}${p.ativo === false ? " (excluído)" : ""}</option>`).join("")}</optgroup>`).join("");
 function rotuloLotacao(g) {
   if (!g.lotacao) return "sem lotação";
   const p = postoPorId(g.lotacao.posto);
@@ -2122,7 +2122,7 @@ function vQuadro() {
       <span class="meta">${equipe(gmPorId(a.gm)?.equipe)?.id || ""}${a.oc.ate && a.oc.ate !== a.oc.de ? ` · volta ${ddmm(somaDias(a.oc.ate, 1))}` : ""}${a.tipo === "TROCA" ? ` · coberto por ${esc(nomeGm(a.oc.substituto))}` : ""}${a.oc.req ? ` · REQ ${esc(a.oc.req)}` : ""}</span></li>`).join("")}</ul></section>`).join("");
   const disp = cd.disposicao.length ? `<section class="disposicao"><h3>À disposição <span class="n">${new Set(cd.disposicao.map((d) => d.gm)).size}</span></h3>
     <p class="dica">Sem posto neste dia (viatura parada ou posto fechado). Use "Cobrir" para mandá-los a um furo.</p><div class="chips">
-    ${[...new Set(cd.disposicao.map((d) => d.gm))].map((id) => { const d = cd.disposicao.find((x) => x.gm === id); return `<button class="chip" data-act="disp-mandar" data-des="${d.id}" title="Clique para mandar a uma vaga · ou arraste até o posto"><span class="nm">${esc(nomeGm(id))}</span><span class="hr">${fmtHm(d.ini)}/${fmtHm(d.fim)}</span><span class="req">de ${esc(postoPorId(d.postoOriginal)?.nome)}</span></button>`; }).join("")}
+    ${[...new Set(cd.disposicao.map((d) => d.gm))].map((id) => { const d = cd.disposicao.find((x) => x.gm === id); return `<button class="chip" data-act="disp-mandar" data-des="${d.id}" title="Clique para mandar a uma vaga · ou arraste até o posto"><span class="nm">${esc(nomeGm(id))}</span><span class="hr">${fmtHm(d.ini)}/${fmtHm(d.fim)}</span><span class="req">de ${esc(postoPorId(d.postoOriginal)?.nome)}${postoPorId(d.postoOriginal)?.ativo === false ? " (excluída)" : ""}</span></button>`; }).join("")}
     </div></section>` : "";
 
   return `
@@ -4965,11 +4965,13 @@ document.addEventListener("click", (e) => {
         .map(([posto, ts]) => ({ t: `Mandar para ${postoPorId(posto).nome} (${ts.map((t) => TURNOS.find((x) => x.id === t).nome.split(" ")[0]).join(" e ")} turno)`, act: "disp-ir", d: { posto } }));
       const orig = d.postoOriginal && postoPorId(d.postoOriginal), faO = orig && cd.fa.find((o) => o.posto === orig.id);
       abrirMenu([{ t: `${nomeGm(d.gm)} · à disposição ${fmtHm(d.ini)}–${fmtHm(d.fim)}`, act: "ed-nada", desab: true }, { sep: true },
-        ...(orig ? [{ t: `Voltar para ${orig.nome}${faO ? ` (fica marcada ${faO.tipo === "FA" ? "em FA" : "fechada"})` : ""}`, act: "disp-voltar", d: { posto: orig.id } }, { sep: true }] : []),
+        ...(orig && orig.ativo === false ? [{ t: `${orig.nome} está excluída do cadastro`, act: "ed-nada", desab: true }, { t: `Reativar ${orig.nome} e voltar (vale para todos os dias)`, act: "disp-reativar", d: { posto: orig.id } }, { sep: true }]
+          : orig ? [{ t: `Voltar para ${orig.nome}${faO ? ` (fica marcada ${faO.tipo === "FA" ? "em FA" : "fechada"})` : ""}`, act: "disp-voltar", d: { posto: orig.id } }, { sep: true }] : []),
         ...(itens.length ? itens : [{ t: "Nenhuma vaga aberta no horário dele", act: "ed-nada", desab: true }]),
         { sep: true }, { t: "Também dá para arrastar até qualquer posto", act: "ed-nada", desab: true }], r.left, r.bottom + 2, el, { des: d });
       return;
     }
+    case "disp-reativar": { const p = postoPorId(el.dataset.posto); fecharMenu(); mudar(`${p.nome} reativada: a guarnição volta para ela`, () => { delete p.ativo; }); return; }
     case "disp-voltar": { const d = ui.menu.des, p = postoPorId(el.dataset.posto); fecharMenu(); mudar(`${nomeGm(d.gm)} voltou para ${p.nome}`, () => data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: d.gm, de: ui.dia, ate: ui.dia, posto: p.id, ficaNaFA: true })); return; }
     case "disp-ir": { const d = ui.menu.des, p = postoPorId(el.dataset.posto); fecharMenu(); mudar(`${nomeGm(d.gm)} saiu de À disposição para ${p.nome}`, () => data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: d.gm, de: ui.dia, ate: ui.dia, posto: p.id })); return; }
     case "rst-abrir": ui.drawer = { tipo: "resetdia", fora: [] }; render(); return;
@@ -5246,6 +5248,7 @@ document.addEventListener("click", (e) => {
     }
     case "salvar-remanej": {
       const posto = $("#r-posto").value;
+      if (!postoAtivoEm(postoPorId(posto), $("#r-de").value)) { toast(`${postoPorId(posto).nome} não está ativo nesse dia. Escolha outro posto.`); return; }
       mudar(`${nomeGm(d.gm)} remanejado para ${postoPorId(posto).nome}`, () => { data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: d.gm, posto, funcao: $("#r-fn").value.trim(), de: $("#r-de").value, ate: $("#r-ate").value || $("#r-de").value }); ui.drawer = null; });
       break;
     }
