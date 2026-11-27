@@ -458,3 +458,13 @@ test("HE em viatura: função escolhida aparece; extensão herda a função do p
   assert.equal(des.find((x) => x.origem === "h1").funcao, "Patrulheiro");
   assert.equal(des.find((x) => x.origem === "h2").funcao, "Motorista");
 });
+
+test("vaga de 6h colada no fim do dia: quem termina às 19h aparece primeiro para estender", () => {
+  const data = base(), d = diaDe(data, "D1");
+  const s = sugerir(data, d, "noite", 1140, 1500).he; // 19:00–01:00
+  const primeiro = s.find((x) => !x.bloqueado);
+  assert.ok(["a", "b"].includes(primeiro.gm.id), "GM do dia (termina 19h) em primeiro: " + primeiro.gm.id);
+  assert.match(primeiro.notas.join(), /termina às 19:00 · estende até 01:00/);
+  const s12 = sugerir(data, d, "noite", 1140, 1860).he; // 12h: continua dando prioridade ao turno da noite
+  assert.ok(!s12[0].estende);
+});

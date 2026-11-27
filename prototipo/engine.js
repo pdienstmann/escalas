@@ -314,7 +314,7 @@ export function afastamentoNoDia(data, gmId, dia) {
 // Ordem: 0 escala oposta do mesmo posto e do mesmo turno (dia/noite) · 1 quem já está no posto hoje (estende)
 // · 2 outros GMs do mesmo turno · 3 mesmo posto, turno oposto · 4 o resto. Dentro de cada grupo: abaixo do teto e menos horas.
 export function prioridadeHE(x, teto) {
-  const grupo = x.doGrupo ? -2 : x.eja ? -1 : x.noPostoHoje ? 1 : x.mesmoPosto && x.mesmoPeriodo ? 0 : x.mesmoPeriodo ? 2 : x.mesmoPosto ? 3 : 4;
+  const grupo = x.doGrupo ? -2 : x.eja ? -1 : x.estende ? (x.noPostoHoje ? -0.6 : -0.5) : x.noPostoHoje ? 1 : x.mesmoPosto && x.mesmoPeriodo ? 0 : x.mesmoPeriodo ? 2 : x.mesmoPosto ? 3 : 4;
   return [x.bloqueado ? 1 : 0, grupo, x.disponivel ? 0 : 1, x.heMes + x.transporte >= teto ? 1 : 0, x.heMes + x.transporte];
 }
 // dia (07–19) ou noite (19–07) de um horário em minutos
@@ -409,11 +409,14 @@ export function sugerir(data, dia, postoId, ini, fim) {
     const notas = [];
     const eja = horarioEja(data, dia, gm.id, postoId, ini, fim);
     const [ea, eb] = eja || limitarExtensao(data, dia, gm.id, ini, fim);
+    // vaga curta (até 6h) colada no serviço dele hoje: quem termina na hora em que ela começa (ou entra quando ela acaba) estende
+    const colado = fim - ini <= 360 && minhas.find((d) => d.nat !== "he" && d.nat !== "bh" && d.posto !== null && (d.fim === ini || d.ini === fim));
+    if (colado && !eja) { base.estende = true; if (!base.noPostoHoje) notas.push(colado.fim === ini ? `termina às ${fmtHm(ini)} · estende até ${fmtHm(fim)}` : `entra às ${fmtHm(fim)} · começa às ${fmtHm(ini)}`); }
     if (eja) { base.eja = eja; notas.push(`do dia · estende ${fmtHm(eja[0])}–${fmtHm(eja[1])}`); }
     else if (base.mesmoPosto && !base.noPostoHoje) notas.push(base.mesmoPeriodo ? "escala oposta deste posto" : "deste posto · turno oposto");
     else if (base.mesmoPeriodo) notas.push("de folga · mesmo turno");
     if (base.noPostoHoje) notas.push(eb - ea < fim - ini ? `já está neste posto hoje · estende ${fmtHm(ea)}–${fmtHm(eb)}` : "já está neste posto hoje · estende");
-    else if (eb - ea < fim - ini) notas.push(`trabalha hoje · estende ${fmtHm(ea)}–${fmtHm(eb)}`);
+    else if (eb - ea < fim - ini && !base.estende) notas.push(`trabalha hoje · estende ${fmtHm(ea)}–${fmtHm(eb)}`);
     if (disponivel) notas.unshift("se ofereceu para HE");
     if (doGrupo) notas.unshift(`do ${grupoVaga}`);
     if (total >= teto) notas.push("já passou do teto de HE");
