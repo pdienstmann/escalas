@@ -103,7 +103,7 @@ async function definirAcesso(env, sessao, corpo) {
 // e o texto livre de atestados e licenças.
 function estadoParaPerfil(r, perfil) {
   if (perfil === "escalante") return r;
-  const e = { ...r.estado, controle: [], requerimentos: {}, folgasSync: {} };
+  const e = { ...r.estado, controle: r.estado.controle.filter((c) => c.tipo === "FECHADO").map((c) => ({ id: c.id, tipo: c.tipo, dia: c.dia })), requerimentos: {}, folgasSync: {} }; // só quais dias foram finalizados
   e.ocorrencias = e.ocorrencias.map((o) => ["ATESTADO", "LICENCA"].includes(o.tipo) ? { id: o.id, tipo: o.tipo, gm: o.gm, de: o.de, ate: o.ate } : o);
   return { ...r, estado: e };
 }
