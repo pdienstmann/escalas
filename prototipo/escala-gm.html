@@ -4212,7 +4212,7 @@ function ofertaDaVaga(posto, turno, dia) {
 const aguardando = (o) => o.gms.filter((g) => g.estado === "oferecida");
 function mensagemOferta(o) {
   const p = postoPorId(o.posto);
-  return `HE disponível: ${p.nome}${p.sub ? ` (${p.sub})` : ""} · ${SEMANA[diaSemana(o.de)].toLowerCase()} ${ddmm(o.de)} · ${o.ini}–${o.fim}${o.nat === "bh" ? " (banco de horas)" : ""}. Quem puder, responde por aqui.`;
+  return `${o.nat === "bh" ? "BH+" : "HE"} disponível: ${p.nome} · ${SEMANA[diaSemana(o.de)].toLowerCase()} ${ddmm(o.de)} · ${o.ini}–${o.fim}. Confirma?`;
 }
 function copiarTexto(txt) {
   const ok = () => toast("Mensagem copiada. É só colar no WhatsApp.");
