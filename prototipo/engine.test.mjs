@@ -480,3 +480,15 @@ test("vaga de 6h de manhã: quem trabalhou a noite anterior e sai às 07h aparec
   assert.ok(x.estende); assert.match(x.notas.join(), /trabalhou a noite · sai às 07:00/);
   assert.equal(s.filter((y) => !y.bloqueado)[0].gm.id, "z");
 });
+
+test("posto de todos os dias com GM da semanal: no fim de semana a vaga dele aparece para cobrir", () => {
+  const data = base();
+  data.postos.push({ id: "cit", nome: "CIT", vagas: { t2: 0, t3: 0, t4: 1, t1: 1 } });
+  data.gms.push({ id: "w", nome: "W", equipe: "SEM", lotacao: { posto: "cit", segmentos: [{ ini: "07:00", fim: "12:00" }, { ini: "13:00", fim: "19:00" }] } });
+  data._versao++;
+  let sab = "2026-11-28", seg = "2026-11-30"; // sábado e segunda
+  const fs = calcularDia(data, sab).furos.filter((f) => f.posto === "cit").map((f) => f.turno);
+  assert.ok(fs.includes("t2") && fs.includes("t3"), "sábado: 2º e 3º turno a cobrir");
+  const fg = calcularDia(data, seg).furos.filter((f) => f.posto === "cit" && ["t2", "t3"].includes(f.turno));
+  assert.equal(fg.length, 0, "segunda: ele cobre");
+});

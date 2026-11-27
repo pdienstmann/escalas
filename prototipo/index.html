@@ -851,6 +851,8 @@ body[data-view="quadro"] main > .barra:first-child, body[data-view="folha"] main
   body[data-view="quadro"] main > .barra:first-child .datas .ic { min-width: 38px; min-height: 36px; }
 }
 @media print { body main > .barra:first-child { position: static; box-shadow: none; } }
+.sem-mot { display: inline-block; margin: .15rem 0 0 .2rem; font-size: .68rem; font-weight: 700; color: #8a5300; background: #fff1d6; border: 1px dashed #e0a33b; border-radius: 9px; padding: 0 .4rem; }
+@media print { .sem-mot { display: none; } }
 /* finalizar escala e controle de HE */
 .btn.fin { border-color: var(--accent); color: var(--accent); font-weight: 600; padding: .2rem .6rem; }
 .fin-ok { color: var(--ok, #2e7d32); font-weight: 600; } .fin-ok .link { font-weight: 400; margin-left: .3rem; }

@@ -175,6 +175,16 @@ function painelAvisos() {
       ${ui.verLidos ? lidos.map((o) => `<section class="aviso-dia lido"><div><p>${esc(o.texto).replace(/\n/g, "<br>")}</p></div><button class="link" data-act="av-naolido" data-id="${o.id}">marcar como não lido</button></section>`).join("") : ""}` : ""}`;
 }
 // Faixa "Atenção hoje": tudo o que pede ação no dia, com a cor da gravidade (vermelho = resolver, laranja = conferir)
+// Viatura com gente escalada, mas sem ninguém como motorista naquele turno
+function semMotorista(cd) {
+  const r = [];
+  for (const p of data.postos) {
+    if (p.tipo !== "vtr" || p.ativo === false || cd.fa.some((o) => o.posto === p.id)) continue;
+    const ts = TURNOS.filter((t) => { const aqui = cd.designacoes.filter((d) => d.posto === p.id && naColuna(d, t)); return aqui.length && !aqui.some((d) => d.funcao === "Motorista"); });
+    if (ts.length) r.push({ p, turnos: ts.map((t) => t.id) });
+  }
+  return r;
+}
 function faixaAtencao(cd, furosTotal) {
   const it = [];
   const ofer = cd.furos.filter((f) => ofertaDaVaga(f.posto, f.turno, ui.dia)).reduce((t, f) => t + f.faltam, 0), semNinguem = furosTotal - ofer;
@@ -187,6 +197,8 @@ function faixaAtencao(cd, furosTotal) {
   if (semInsp.length) it.push(["grave", `Sem inspetor de serviço ${semInsp.map((p) => (p === "dia" ? "de dia" : "à noite")).join(" e ")}`, `<button class="link" data-act="ir-insp">escolher</button>`]);
   const faLog = data.postos.filter((p) => p.ativo !== false && !cd.fa.some((o) => o.posto === p.id) && cd.designacoes.some((d) => d.posto === p.id)).map((p) => viaturaNaFrota(numeroDe(nomeNoDia(p, cd)))).filter((v) => v && v.situacao !== "QAP");
   if (faLog.length) it.push(["aviso", `Viatura em FA pela logística com guarnição escalada: ${[...new Set(faLog.map((v) => v.prefixo))].join(", ")}`, `<button class="link" data-act="ir-frota">ver viaturas</button>`]);
+  const sm = semMotorista(cd);
+  if (sm.length) it.push(["aviso", `Viatura sem motorista: ${sm.map((x) => `${nomeNoDia(x.p, cd)} (${x.turnos.map((t) => TURNOS.find((y) => y.id === t).nome.split(" ")[0]).join(", ")} turno)`).join("; ")}`, `<span class="meta">botão direito no GM › Função</span>`]);
   if (ui.dia < hojeBase() && !diaFinalizado(data, ui.dia)) it.push(["info", "Este dia já passou e a escala ainda não foi finalizada (as HEs não estão no controle)", `<button class="link" data-act="fin-abrir">finalizar</button>`]);
   if (!it.length) return `<div class="atencao-ok">✓ Nada pendente neste dia</div>`;
   return `<section class="atencao" aria-label="Atenção hoje"><h3>Atenção</h3><ul>${it.map(([n, t, a]) => `<li class="${n}"><span class="pt-cor" aria-hidden="true"></span><span>${esc(t)}</span>${a}</li>`).join("")}</ul></section>`;
@@ -228,6 +240,7 @@ function vQuadro() {
           else if (furo) h += `<button class="furo" data-act="pop-add" data-posto="${p.id}" data-turno="${t.id}">Cobrir · falta ${furo.faltam}${p.reforco ? ` · ${p.reforco.ini}–${p.reforco.fim}` : ""}</button>`;
           if (!aqui.length && !furo) h = p.rondas ? `<span class="rondas">VTR/RONDAS FREQUENTES</span>` : naoHoje && p.vagas ? `<span class="vazio">não funciona hoje</span>` : "";
           if (!furo) h += `<button class="add" data-act="pop-add" data-posto="${p.id}" data-turno="${t.id}" aria-label="Pôr GM em ${esc(p.nome)}, ${t.nome}">+ pôr GM</button>`;
+          if (p.tipo === "vtr" && aqui.length && !aqui.some((d) => d.funcao === "Motorista")) h += `<span class="sem-mot" title="Ninguém como motorista neste turno · botão direito no GM › Função">sem motorista</span>`;
           return `<td class="${t.id === "t2" || t.id === "t3" ? "dia" : "noite"}" data-posto="${p.id}" data-turno="${t.id}" tabindex="-1">${h}</td>`;
         }).join("");
       }

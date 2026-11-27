@@ -269,12 +269,25 @@ export function calcularDia(data, dia) {
   }
 
   // 8. Furos: vagas por turno não preenchidas
+  // Posto que funciona todos os dias e tem GM da semanal lotado: cada um conta como vaga no horário dele
+  // (no fim de semana ele não trabalha e a vaga aparece para cobrir), mesmo que o cadastro não tenha vaga naquele turno.
+  const vagaSemanal = new Map();
+  for (const g of data.gms) {
+    if (g.ativo === false) continue;
+    const v = vigente(g, dia), eq = data.equipes.find((e) => e.id === v.equipe);
+    if (eq?.tipo !== "semanal" || !v.lotacao?.posto) continue;
+    const segs = (v.lotacao.segmentos || []).map((sg) => intervalo(sg.ini, sg.fim));
+    const m = vagaSemanal.get(v.lotacao.posto) || {};
+    for (const t of TURNOS) if (segs.reduce((x, [a, b]) => x + sobrepoe(a, b, t.ini, t.fim), 0) >= 60) m[t.id] = (m[t.id] || 0) + 1;
+    vagaSemanal.set(v.lotacao.posto, m);
+  }
   const furos = [];
   for (const p of data.postos) {
-    if (fa.has(p.id) || !(ajustesPosto.get(p.id)?.vagas || p.vagas)) continue;
+    const ajV = ajustesPosto.get(p.id)?.vagas, impl = !ajV && !p.rondas && !p.dias ? vagaSemanal.get(p.id) : null;
+    if (fa.has(p.id) || !(ajV || p.vagas || impl)) continue;
     if (p.dias && !p.dias.includes(diaSemana(dia))) continue;
     for (const t of TURNOS) {
-      const vagas = (ajustesPosto.get(p.id)?.vagas?.vagas || p.vagas)[t.id] || 0;
+      const vagas = Math.max((ajV?.vagas || p.vagas || {})[t.id] || 0, impl?.[t.id] || 0);
       if (!vagas) continue;
       const ocupantes = new Set(des.filter((d) => (d.posto === p.id || d.levouVtr === p.id) && sobrepoe(d.ini, d.fim, t.ini, t.fim) >= 60).map((d) => d.gm));
       if (ocupantes.size < vagas) furos.push({ posto: p.id, turno: t.id, faltam: vagas - ocupantes.size });
