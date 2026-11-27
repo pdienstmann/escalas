@@ -1990,7 +1990,7 @@ function substituirGm(d, X, via, m) {
 function abrirEditor(modo, el, ctx) {
   fecharMenu(); fecharPop(); fecharEditor();
   const r = el.getBoundingClientRect(), box = $("#inline");
-  Object.assign(ed, { modo, el, ctx, d: ctx.des || null, sel: 0, aberto: Date.now() });
+  Object.assign(ed, { modo, el, ctx, d: ctx.des || null, sel: 0, aberto: Date.now(), oferta: null });
   if (modo === "hora") {
     const v = valoresCartao(ed.d);
     if (ctx.junto) v.fim = fmtHm(ctx.junto.fim);
@@ -2093,6 +2093,18 @@ function escolherEditor(i) {
   if (!x || x.bloqueado) return;
   if (ed.oferta) { const s0 = ed.oferta; s0.has(x.gm.id) ? s0.delete(x.gm.id) : s0.add(x.gm.id); atualizarLista(); atualizarRodapeOferta(); $("#ed-in").focus(); return; }
   const { modo, d, ctx, el } = ed, X = x.gm.id, reqEd = $("#ed-req")?.value.trim() || "";
+  // cobrir vaga com HE: primeiro oferecer (WhatsApp); lançar direto só se ele já confirmou
+  if (modo === "add" && x.via !== "rem") {
+    const r = (document.getElementById(`ed-op-${i}`) || el).getBoundingClientRect();
+    const [vi, vf] = ctx.ini != null ? [ctx.ini, ctx.fim] : intervaloVaga(ctx.posto, ctx.turno), [a, b] = horarioProposto(data, ui.dia, X, ctx.posto, vi, vf);
+    const dd = { dia: ui.dia, posto: ctx.posto, gm: X, ini: fmtHm(a), fim: fmtHm(b), req: reqEd, nat: ctx.nat || "he" };
+    fecharEditor();
+    abrirMenu([{ t: `${nomeGm(X)} · ${postoPorId(ctx.posto).nome} ${dd.ini}–${dd.fim}`, act: "ed-nada", desab: true }, { sep: true },
+      { t: "📲 Oferecer a ele (WhatsApp)", act: "pend-oferecer", d: { ...dd, ini: fmtHm(vi), fim: fmtHm(vf) }, padrao: true }, { t: "Copiar mensagem da vaga", act: "pend-copiar", d: { ...dd, ini: fmtHm(vi), fim: fmtHm(vf) } }, { sep: true },
+      { t: "Já confirmou: lançar HE", act: "pend-he", d: { ...dd, nat: "he" } }, { t: "Já confirmou: lançar como BH+", act: "pend-he", d: { ...dd, nat: "bh" } },
+      { t: "Cancelar", act: "dr-cancelar" }], r.left, r.bottom + 2, el, {});
+    return;
+  }
   fecharEditor();
   if (modo === "padrao") { colocarNoPadrao(x.gm, ctx.posto, ctx.per); return; }
   if (modo === "add") {
@@ -2299,7 +2311,7 @@ function ofertar(posto, dia, ini, fim, gms, nat = "he") {
   const [a, b] = typeof ini === "number" ? [ini, fim] : intervalo(ini, fim), I = fmtHm(a), F = fmtHm(b);
   const furos = calcularDia(data, dia).furos.filter((f) => f.posto === posto && sobrepoe(a, b, ...[TURNOS.find((t) => t.id === f.turno)].map((t) => [t.ini, t.fim]).flat()) > 0);
   const vagas = Math.max(1, ...furos.map((f) => f.faltam));
-  let o = ofertasAbertas(dia).find((x) => x.posto === posto && x.ini === I && x.fim === F);
+  let o = ofertasAbertas(dia).find((x) => x.posto === posto && sobrepoe(...intervalo(x.ini, x.fim), a, b) > 0); // mesma vaga: entra na oferta já aberta
   const novos = gms.filter((g) => !o?.gms.some((x) => x.gm === g));
   if (!novos.length) { toast("Já foi oferecida a esses GMs."); return null; }
   mudar(`HE oferecida a ${novos.map(nomeGm).join(", ")} · ${postoPorId(posto).nome} ${I}–${F} (${ddmm(dia)})`, () => {
@@ -3286,7 +3298,7 @@ document.addEventListener("click", (e) => {
     case "letra": { const on = document.documentElement.classList.toggle("letra-grande"); try { localStorage.setItem("escala-letra", on ? "1" : ""); } catch { /* ignora */ } el.setAttribute("aria-pressed", String(on)); if (ui.pop) desenharPop(); return; }
     case "remanejar": mudar(`${nomeGm(el.dataset.gm)} remanejado para ${postoPorId(d.posto).nome}`, () => { data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: el.dataset.gm, de: ui.dia, ate: ui.dia, posto: d.posto }); ui.drawer = null; }); break;
     case "pend-rem": fecharMenu(); mudar(`${nomeGm(el.dataset.gm)} remanejado para ${postoPorId(el.dataset.posto).nome} em ${ddmm(el.dataset.dia)}`, () => data.ocorrencias.push({ id: novoId(), tipo: "REMANEJ", gm: el.dataset.gm, de: el.dataset.dia, ate: el.dataset.dia, posto: el.dataset.posto })); break;
-    case "pend-he": fecharMenu(); mudar(`${el.dataset.nat === "bh" ? "BH+" : "HE"}: ${nomeGm(el.dataset.gm)} ${el.dataset.ini}–${el.dataset.fim} em ${postoPorId(el.dataset.posto).nome} (${ddmm(el.dataset.dia)})`, () => data.ocorrencias.push({ id: novoId(), tipo: el.dataset.nat === "bh" ? "BH_MAIS" : "HE", gm: el.dataset.gm, de: el.dataset.dia, ini: el.dataset.ini, fim: el.dataset.fim, posto: el.dataset.posto, req: "" })); break;
+    case "pend-he": fecharMenu(); mudar(`${el.dataset.nat === "bh" ? "BH+" : "HE"}: ${nomeGm(el.dataset.gm)} ${el.dataset.ini}–${el.dataset.fim} em ${postoPorId(el.dataset.posto).nome} (${ddmm(el.dataset.dia)})`, () => data.ocorrencias.push({ id: novoId(), tipo: el.dataset.nat === "bh" ? "BH_MAIS" : "HE", gm: el.dataset.gm, de: el.dataset.dia, ini: el.dataset.ini, fim: el.dataset.fim, posto: el.dataset.posto, req: el.dataset.req || "" })); break;
     case "pend-mais": { const k = el.dataset.k; ui.pendMais.has(k) ? ui.pendMais.delete(k) : ui.pendMais.add(k); render(); return; }
     case "pend-pergunta": {
       const x = el.dataset, r = el.getBoundingClientRect(), p = postoPorId(x.posto)?.nome;
