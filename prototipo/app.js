@@ -1111,19 +1111,29 @@ function cartoesPendencias(porDia) {
   }).join("");
 }
 // Lembretes do mês: o que costuma ficar esquecido
+// lista de GMs de um aviso: mostra alguns e "ver todos (N)" abre a lista inteira ali mesmo
+function nomesAviso(chave, gms, extra = () => "") {
+  const aberto = (ui.lembAberto ||= new Set()).has(chave), mostrar = aberto ? gms : gms.slice(0, 6);
+  return `${mostrar.map((g) => `<button class="link" data-act="abrir-ficha" data-gm="${g.id}">${esc(g.nome)}</button>${extra(g)}`).join(", ")}${gms.length > 6 ? ` <button class="link ver-todos" data-act="lemb-todos" data-k="${chave}">${aberto ? "mostrar menos" : `ver todos (${gms.length})`}</button>` : ""}`;
+}
+const plural = (n, um, varios) => (n === 1 ? um : varios);
 function lembretesMes() {
-  const m = mesDe(ui.dia), it = [];
+  const m = mesDe(ui.dia), it = [], nomeM = MESES[Number(m.slice(5)) - 1];
   const abertos = diasEmAberto(data, m, somaDias(hojeBase(), -1));
-  if (abertos.length) it.push(`<li><b>${abertos.length}</b> dia${abertos.length === 1 ? "" : "s"} já passado${abertos.length === 1 ? "" : "s"} sem finalizar a escala (as HEs ainda não estão no controle). <button class="link" data-act="ir-mes-fin">Finalizar…</button></li>`);
-  const livro = livroMes(data, m), poucas = data.gms.filter((g) => g.ativo !== false && equipe(g.equipe)?.tipo === "alternado" && (livro.get(g.id)?.folgas || 0) < 2);
-  if (poucas.length) it.push(`<li><b>${poucas.length}</b> GM${poucas.length === 1 ? "" : "s"} 12x36 com menos de 2 folgas em ${MESES[Number(m.slice(5)) - 1]}: ${poucas.slice(0, 6).map((g) => `<button class="link" data-act="abrir-ficha" data-gm="${g.id}">${esc(g.nome)}</button>`).join(", ")}${poucas.length > 6 ? "…" : ""}</li>`);
-  const ctl = controleMes(data, m), prev = previstaMes(data, m), teto = data.config.tetoHE * 60;
-  const acima = data.gms.filter((g) => (ctl.get(g.id)?.total || 0) + (prev.get(g.id) || 0) > teto);
-  if (acima.length) it.push(`<li><b>${acima.length}</b> GM${acima.length === 1 ? "" : "s"} vai${acima.length === 1 ? "" : "o"} passar de ${data.config.tetoHE}h de HE no mês (o excedente fica para o próximo): ${acima.slice(0, 6).map((g) => esc(g.nome)).join(", ")}${acima.length > 6 ? "…" : ""}</li>`);
+  if (abertos.length) it.push(`<li><b>${abertos.length}</b> ${plural(abertos.length, "dia já passou", "dias já passaram")} sem finalizar a escala (as HEs ainda não estão no controle). <button class="link" data-act="ir-mes-fin">Finalizar…</button></li>`);
+  const limbo = semPadrao(ui.dia);
+  if (limbo.length) it.push(`<li><b>${limbo.length}</b> GM${plural(limbo.length, "", "s")} sem posto no padrão (${plural(limbo.length, "fica", "ficam")} fora da escala): ${nomesAviso("limbo", limbo)} <button class="link" data-act="ir-efetivo">Abrir o Efetivo</button></li>`);
+  const livro = livroMes(data, m), poucas = data.gms.filter((g) => g.ativo !== false && equipe(g.equipe)?.tipo === "alternado" && (livro.get(g.id)?.folgas || 0) < 2).sort((a, b) => a.nome.localeCompare(b.nome));
+  if (poucas.length) it.push(`<li><b>${poucas.length}</b> GM${plural(poucas.length, "", "s")} 12x36 com menos de 2 folgas em ${nomeM}: ${nomesAviso("folgas", poucas, (g) => ` <small class="meta">(${livro.get(g.id)?.folgas || 0})</small>`)}</li>`);
+  const ctl = controleMes(data, m), prev = previstaMes(data, m), teto = data.config.tetoHE * 60, tot = (g) => (ctl.get(g.id)?.total || 0) + (prev.get(g.id) || 0);
+  const acima = data.gms.filter((g) => tot(g) > teto).sort((a, b) => tot(b) - tot(a));
+  if (acima.length) it.push(`<li><b>${acima.length}</b> GM${plural(acima.length, " vai", "s vão")} passar de ${data.config.tetoHE}h de HE no mês (o excedente fica para o próximo): ${nomesAviso("teto", acima, (g) => ` <small class="meta">(${fmtHoras(tot(g))})</small>`)}</li>`);
   const semana = Array.from({ length: 7 }, (_, i) => somaDias(ui.dia, i));
+  const aguard = semana.flatMap((d) => ofertasAbertas(d).flatMap((o) => aguardando(o).map((g) => ({ d, o, g }))));
+  if (aguard.length) it.push(`<li><b>${aguard.length}</b> HE${plural(aguard.length, "", "s")} oferecida${plural(aguard.length, "", "s")} sem resposta: ${[...new Set(aguard.map((x) => `${nomeGm(x.g.gm)} (${ddmm(x.d)} · ${postoPorId(x.o.posto)?.nome})`))].slice(0, 6).map(esc).join(", ")}${aguard.length > 6 ? "…" : ""}</li>`);
   const faVtr = new Set();
   for (const d of semana) { const cd = calcularDia(data, d); for (const p of data.postos) { const fv = viaturaNaFrota(numeroDe(nomeNoDia(p, cd))); if (fv && fv.situacao !== "QAP" && !cd.fa.some((o) => o.posto === p.id) && cd.designacoes.some((x) => x.posto === p.id)) faVtr.add(fv.prefixo); } }
-  if (faVtr.size) it.push(`<li>Viatura${faVtr.size === 1 ? "" : "s"} em FA pela logística, mas com guarnição escalada: <b>${[...faVtr].join(", ")}</b>. <button class="link" data-act="ir-frota">Ver viaturas</button></li>`);
+  if (faVtr.size) it.push(`<li>${plural(faVtr.size, "Viatura", "Viaturas")} em FA pela logística, mas com guarnição escalada: <b>${[...faVtr].join(", ")}</b>. <button class="link" data-act="ir-frota">Ver viaturas</button></li>`);
   const semInsp = semana.filter((d) => !data.inspetores?.[d]?.dia || !data.inspetores?.[d]?.noite);
   if (Object.keys(data.inspetores || {}).length && semInsp.length) it.push(`<li>Sem inspetor de serviço na escala mensal: ${semInsp.map(ddmm).join(", ")}. <button class="link" data-act="ir-insp">Abrir</button></li>`);
   return it.length ? `<section class="painel lembretes"><h3>Não esqueça</h3><ul>${it.join("")}</ul></section>` : "";
@@ -3435,6 +3445,8 @@ document.addEventListener("click", (e) => {
     }
     case "ir-mes-fin": ui.view = "mes"; ui.mes = mesDe(ui.dia); location.hash = "mes"; render(); $("[data-act=fin-pendentes]")?.click(); return;
     case "so-furos": ui.soFuros = true; render(); return;
+    case "lemb-todos": { const k = el.dataset.k, a = (ui.lembAberto ||= new Set()); a.has(k) ? a.delete(k) : a.add(k); render(); return; }
+    case "ir-efetivo": ui.view = "padroes"; (ui.padrao ||= { aba: "efetivo", mes: mesDe(ui.dia), desde: ui.dia }).aba = "efetivo"; ui.efetivo = { busca: "", so: "sem" }; location.hash = "padroes"; render(); return;
     case "ir-frota": ui.view = "frota"; location.hash = "frota"; render(); return;
     case "ir-insp": ui.view = "padroes"; (ui.padrao ||= { aba: "impar", mes: mesDe(ui.dia), desde: ui.dia }).aba = "inspetores"; location.hash = "padroes"; render(); return;
     case "pend-abrir": fecharMenu(); ui.dia = el.dataset.dia; ui.mes = mesDe(ui.dia); ui.view = "quadro"; location.hash = "quadro"; abrirFuro(el.dataset.posto, el.dataset.turno); break;
