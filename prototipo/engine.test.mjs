@@ -502,3 +502,12 @@ test("vaga de viatura: GMs lotados em viatura aparecem antes dos de posto fixo",
   assert.ok(i === -1 || s.slice(i).every((x) => x.foraVtr), "depois do primeiro de posto fixo, só vem posto fixo");
   assert.ok(s.some((x) => !x.foraVtr));
 });
+
+test("GM das 18h às 06h não cobre o 3º turno (13–19) por 1h: o turno vira furo e a vaga fica com 12h", () => {
+  const data = base(), d = diaDe(data, "D1");
+  data.postos.push({ id: "lar", nome: "LAR", vagas: { t2: 1, t3: 1, t4: 1, t1: 1 } });
+  data.gms.find((g) => g.equipe === "N1").lotacao = { posto: "lar", segmentos: [{ ini: "18:00", fim: "06:00" }] };
+  data._versao++;
+  const fs = calcularDia(data, d).furos.filter((f) => f.posto === "lar").map((f) => f.turno).sort();
+  assert.deepEqual(fs, ["t2", "t3"]);
+});

@@ -289,7 +289,9 @@ export function calcularDia(data, dia) {
     for (const t of TURNOS) {
       const vagas = Math.max((ajV?.vagas || p.vagas || {})[t.id] || 0, impl?.[t.id] || 0);
       if (!vagas) continue;
-      const ocupantes = new Set(des.filter((d) => (d.posto === p.id || d.levouVtr === p.id) && sobrepoe(d.ini, d.fim, t.ini, t.fim) >= 60).map((d) => d.gm));
+      // conta quem está no posto por pelo menos metade do turno (18h–06h não cobre o 13–19 por causa de 1h)
+      const minimo = Math.min(180, (t.fim - t.ini) / 2);
+      const ocupantes = new Set(des.filter((d) => (d.posto === p.id || d.levouVtr === p.id) && sobrepoe(d.ini, d.fim, t.ini, t.fim) >= minimo).map((d) => d.gm));
       if (ocupantes.size < vagas) furos.push({ posto: p.id, turno: t.id, faltam: vagas - ocupantes.size });
     }
   }

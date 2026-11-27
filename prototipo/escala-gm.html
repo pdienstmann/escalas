@@ -860,6 +860,9 @@ body[data-view="quadro"] main > .barra:first-child, body[data-view="folha"] main
 @media print { body main > .barra:first-child { position: static; box-shadow: none; } }
 .sem-mot { display: inline-block; margin: .15rem 0 0 .2rem; font-size: .68rem; font-weight: 700; color: #8a5300; background: #fff1d6; border: 1px dashed #e0a33b; border-radius: 9px; padding: 0 .4rem; }
 @media print { .sem-mot { display: none; } }
+.tag-res { display: inline-flex; align-items: center; gap: .2rem; font-size: .72rem; background: #ede7fb; color: #4b2a8f; border: 1px solid #c9b8f0; border-radius: 9px; padding: 0 .1rem 0 .45rem; margin-right: .3rem; }
+.tag-res .ic.mini { padding: 0 .25rem; min-width: 0; height: auto; border: 0; background: none; }
+.ocultos.reservadas b { color: #4b2a8f; }
 /* finalizar escala e controle de HE */
 .btn.fin { border-color: var(--accent); color: var(--accent); font-weight: 600; padding: .2rem .6rem; }
 .fin-ok { color: var(--ok, #2e7d32); font-weight: 600; } .fin-ok .link { font-weight: 400; margin-left: .3rem; }
@@ -1293,7 +1296,9 @@ function calcularDia(data, dia) {
     for (const t of TURNOS) {
       const vagas = Math.max((ajV?.vagas || p.vagas || {})[t.id] || 0, impl?.[t.id] || 0);
       if (!vagas) continue;
-      const ocupantes = new Set(des.filter((d) => (d.posto === p.id || d.levouVtr === p.id) && sobrepoe(d.ini, d.fim, t.ini, t.fim) >= 60).map((d) => d.gm));
+      // conta quem está no posto por pelo menos metade do turno (18h–06h não cobre o 13–19 por causa de 1h)
+      const minimo = Math.min(180, (t.fim - t.ini) / 2);
+      const ocupantes = new Set(des.filter((d) => (d.posto === p.id || d.levouVtr === p.id) && sobrepoe(d.ini, d.fim, t.ini, t.fim) >= minimo).map((d) => d.gm));
       if (ocupantes.size < vagas) furos.push({ posto: p.id, turno: t.id, faltam: vagas - ocupantes.size });
     }
   }
@@ -2226,12 +2231,21 @@ function painelAvisos() {
       ${ui.verLidos ? lidos.map((o) => `<section class="aviso-dia lido"><div><p>${esc(o.texto).replace(/\n/g, "<br>")}</p></div><button class="link" data-act="av-naolido" data-id="${o.id}">marcar como não lido</button></section>`).join("") : ""}` : ""}`;
 }
 // Faixa "Atenção hoje": tudo o que pede ação no dia, com a cor da gravidade (vermelho = resolver, laranja = conferir)
+// Viatura: dupla com horários diferentes no mesmo turno (ex.: um 07–19 e o outro 06–18) — só aviso na tela
+function horarioNoPosto(cd, posto, gm) { const ds = cd.designacoes.filter((d) => d.posto === posto && d.gm === gm); return ds.length ? [Math.min(...ds.map((d) => d.ini)), Math.max(...ds.map((d) => d.fim))] : null; }
+function duplaDesigual(cd, p, t) {
+  if (p.tipo !== "vtr") return null;
+  const gms = [...new Set(cd.designacoes.filter((d) => d.posto === p.id && naColuna(d, t)).map((d) => d.gm))];
+  if (gms.length < 2) return null;
+  const hs = gms.map((g) => [g, horarioNoPosto(cd, p.id, g)]), dif = new Set(hs.map(([, h]) => h.join("-")));
+  return dif.size > 1 ? hs.map(([g, h]) => `${nomeGm(g)} ${fmtHm(h[0])}–${fmtHm(h[1])}`).join(" · ") : null;
+}
 // Viatura com gente escalada, mas sem ninguém como motorista naquele turno
 function semMotorista(cd) {
   const r = [];
   for (const p of data.postos) {
     if (p.tipo !== "vtr" || p.ativo === false || cd.fa.some((o) => o.posto === p.id)) continue;
-    const ts = TURNOS.filter((t) => { const aqui = cd.designacoes.filter((d) => d.posto === p.id && naColuna(d, t)); return aqui.length && !aqui.some((d) => d.funcao === "Motorista"); });
+    const ts = TURNOS.filter((t) => { const aqui = cd.designacoes.filter((d) => d.posto === p.id && naColuna(d, t)); return aqui.some((d) => d.funcao === "Patrulheiro") && !aqui.some((d) => d.funcao === "Motorista"); }); // só quando há patrulheiro e falta o motorista
     if (ts.length) r.push({ p, turnos: ts.map((t) => t.id) });
   }
   return r;
@@ -2248,6 +2262,8 @@ function faixaAtencao(cd, furosTotal) {
   if (semInsp.length) it.push(["grave", `Sem inspetor de serviço ${semInsp.map((p) => (p === "dia" ? "de dia" : "à noite")).join(" e ")}`, `<button class="link" data-act="ir-insp">escolher</button>`]);
   const faLog = data.postos.filter((p) => p.ativo !== false && !cd.fa.some((o) => o.posto === p.id) && cd.designacoes.some((d) => d.posto === p.id)).map((p) => viaturaNaFrota(numeroDe(nomeNoDia(p, cd)))).filter((v) => v && v.situacao !== "QAP");
   if (faLog.length) it.push(["aviso", `Viatura em FA pela logística com guarnição escalada: ${[...new Set(faLog.map((v) => v.prefixo))].join(", ")}`, `<button class="link" data-act="ir-frota">ver viaturas</button>`]);
+  const dds = data.postos.filter((p) => p.tipo === "vtr" && !cd.fa.some((o) => o.posto === p.id)).map((p) => [p, TURNOS.map((t) => duplaDesigual(cd, p, t)).find(Boolean)]).filter(([, x]) => x);
+  if (dds.length) it.push(["info", `Dupla com horários diferentes: ${dds.map(([p, x]) => `${nomeNoDia(p, cd)} (${x})`).join("; ")}`, ""]);
   const sm = semMotorista(cd);
   if (sm.length) it.push(["aviso", `Viatura sem motorista: ${sm.map((x) => `${nomeNoDia(x.p, cd)} (${x.turnos.map((t) => TURNOS.find((y) => y.id === t).nome.split(" ")[0]).join(", ")} turno)`).join("; ")}`, `<span class="meta">botão direito no GM › Função</span>`]);
   if (ui.dia < hojeBase() && !diaFinalizado(data, ui.dia)) it.push(["info", "Este dia já passou e a escala ainda não foi finalizada (as HEs não estão no controle)", `<button class="link" data-act="fin-abrir">finalizar</button>`]);
@@ -2291,14 +2307,15 @@ function vQuadro() {
           else if (furo) h += `<button class="furo" data-act="pop-add" data-posto="${p.id}" data-turno="${t.id}">Cobrir · falta ${furo.faltam}${p.reforco ? ` · ${p.reforco.ini}–${p.reforco.fim}` : ""}</button>`;
           if (!aqui.length && !furo) h = p.rondas ? `<span class="rondas">VTR/RONDAS FREQUENTES</span>` : naoHoje && p.vagas ? `<span class="vazio">não funciona hoje</span>` : "";
           if (!furo) h += `<button class="add" data-act="pop-add" data-posto="${p.id}" data-turno="${t.id}" aria-label="Pôr GM em ${esc(p.nome)}, ${t.nome}">+ pôr GM</button>`;
-          if (p.tipo === "vtr" && aqui.length && !aqui.some((d) => d.funcao === "Motorista")) h += `<span class="sem-mot" title="Ninguém como motorista neste turno · botão direito no GM › Função">sem motorista</span>`;
+          if (p.tipo === "vtr" && aqui.some((d) => d.funcao === "Patrulheiro") && !aqui.some((d) => d.funcao === "Motorista")) h += `<span class="sem-mot" title="Ninguém como motorista neste turno · botão direito no GM › Função">sem motorista</span>`;
+          const dd = duplaDesigual(cd, p, t); if (dd) h += `<span class="sem-mot dif-h" title="${esc(dd)}">horários diferentes</span>`;
           return `<td class="${t.id === "t2" || t.id === "t3" ? "dia" : "noite"}" data-posto="${p.id}" data-turno="${t.id}" tabindex="-1">${h}</td>`;
         }).join("");
       }
       const aj = cd.ajustesPosto.get(p.id) || {};
       const ninguem = !p.rondas && !faPostos.has(p.id) && !cd.designacoes.some((d) => d.posto === p.id);
       corpo += `<tr class="${s.grupamento ? "em-grupo" : ""} ${ninguem ? "ninguem" : ""} ${nLinha++ % 2 ? "alt" : ""} tipo-${p.tipo || "posto"}"><th scope="row" class="posto"><button class="posto-btn" data-act="pop-posto" data-posto="${p.id}" title="Clique para mudar este ${ehViatura(p) ? "viatura" : "posto"}">
-        <span class="pn">${iconePosto(p)}${esc(nomeNoDia(p, cd))}</span>${subNoDia(p, cd) ? `<span class="ps ${aj.area ? "dia" : ""}">${esc(subNoDia(p, cd))}</span>` : ""}${p.so ? `<span class="tag rem">só neste dia</span>` : ""}${p.obs ? `<span class="po">(${esc(p.obs)})</span>` : ""}
+        <span class="pn">${iconePosto(p)}${esc(nomeNoDia(p, cd))}</span>${subNoDia(p, cd) ? `<span class="ps ${aj.area ? "dia" : ""}">${esc(subNoDia(p, cd))}</span>` : ""}${p.so ? `<span class="tag rem">só neste dia</span>` : ""}${obsNoDia(p) ? `<span class="po">(${esc(obsNoDia(p))})</span>` : ""}
         ${aj.vagas ? `<span class="tag rem" title="Clique no nome para voltar ao normal">${aj.vagas.obs === "vaga dispensada" ? "vaga dispensada hoje" : "vagas do dia alteradas"}</span>` : ""}${(() => { const fv = viaturaNaFrota(numeroDe(nomeNoDia(p, cd))); if (!fv || fv.situacao === "QAP" || faPostos.has(p.id)) return ""; const alt = (data.frota || []).filter((x) => x.situacao === "QAP" && x.modelo === fv.modelo && !guarnicaoNaEscala(x.prefixo, cd)).map((x) => x.prefixo); return `<span class="tag fa-log" title="A logística marcou a ${esc(fv.prefixo)} como ${SIT[fv.situacao][0]}.${alt.length ? ` Livres do mesmo modelo: ${alt.join(", ")}.` : ""} Botão direito › Usar outra viatura hoje.">logística: ${fv.situacao === "FAP" ? "FA perm." : "FA"}</span>`; })()}${ninguem ? `<span class="tag vazio" title="Ninguém escalado neste dia. Botão direito: excluir ou mudar as vagas.">ninguém escalado</span>` : ""}<span class="lapis" aria-hidden="true">✎</span></button></th>${cels}</tr>`;
     }
     const vazioGrupo = s.grupamento && !cd.designacoes.some((d) => postos.some((p) => p.id === d.posto));
@@ -2348,6 +2365,7 @@ function vQuadro() {
   <p class="dica como">Clique no <b>nome</b> ou no <b>horário</b> para editar ali mesmo · <b>botão direito</b> mostra todas as opções · <b>arraste</b> para remanejar · setas, Enter, Delete, Ctrl+C e Ctrl+V também funcionam.</p>
   ${painelPlano()}
   ${(() => { const oc = cd.fa.filter((o) => o.oculto && !cd.designacoes.some((d) => d.posto === o.posto)); return oc.length ? `<p class="ocultos">Ocultos hoje (não saem na escala nem na folha): ${oc.map((o) => `<button class="link" data-act="pop-posto" data-posto="${o.posto}" title="Clique para mostrar de novo ou reabrir">${esc(postoPorId(o.posto)?.nome || "")} <span class="meta">(${o.tipo === "FA" ? "FA" : "fechado"})</span></button>`).join(", ")}</p>` : ""; })()}
+  ${(() => { const rs = reservadasNoDia(ui.dia); return rs.length || !soVer() ? `<p class="ocultos reservadas">${rs.length ? `Viaturas reservadas hoje: ${rs.map(({ v, r }) => `<b>${esc(v.prefixo)}</b> <span class="meta">(${esc(r.motivo || "sem motivo")})</span>`).join(", ")}` : ""} ${soVer() ? "" : `<button class="link" data-act="rv-abrir">${rs.length ? "+ reservar outra" : "Reservar viatura…"}</button>`}</p>` : ""; })()}
   ${painelAvisos()}
   ${faixaAtencao(cd, furosTotal)}
   ${disp}
@@ -2423,7 +2441,7 @@ function drawerOperacao(d) {
     <div class="linha op-add"><label class="cresce">Viatura da frota <select id="op-frota"><option value="">escolha…</option>${livres.map((v) => { const u = usoNaEscala(v.prefixo); return `<option value="${esc(v.prefixo)}">${esc(v.prefixo)} · ${esc(v.modelo)}${u ? ` (na escala: ${esc(u.nome)})` : " (livre)"}</option>`; }).join("")}</select></label><button class="btn" data-act="op-add-frota">Adicionar</button></div>
     <div class="linha op-add"><label class="cresce">Outra viatura ou equipe <input id="op-outra" placeholder="ex.: VTR 1399, MOTO 651, EQUIPE A PÉ 1"></label><button class="btn" data-act="op-add-outra">Adicionar</button></div>
     <button class="btn pri largo" data-act="op-salvar">${s ? "Salvar operação" : "Criar operação"}</button>
-    ${s ? `<p class="dica">Para excluir a operação, clique com o botão direito no nome dela no quadro › Excluir seção.</p>` : ""}
+    ${s ? `<button class="btn perigo-leve largo" data-act="op-excluir" data-secao="${s.id}">Excluir a operação…</button>` : ""}
   </div></div>`;
 }
 // ---------- POSTOS EXCLUÍDOS ----------
@@ -3123,13 +3141,14 @@ function vFolha() {
   for (const s of data.secoes) {
     if (!opNoDia(s, ui.dia)) continue;
     const ps = data.postos.filter((p) => p.secao === s.id && postoDoDia(p, ui.dia) && ((faPostos.get(p.id)?.tipo !== "FA" && !faPostos.get(p.id)?.oculto) || cd.designacoes.some((d) => d.posto === p.id)) // viatura em FA não sai na folha (a não ser que a guarnição fique nela)
-      && (p.rondas || faPostos.has(p.id) || cd.designacoes.some((d) => d.posto === p.id) || cd.furos.some((f) => f.posto === p.id))); // nem posto vazio sem vaga
+      && (p.tipo === "vtr" ? cd.designacoes.some((d) => d.posto === p.id) // viatura sem ninguém escalado não sai na folha
+        : p.rondas || faPostos.has(p.id) || cd.designacoes.some((d) => d.posto === p.id) || cd.furos.some((f) => f.posto === p.id))); // nem posto vazio sem vaga
     if (!ps.length) continue;
     const verso = ps.every((p) => p.tipo === "reserva");
     if (s.grupamento && !cd.designacoes.some((d) => ps.some((p) => p.id === d.posto))) continue;
     let html = "";
     html += `<tr class="sec ${s.grupamento ? "grupo" : ""} ${s.operacao ? "op" : ""}"><th>${s.operacao ? `ANEXO · OPERAÇÃO ${esc(s.nome)}<br><span class="sub">${esc(textoOp(s.operacao))}</span>` : esc(s.nome)}</th>${TURNOS.map((t) => `<th>${t.nome.split(" ")[0]}</th><th>TURNO</th>`).join("")}</tr>`;
-    html += ps.map((p) => `<tr><th class="p">${esc(nomeNoDia(p, cd))}${subNoDia(p, cd) && p.tipo !== "reserva" ? `<br><span class="sub">${esc(subNoDia(p, cd))}</span>` : ""}${p.obs ? `<br><span class="sub">(${esc(p.obs)})</span>` : ""}</th>${TURNOS.map((t) => cel(p, t)).join("")}</tr>`).join("");
+    html += ps.map((p) => `<tr><th class="p">${esc(nomeNoDia(p, cd))}${subNoDia(p, cd) && p.tipo !== "reserva" ? `<br><span class="sub">${esc(subNoDia(p, cd))}</span>` : ""}${obsNoDia(p) ? `<br><span class="sub">(${esc(obsNoDia(p))})</span>` : ""}</th>${TURNOS.map((t) => cel(p, t)).join("")}</tr>`).join("");
     if (verso) corpoVerso += html; else corpo += html;
   }
   const grupo = (tipos, titulo, colRet, cor) => {
@@ -3164,6 +3183,7 @@ function vFolha() {
       ${grupo(["TROCA"], "TROCAS DE SERVIÇO", "SITUAÇÃO")}
       ${grupo(["ATESTADO", "LICENCA", "CURSO"], "ATESTADO / LICENÇAS / CURSOS", "PERÍODO", "q-atest")}
       ${grupo(["FERIAS"], "FÉRIAS", "PERÍODO", "q-ferias")}
+      ${(() => { const rs = reservadasNoDia(ui.dia); return rs.length ? `<tr class="sec"><th>VIATURAS RESERVADAS</th><th colspan="4">VIATURA</th><th colspan="4">MOTIVO</th></tr>${rs.map(({ v, r }) => `<tr><th class="p"></th><td colspan="4" class="c">${esc(v.prefixo)} ${esc(v.modelo || "")}</td><td colspan="4" class="c">${esc(r.motivo || "")}${r.ate && r.ate !== r.de ? ` (até ${ddmm(r.ate)})` : ""}</td></tr>`).join("")}` : ""; })()}
     </table>
   </article></div>`;
 }
@@ -3475,7 +3495,7 @@ function posicionarPop() {
 function fecharPop() { ui.pop = null; const p = $("#pop"); if (p) { p.hidden = true; p.innerHTML = ""; } }
 function desenharPop() {
   const p = $("#pop"), s = ui.pop;
-  p.innerHTML = { hora: popCard, card: popCard, tirar: popTirar, insp: popInsp, gm: popGm, add: popGm, motivo: popMotivo, posto: popPosto, secao: popSecao, novo: popNovo, buscagm: popBuscaGm }[s.modo](s);
+  p.innerHTML = { hora: popCard, card: popCard, tirar: popTirar, insp: popInsp, gm: popGm, add: popGm, motivo: popMotivo, posto: popPosto, secao: popSecao, novo: popNovo, buscagm: popBuscaGm, reservavtr: popReservaVtr }[s.modo](s);
   p.hidden = false;
   const W = Math.min(s.modo === "posto" || s.modo === "secao" || s.modo === "novo" || s.modo === "buscagm" ? 460 : 380, innerWidth - 24);
   p.style.width = W + "px";
@@ -3544,10 +3564,21 @@ function guarnicaoNaEscala(prefixo, cd) {
   return [d.length ? d.join("/") : "", n.length ? `noite: ${n.join("/")}` : ""].filter(Boolean).join(" · ");
 }
 // Viaturas que a logística marcou QAP e que não estão em uso na escala do dia (mesmo tipo; mesmo modelo primeiro)
+// Reserva de viatura num período, com motivo (fica na frota: a logística também pode reservar)
+const reservaDe = (v, dia) => (v?.reservas || []).find((r) => r.de <= dia && dia <= (r.ate || r.de));
+const reservadasNoDia = (dia) => (data.frota || []).map((v) => ({ v, r: reservaDe(v, dia) })).filter((x) => x.r);
+function popReservaVtr(s) {
+  const qap = (data.frota || []).filter((v) => v.situacao === "QAP" && !reservaDe(v, ui.dia));
+  return `${cabPop("Reservar viatura", "Fica marcada como reservada na escala e na folha")}<div class="pop-corpo"><div class="bloco">
+    <label>Viatura <select id="rv-v">${(s.fr ? (data.frota || []).filter((v) => v.id === s.fr) : qap).map((v) => `<option value="${v.id}">${esc(v.prefixo)} · ${esc(v.modelo || "")}</option>`).join("") || `<option value="">nenhuma QAP livre</option>`}</select></label>
+    <label>Motivo <input id="rv-motivo" placeholder="ex.: evento na prefeitura, apoio à defesa civil" autocomplete="off"></label>
+    <div class="linha"><label>De <input type="date" id="rv-de" value="${ui.dia}"></label><label>Até <input type="date" id="rv-ate" value="${ui.dia}"></label></div>
+    <button class="btn pri" data-act="rv-salvar">Reservar</button></div></div>`;
+}
 function viaturasLivres(p, cd) {
   const atual = viaturaNaFrota(numeroDe(nomeNoDia(p, cd))), moto = p.tipo === "moto";
   const emFA = new Set(cd.fa.filter((o) => o.tipo === "FA").map((o) => numeroDe(nomeNoDia(postoPorId(o.posto) || {}, cd))));
-  return (data.frota || []).filter((v) => v.situacao === "QAP" && !emFA.has(String(v.prefixo)) && ehMoto(v.modelo) === moto && String(v.prefixo) !== numeroDe(nomeNoDia(p, cd)) && !guarnicaoNaEscala(v.prefixo, cd))
+  return (data.frota || []).filter((v) => v.situacao === "QAP" && !reservaDe(v, ui.dia) && !emFA.has(String(v.prefixo)) && ehMoto(v.modelo) === moto && String(v.prefixo) !== numeroDe(nomeNoDia(p, cd)) && !guarnicaoNaEscala(v.prefixo, cd))
     .sort((a, b) => ((b.modelo === atual?.modelo) - (a.modelo === atual?.modelo)) || String(a.prefixo).localeCompare(String(b.prefixo)));
 }
 function vFrota() {
@@ -3560,13 +3591,14 @@ function vFrota() {
       <td class="sit">${Object.entries(SIT).map(([k, [t, c]]) => `<button class="sitb ${c} ${v.situacao === k ? "on" : ""}" data-act="fr-sit" data-fr="${v.id}" data-sit="${k}" aria-pressed="${v.situacao === k}" title="${t}">${k === "FAP" ? "FA perm." : k}</button>`).join("")}</td>
       <td><input class="fr-in" data-fr="${v.id}" data-campo="finalidade" value="${esc(v.finalidade || "")}" placeholder="${v.situacao === "FAP" ? "FA permanente" : "finalidade"}" aria-label="Finalidade"></td>
       <td><input class="fr-in" data-fr="${v.id}" data-campo="guarnicao" value="${esc(v.guarnicao || "")}" placeholder="${esc(esc2 || "guarnição")}" title="${esc2 ? `Na escala de ${ddmm(ui.dia)}: ${esc(esc2)}` : ""}" aria-label="Guarnição"></td>
+      <td class="fr-res">${(v.reservas || []).filter((r) => (r.ate || r.de) >= hojeBase()).map((r) => `<span class="tag-res" title="${esc(r.motivo || "")}">reservada ${ddmm(r.de)}${r.ate && r.ate !== r.de ? `–${ddmm(r.ate)}` : ""}${r.motivo ? ` · ${esc(r.motivo)}` : ""} <button class="ic mini" data-act="fr-res-del" data-fr="${v.id}" data-de="${r.de}" aria-label="Cancelar reserva">×</button></span>`).join("")}<button class="link" data-act="fr-reservar" data-fr="${v.id}">reservar…</button></td>
       <td><button class="ic" data-act="fr-del" data-fr="${v.id}" aria-label="Excluir viatura ${esc(v.prefixo)}" title="Excluir">×</button></td></tr>`; };
   const cards = modelos.map((m) => { const vs = fr.filter((v) => (v.modelo || "SEM MODELO") === m), mostra = vs.filter(vis);
     if (!mostra.length && (f.sit || f.busca)) return "";
     return `<section class="fr-card"><header><span class="fr-qtd">${vs.length}</span><button class="link fr-modelo" data-act="fr-renomear" data-modelo="${esc(m)}" title="Renomear modelo">${esc(m)}</button>
         <span class="fr-mini">${["QAP", "FA", "FAP"].map((k) => vs.filter((v) => v.situacao === k).length ? `<i class="${SIT[k][1]}">${vs.filter((v) => v.situacao === k).length} ${k === "FAP" ? "FA perm." : k}</i>` : "").join("")}</span>
         <button class="btn mini" data-act="fr-add" data-modelo="${esc(m)}">+ viatura</button></header>
-      <table class="fr"><thead><tr><th>Prefixo</th><th>Situação</th><th>Finalidade</th><th>Guarnição</th><th></th></tr></thead><tbody>${mostra.map(linha).join("")}</tbody></table></section>`; }).join("");
+      <table class="fr"><thead><tr><th>Prefixo</th><th>Situação</th><th>Finalidade</th><th>Guarnição</th><th>Reserva</th><th></th></tr></thead><tbody>${mostra.map(linha).join("")}</tbody></table></section>`; }).join("");
   return `<div class="barra"><div class="datas"><h2 class="titulo-mes">Viaturas</h2><span class="meta">situação atual da frota · guarnição sugerida pela escala de ${ddmm(ui.dia)}</span></div>
     <div class="filtros"><input type="search" id="fr-busca" value="${esc(f.busca)}" placeholder="Buscar prefixo, modelo, finalidade" aria-label="Buscar viatura"></div></div>
   <div class="resumo fr-resumo">
@@ -3692,9 +3724,13 @@ function destacarGm(gm) {
     el.scrollIntoView({ block: "center", behavior: "smooth" }); el.classList.add("piscar"); setTimeout(() => el.classList.remove("piscar"), 2400);
   }, 60);
 }
+// "SEG A SEX" e afins só aparecem nos dias em que o posto funciona (no fim de semana confundiria)
+const obsNoDia = (p) => { const ds = diaSemana(ui.dia);
+  if (!p.obs || (p.dias && !p.dias.includes(ds)) || (/SEG\.?\s*(A|À|-)\s*SEX/i.test(p.obs) && (ds === 0 || ds === 6))) return "";
+  return p.obs; };
 function nomeNoDia(p, cd) {
   const pre = cd?.ajustesPosto?.get(p.id)?.prefixo;
-  return pre ? `${pre.nome} (no lugar da ${p.nome.replace(/^(NOITE )?(VTR|MT) /, "")})` : p.nome;
+  return pre ? `${/^NOITE /.test(p.nome) && !/^NOITE /.test(pre.nome) ? "NOITE " : ""}${pre.nome}` : p.nome; // troca de viatura: só o nome novo
 }
 function popPosto(s) {
   const p = postoPorId(s.posto), cd = calcularDia(data, ui.dia);
@@ -3859,7 +3895,7 @@ function limitarDia() {
 }
 // ações que quem só visualiza pode usar (navegar, buscar, imprimir)
 const LIVRES = new Set(["folha-dia", "dia", "ir-hoje", "imprimir", "letra", "busca-gm", "bg-escolher", "bg-limpar", "bg-mostrar", "pop-fechar", "so-furos", "mn-proxy", "mn-nova-aba", "mn-busca-gm", "ed-nada", "ver-todos", "lemb-todos", "perfil-sair", "fechar"]);
-function bloqueadoParaPerfil(a) { return soVer() && !LIVRES.has(a) && !(editaFrota() && (a.startsWith("fr-") || a === "desfazer")); }
+function bloqueadoParaPerfil(a) { return soVer() && !LIVRES.has(a) && !(editaFrota() && (a.startsWith("fr-") || a.startsWith("rv-") || a === "desfazer")); }
 const DOCS_SYNC = ["postos", "secoes", "equipes", "config", "requerimentos", "inspetores", "frota", "folgasSync"];
 const srv = { revisao: 0, foto: null, enviando: false, pendente: false, resumos: [], estado: "ok" };
 function fotografar(d) {
@@ -4079,7 +4115,9 @@ function itensPosto(p) {
     ...itensMoverPosto(p),
     { t: "Copiar como modelo (para colar em outra seção)", act: "copiar-modelo", d: { id: p.id } },
     { sep: true },
-    { t: `Excluir ${ehViatura(p) ? "viatura" : "posto"}…`, act: "mn-excluir-posto" },
+    { t: `Excluir ${ehViatura(p) ? "viatura" : "posto"}`, sub: [
+      { t: `Só em ${ddmm(ui.dia)} (some da escala e da folha neste dia)`, act: "mn-fechar", d: { tipo: "FECHADO", oculto: "1" }, padrao: true },
+      { t: "Em todos os dias (excluir do cadastro e dos padrões)…", act: "mn-excluir-posto" }] },
     ...itensGerais(),
   ];
 }
@@ -4207,6 +4245,7 @@ const itensMoverPosto = (p) => {
 };
 function itensSecao(id) {
   const s = data.secoes.find((x) => x.id === id), i = data.secoes.indexOf(s);
+  if (s?.operacao) return [{ t: "Editar a operação…", act: "op-editar", d: { secao: id }, padrao: true }, { sep: true }, { t: "Excluir a operação…", act: "op-excluir", d: { secao: id } }, ...itensGerais()];
   return [
     { t: "Renomear", act: "mn-secao-nome", d: { secao: id }, padrao: true },
     { t: "Novo posto ou viatura…", act: "mn-secao", d: { secao: id } },
@@ -5701,6 +5740,19 @@ document.addEventListener("click", (e) => {
       if (imp.competencia) { syncFolgas.mudancas = syncFolgas.mudancas.filter((x) => x.mes !== imp.competencia.mes); syncFolgas.prontos = syncFolgas.prontos.filter((m) => m !== imp.competencia.mes); try { localStorage.removeItem("folgas-cache2"); } catch { /* ignora */ } mostrarSeloFolgas(); }
       return;
     }
+    case "op-excluir": {
+      const s = data.secoes.find((x) => x.id === el.dataset.secao), ps = new Set(data.postos.filter((p) => p.secao === s.id).map((p) => p.id));
+      const ocs = data.ocorrencias.filter((o) => ps.has(o.posto)), gms = new Set(ocs.filter((o) => o.gm).map((o) => o.gm));
+      fecharMenu();
+      if (!confirm(`Excluir a operação ${s.nome}?\n\n${gms.size ? `${gms.size} GM(s) escalados nela voltam para onde estavam (remanejamentos e HE da operação são desfeitos).` : "Ninguém está escalado nela."}`)) return;
+      ui.drawer = null;
+      mudar(`Operação ${s.nome} excluída${gms.size ? ` · ${gms.size} GM(s) voltaram ao lugar de origem` : ""}`, () => {
+        data.ocorrencias = data.ocorrencias.filter((o) => !ps.has(o.posto));
+        data.postos = data.postos.filter((p) => !ps.has(p.id));
+        data.secoes = data.secoes.filter((x) => x !== s);
+      });
+      return;
+    }
     case "op-nova": ui.drawer = { tipo: "operacao", novas: [] }; render(); $("#op-nome")?.focus(); return;
     case "op-editar": ui.drawer = { tipo: "operacao", secao: el.dataset.secao, novas: [] }; render(); return;
     case "op-add-frota": case "op-add-outra": {
@@ -5871,6 +5923,15 @@ document.addEventListener("click", (e) => {
       if (!navigator.clipboard?.writeText) copiarTexto(txt);
       if (ofertar(x.posto, x.dia, x.ini, x.fim, [x.gm], x.nat || "he")) toast(`Mensagem copiada e ${nomeGm(x.gm)} marcado como aguardando resposta. É só colar no WhatsApp.`, true);
       return; }
+    case "fr-reservar": abrirPop("reservavtr", el, { fr: el.dataset.fr }); return;
+    case "rv-abrir": abrirPop("reservavtr", el, {}); return;
+    case "rv-salvar": {
+      const v = (data.frota || []).find((x) => x.id === $("#rv-v")?.value), motivo = $("#rv-motivo").value.trim(), de = $("#rv-de").value, ate = $("#rv-ate").value || de;
+      if (!v) { toast("Escolha a viatura."); return; } if (!motivo) { toast("Escreva o motivo da reserva."); $("#rv-motivo").focus(); return; } if (!de || ate < de) { toast("Confira as datas."); return; }
+      fecharPop(); mudar(`${v.prefixo} reservada ${ddmm(de)}${ate !== de ? ` a ${ddmm(ate)}` : ""}: ${motivo}`, () => { v.reservas = [...(v.reservas || []).filter((r) => (r.ate || r.de) < de || r.de > ate), { de, ate, motivo }]; });
+      return;
+    }
+    case "fr-res-del": { const v = (data.frota || []).find((x) => x.id === el.dataset.fr); mudar(`Reserva da ${v.prefixo} cancelada`, () => { v.reservas = (v.reservas || []).filter((r) => r.de !== el.dataset.de); }); return; }
     case "mn-nova-aba": fecharMenu(); window.open(location.pathname + location.search + el.dataset.href, "_blank"); return;
     case "mn-ed-escolher": { fecharMenu(); escolherEditor(Number(el.dataset.i)); return; }
     case "mn-proxy": { const b = ui.proxies?.[Number(el.dataset.i)]; fecharMenu(); if (b?.isConnected) b.click(); return; }
