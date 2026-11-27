@@ -3285,6 +3285,13 @@ document.addEventListener("click", (e) => {
     case "posto-criar": {
       const sec = $("#np-secao")?.value || ui.pop.secao, nome = $("#np-nome").value.trim().toUpperCase();
       if (!nome) { toast("Digite o nome do posto ou viatura."); return; }
+      const igual = data.postos.find((x) => x.ativo === false && !x.apagado && !x.so && !x.de && norm(x.nome) === norm(nome));
+      if (igual && !$("#np-so")?.checked) {
+        const lot = lotadosEm(igual.id, ui.padrao?.desde || ui.dia).length;
+        if (confirm(`Já existe "${igual.nome}" excluída${lot ? ` (com ${lot} GM${lot === 1 ? "" : "s"} lotado${lot === 1 ? "" : "s"} nela)` : ""}.\n\nOK = reativar a antiga (recomendado: mantém a guarnição e o histórico)\nCancelar = criar uma nova mesmo assim`)) {
+          fecharPop(); mudar(`${igual.nome} reativada`, () => { delete igual.ativo; }); return;
+        }
+      }
       const tipo = $("#np-tipo").value, nd = Number($("#np-dia").value) || 0, nn = Number($("#np-noite").value) || 0, sub = $("#np-sub")?.value.trim().toUpperCase() || "", so = $("#np-so")?.checked ? ui.dia : "";
       fecharPop();
       mudar(`${nome} criado${so ? ` só para ${ddmm(so)}` : ""}. Clique em "+ pôr GM" para escalar alguém.`, () => {
