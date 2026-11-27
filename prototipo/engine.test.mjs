@@ -409,3 +409,17 @@ test("serviço noturno com HE fixa depois da meia-noite (18–06 + 06–07): a H
   const ds = calcularDia(data, d).designacoes.filter((x) => x.gm === "n").map((x) => [x.ini, x.fim, x.nat]);
   assert.deepEqual(ds, [[1080, 1800, "normal"], [1800, 1860, "he"]]);
 });
+
+test("vaga de grupamento: os GMs do grupamento aparecem primeiro nas sugestões", async () => {
+  const { grupoDoPosto } = await import("./engine.js");
+  const data = base();
+  data.secoes = [{ id: "s1", nome: "MOTOS · GESCOM", grupamento: true }];
+  data.postos.push({ id: "mt", nome: "MT 631", tipo: "moto", secao: "s1", vagas: { t2: 1, t3: 1 } });
+  data.gms.find((g) => g.id === "n").grupos = ["GESCOM"];
+  data._versao++;
+  const d = diaDe(data, "D1");
+  assert.equal(grupoDoPosto(data, "mt"), "MOTOS · GESCOM");
+  const s = sugerir(data, d, "mt", 420, 1140).he;
+  assert.equal(s[0]?.gm.id, "n");
+  assert.match(s[0].notas.join(), /do MOTOS · GESCOM/);
+});

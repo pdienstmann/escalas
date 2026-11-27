@@ -165,6 +165,8 @@ function faixaAtencao(cd, furosTotal) {
   const ofer = cd.furos.filter((f) => ofertaDaVaga(f.posto, f.turno, ui.dia)).reduce((t, f) => t + f.faltam, 0), semNinguem = furosTotal - ofer;
   if (semNinguem) it.push(["grave", `${semNinguem} ${semNinguem === 1 ? "vaga descoberta" : "vagas descobertas"}${ofer ? " (sem oferta)" : ""}`, `<button class="link" data-act="so-furos">ver só os furos</button>`]);
   if (ofer) it.push(["aviso", `${ofer} ${ofer === 1 ? "vaga" : "vagas"} com HE oferecida, aguardando resposta`, ""]);
+  const pendResp = ofertasAbertas(ui.dia).filter((o) => !cd.furos.some((f) => f.posto === o.posto && sobrepoe(...intervalo(o.ini, o.fim), TURNOS.find((t) => t.id === f.turno).ini, TURNOS.find((t) => t.id === f.turno).fim) > 0)).reduce((t, o) => t + aguardando(o).length, 0);
+  if (pendResp) it.push(["info", `${pendResp} GM${pendResp === 1 ? "" : "s"} ainda sem resposta em vagas já preenchidas (avise que não precisa mais)`, ""]);
   for (const a of cd.alertas) it.push([a.nivel === "erro" ? "grave" : "aviso", a.texto, ""]);
   const semInsp = ["dia", "noite"].filter((per) => cd.equipes.map(equipe).some((e) => e.periodo === per) && cd.equipes.map(equipe).filter((e) => e.periodo === per).every((e) => !(cd.inspetores.has(e.id) ? cd.inspetores.get(e.id) : e.inspetor)));
   if (semInsp.length) it.push(["grave", `Sem inspetor de serviço ${semInsp.map((p) => (p === "dia" ? "de dia" : "à noite")).join(" e ")}`, `<button class="link" data-act="ir-insp">escolher</button>`]);
@@ -204,8 +206,9 @@ function vQuadro() {
           const furo = furosP.find((f) => f.turno === t.id);
           const { mostrar, junto } = juntarHeFixa(aqui, t, cd.designacoes);
           let h = mostrar.map((d) => chip(d, t, junto.get(d))).join("");
-          const of = furo && ofertaDaVaga(p.id, t.id, ui.dia);
-          if (of) h += `<button class="furo oferecida" data-act="oferta-abrir" data-id="${of.id}" title="Clique para marcar quem confirmou">HE oferecida a ${aguardando(of).length || of.gms.length} · aguardando<small>${esc(aguardando(of).map((g) => nomeGm(g.gm)).join(", "))}</small></button>`;
+          const of = ofertaDaVaga(p.id, t.id, ui.dia);
+          if (of && !furo && aguardando(of).length) h += `<button class="oferta-pend" data-act="oferta-abrir" data-id="${of.id}" title="Ainda falta resposta de quem recebeu a oferta">⏳ ${aguardando(of).length} aguardando resposta da HE oferecida</button>`;
+          else if (of && furo) h += `<button class="furo oferecida" data-act="oferta-abrir" data-id="${of.id}" title="Clique para marcar quem confirmou">HE oferecida a ${aguardando(of).length || of.gms.length} · aguardando<small>${esc(aguardando(of).map((g) => nomeGm(g.gm)).join(", "))}</small></button>`;
           else if (furo) h += `<button class="furo" data-act="pop-add" data-posto="${p.id}" data-turno="${t.id}">Cobrir · falta ${furo.faltam}${p.reforco ? ` · ${p.reforco.ini}–${p.reforco.fim}` : ""}</button>`;
           if (!aqui.length && !furo) h = p.rondas ? `<span class="rondas">VTR/RONDAS FREQUENTES</span>` : naoHoje && p.vagas ? `<span class="vazio">não funciona hoje</span>` : "";
           if (!furo) h += `<button class="add" data-act="pop-add" data-posto="${p.id}" data-turno="${t.id}" aria-label="Pôr GM em ${esc(p.nome)}, ${t.nome}">+ pôr GM</button>`;
@@ -1060,7 +1063,7 @@ function cartoesPendencias(porDia) {
         }).join("");
         const outras = alts.map((s) => { const [a, b] = horarioProposto(data, d, s.gm.id, x.posto.id, x.ini, x.fim); return btn(s.gm.id, a, b, "he", motivoSug(s) || "livre", false); }).join("");
         const of = ofertasAbertas(d).find((o) => o.posto === x.posto.id && sobrepoe(...intervalo(o.ini, o.fim), x.ini, x.fim) > 0);
-        const stOf = of ? `<div class="oferta-st"><span class="of-tit">📲 HE oferecida · aguardando resposta</span>${aguardando(of).map((g) => `<span class="of-gm"><b>${esc(nomeGm(g.gm))}</b><button class="btn mini of-sim" data-act="of-resp" data-id="${of.id}" data-gm="${g.gm}" data-e="confirmou">✓ confirmou</button><button class="link" data-act="of-resp" data-id="${of.id}" data-gm="${g.gm}" data-e="recusou">recusou</button></span>`).join("")}<button class="link" data-act="of-copiar" data-id="${of.id}">copiar mensagem</button></div>` : "";
+        const stOf = of ? `<div class="oferta-st"><span class="of-tit">📲 HE oferecida · aguardando resposta</span>${aguardando(of).map((g) => `<span class="of-gm"><b>${esc(nomeGm(g.gm))}</b><button class="btn mini of-sim" data-act="of-resp" data-id="${of.id}" data-gm="${g.gm}" data-e="confirmou">✓ confirmou</button><button class="link" data-act="of-resp" data-id="${of.id}" data-gm="${g.gm}" data-e="recusou">recusou</button><button class="link" data-act="of-resp" data-id="${of.id}" data-gm="${g.gm}" data-e="cancelada">cancelar envio</button></span>`).join("")}<button class="link" data-act="of-copiar" data-id="${of.id}">copiar mensagem</button></div>` : "";
         return `<li class="${of ? "com-oferta" : ""}"><div class="pinfo"><b>${esc(x.posto.nome)}</b> <span class="meta">${x.posto.reforco ? "Reforço" : x.per === "dia" ? "Dia" : "Noite"} ${fmtHm(x.ini)}–${fmtHm(x.fim)}${x.faltam > 1 ? ` · faltam ${x.faltam}` : ""}</span></div>
           ${stOf}<div class="pacoes">${of ? `<span class="meta">oferecer a mais:</span>` : ""}${principais || `<span class="meta">ninguém livre</span>`}${outras ? `<span class="ou">ou</span>${outras}` : ""}
           ${extras.length ? `<button class="link" data-act="pend-mais" data-k="${esc(chave)}" aria-expanded="${aberto}">${aberto ? "menos" : `+${extras.length} opções`}</button>` : ""}
@@ -2004,7 +2007,7 @@ function abrirEditor(modo, el, ctx) {
     if (modo === "add" && ctx.ini == null) [ctx.ini, ctx.fim] = intervaloVaga(ctx.posto, ctx.turno);
     const titulo = modo === "nome" ? `No lugar de ${nomeGm(ed.d.gm)}` : modo === "padrao" ? `${postoPorId(ctx.posto).nome} · ${ctx.per} · padrão ${ui.padrao.aba === "impar" ? "ímpar" : "par"}` : `${postoPorId(ctx.posto).nome}`;
     box.innerHTML = `<input id="ed-in" class="ed-in" value="${esc(ctx.inicial || "")}" placeholder="Digite o nome do GM" aria-label="${esc(titulo)}" role="combobox" aria-expanded="true" aria-controls="ed-lista" autocomplete="off" spellcheck="false">
-      <div class="ed-lista-box"><p class="ed-titulo">${esc(titulo)}</p>${modo === "add" && ctx.ini != null ? `<div class="ed-chips ed-dur">${opcoesVaga(ctx.posto, ctx.turno).map(([a, b, r]) => `<button class="ed-chip ${a === ctx.ini && b === ctx.fim ? "on" : ""}" data-act="ed-dur" data-ini="${a}" data-fim="${b}" tabindex="-1">${r} · ${fmtHm(a)}–${fmtHm(b)}</button>`).join("")}</div>` : ""}${modo === "add" ? `<div class="ed-chips ed-nat"><button class="ed-chip ${ctx.nat !== "bh" ? "on" : ""}" data-act="ed-nat" data-nat="he" tabindex="-1">Hora extra</button><button class="ed-chip ${ctx.nat === "bh" ? "on bh" : ""}" data-act="ed-nat" data-nat="bh" tabindex="-1">Banco de horas (BH+)</button><input id="ed-req" class="ed-req" placeholder="REQ (opcional)" size="9" autocomplete="off"></div>` : ""}<ul id="ed-lista" role="listbox"></ul><div class="ed-rodape"><button class="link ed-mais" data-act="ed-mais">Mais opções…</button>${modo === "add" ? `<button class="link ed-of" data-act="ed-oferecer">📲 Oferecer a vários (WhatsApp)…</button>` : ""}${modo === "add" && calcularDia(data, ui.dia).furos.some((f) => f.posto === ctx.posto && f.turno === ctx.turno) ? `<button class="link ed-sem" data-act="ed-semgm">Deixar sem GM neste dia</button>` : ""}</div></div>`;
+      <div class="ed-lista-box"><p class="ed-titulo">${esc(titulo)}</p>${modo === "add" && ctx.ini != null ? `<div class="ed-chips ed-dur">${opcoesVaga(ctx.posto, ctx.turno).map(([a, b, r]) => `<button class="ed-chip ${a === ctx.ini && b === ctx.fim ? "on" : ""}" data-act="ed-dur" data-ini="${a}" data-fim="${b}" tabindex="-1">${r} · ${fmtHm(a)}–${fmtHm(b)}</button>`).join("")}</div>` : ""}${modo === "add" ? `<div class="ed-chips ed-nat"><button class="ed-chip ${!["bh", "rem"].includes(ctx.nat) ? "on" : ""}" data-act="ed-nat" data-nat="he" tabindex="-1">Hora extra</button><button class="ed-chip ${ctx.nat === "bh" ? "on bh" : ""}" data-act="ed-nat" data-nat="bh" tabindex="-1">Banco de horas (BH+)</button><button class="ed-chip ${ctx.nat === "rem" ? "on rem" : ""}" data-act="ed-nat" data-nat="rem" tabindex="-1" title="GMs à disposição ou na reserva técnica">Remanejar<span class="n-rem"></span></button><input id="ed-req" class="ed-req" placeholder="REQ (opcional)" size="9" autocomplete="off"></div>` : ""}<ul id="ed-lista" role="listbox"></ul><div class="ed-rodape"><button class="link ed-mais" data-act="ed-mais">Mais opções…</button>${modo === "add" ? `<button class="link ed-of" data-act="ed-oferecer">📲 Oferecer a vários (WhatsApp)…</button>` : ""}${modo === "add" && calcularDia(data, ui.dia).furos.some((f) => f.posto === ctx.posto && f.turno === ctx.turno) ? `<button class="link ed-sem" data-act="ed-semgm">Deixar sem GM neste dia</button>` : ""}</div></div>`;
   }
   box.hidden = false;
   box.style.left = Math.max(4, Math.min(r.left - 2, innerWidth - 284)) + "px";
@@ -2064,14 +2067,16 @@ function candidatosEditor() {
 }
 function atualizarLista() {
   const q = norm($("#ed-in").value.trim());
-  const todos = candidatosEditor().filter((x) => !q || norm(x.gm.nome).includes(q));
+  const cand = candidatosEditor(), nat = ed.modo === "add" ? ed.ctx?.nat || "he" : null;
+  const nRem = cand.filter((x) => x.via === "rem").length, sp = document.querySelector(".ed-nat .n-rem"); if (sp) sp.textContent = ` (${nRem})`;
+  const todos = cand.filter((x) => (!nat ? true : nat === "rem" ? x.via === "rem" : x.via !== "rem")).filter((x) => !q || norm(x.gm.nome).includes(q));
   todos.sort((a, b) => (q ? (norm(b.gm.nome).startsWith(q) - norm(a.gm.nome).startsWith(q)) : 0));
   ed.lista = todos.slice(0, 25); // mais opções, com rolagem (as mesmas informações de cada uma)
   if (ed.sel >= ed.lista.length) ed.sel = 0;
   $("#ed-lista").innerHTML = ed.lista.length ? ed.lista.map((x, i) => `<li role="option" id="ed-op-${i}" aria-selected="${i === ed.sel}" aria-disabled="${!!x.bloqueado}" data-i="${i}" class="${x.bloqueado ? "bloq" : ""} ${ed.oferta?.has(x.gm.id) ? "marcado" : ""}">
     <b>${ed.oferta ? `<span class="caixa" aria-hidden="true">${ed.oferta.has(x.gm.id) ? "☑" : "☐"}</span>` : ""}${esc(x.gm.nome)}</b><span>${x.via === "pad" ? esc(x.notas[0]) : x.via === "rem" ? `${esc(x.origem.toLowerCase())} · ${x.daEscala ? "tirar da escala (abre vaga lá)" : "remanejar"}` : `${x.notas?.length ? `<span class="mot">${esc(x.notas[0])}</span>` : ""}`}${x.via === "rem" ? "" : seloHE(x.heMes + x.transporte)}</span></li>`).join("")
     + (todos.length > 25 ? `<li class="ed-resto" aria-hidden="true">+ ${todos.length - 25} — continue digitando</li>` : "")
-    : `<li class="ed-resto">Ninguém livre com esse nome nesse horário</li>`;
+    : `<li class="ed-resto">${nat === "rem" && !q ? "Ninguém à disposição ou na reserva nesse horário" : "Ninguém livre com esse nome nesse horário"}</li>`;
   $("#ed-in").setAttribute("aria-activedescendant", ed.lista.length ? `ed-op-${ed.sel}` : "");
   // a lista nunca passa da borda da tela: encolhe para caber
   const lst = $("#ed-lista"), box = lst?.closest(".ed-lista-box");
@@ -2161,6 +2166,7 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "Enter") { e.preventDefault(); escolherEditor(ed.sel); }
 }, true);
 document.addEventListener("input", (e) => {
+  if (e.target.id === "ef-busca") { ui.efetivo.busca = e.target.value; render(); const i = $("#ef-busca"); i.focus(); i.setSelectionRange(i.value.length, i.value.length); return; }
   if (e.target.id === "fr-busca") { ui.frota.busca = e.target.value; render(); const i = $("#fr-busca"); i.focus(); i.setSelectionRange(i.value.length, i.value.length); return; }
   if (e.target.id === "ng-nome") {
     const g = data.gms.find((x) => norm(x.nome) === norm(e.target.value.trim()));
@@ -2323,25 +2329,32 @@ function ofertar(posto, dia, ini, fim, gms, nat = "he") {
 function responderOferta(id, gm, estado) {
   const o = data.ocorrencias.find((x) => x.id === id), g = o?.gms.find((x) => x.gm === gm);
   if (!g) return;
-  if (estado === "recusou") { mudar(`${nomeGm(gm)} recusou a HE`, () => { g.estado = "recusou"; if (!aguardando(o).length && !o.gms.some((x) => x.estado === "confirmou")) o.fechada = true; }); return; }
+  if (estado === "recusou" || estado === "cancelada") {
+    mudar(estado === "recusou" ? `${nomeGm(gm)} recusou a HE` : `Envio para ${nomeGm(gm)} cancelado`, () => { g.estado = estado; if (!aguardando(o).length) o.fechada = true; });
+    return;
+  }
   const conf = o.gms.filter((x) => x.estado === "confirmou").length + 1;
   const [a, b] = horarioProposto(data, o.de, gm, o.posto, ...intervalo(o.ini, o.fim));
   const [oa, ob] = intervalo(o.ini, o.fim), parte = b - a < ob - oa;
-  mudar(`${nomeGm(gm)} confirmou: ${o.nat === "bh" ? "BH+" : "HE"} ${fmtHm(a)}–${fmtHm(b)} em ${postoPorId(o.posto).nome}${parte ? ` (estende 6h; o resto continua vaga)` : conf >= o.vagas ? " · vaga preenchida" : ` · falta${o.vagas - conf === 1 ? "" : "m"} ${o.vagas - conf}`}`, () => {
+  mudar(`${nomeGm(gm)} confirmou: ${o.nat === "bh" ? "BH+" : "HE"} ${fmtHm(a)}–${fmtHm(b)} em ${postoPorId(o.posto).nome}${parte ? ` (estende 6h; o resto continua vaga)` : conf >= o.vagas ? " · vaga preenchida" : ` · falta${o.vagas - conf === 1 ? "" : "m"} ${o.vagas - conf}`}${aguardando(o).length > 1 ? ` · ${aguardando(o).length - 1} ainda aguardando resposta` : ""}`, () => {
     g.estado = "confirmou";
     data.ocorrencias.push({ id: novoId(), tipo: o.nat === "bh" ? "BH_MAIS" : "HE", gm, de: o.de, ini: fmtHm(a), fim: fmtHm(b), posto: o.posto, req: "", oferta: o.id });
-    if (conf >= o.vagas) o.fechada = true; // vaga coberta: quem não respondeu sai da lista
+    if (!aguardando(o).length) o.fechada = true; // só fecha quando todos tiverem resposta (confirmou, recusou ou envio cancelado)
   });
 }
 // menu da vaga oferecida: confirmar / recusar cada um, oferecer a mais, copiar mensagem
 function menuOferta(o, el) {
   const r = el.getBoundingClientRect(), ag = aguardando(o);
   abrirMenu([{ t: `HE oferecida · ${postoPorId(o.posto).nome} ${o.ini}–${o.fim}${o.vagas > 1 ? ` · ${o.vagas} vagas` : ""}`, act: "ed-nada", desab: true }, { sep: true },
-    ...ag.flatMap((g) => [{ t: `✓ ${nomeGm(g.gm)} confirmou`, act: "of-resp", d: { id: o.id, gm: g.gm, e: "confirmou" } }, { t: `✗ ${nomeGm(g.gm)} recusou`, act: "of-resp", d: { id: o.id, gm: g.gm, e: "recusou" } }]),
-    ...o.gms.filter((g) => g.estado !== "oferecida").map((g) => ({ t: `${nomeGm(g.gm)}: ${g.estado}`, act: "ed-nada", desab: true })),
+    ...(() => { const cheia = o.gms.filter((x) => x.estado === "confirmou").length >= o.vagas;
+      return ag.map((g) => ({ t: `${nomeGm(g.gm)} · aguardando`, sub: [
+        { t: `✓ Confirmou${cheia ? " (vaga já preenchida: lança mesmo assim)" : ""}`, act: "of-resp", d: { id: o.id, gm: g.gm, e: "confirmou" } },
+        { t: "✗ Recusou", act: "of-resp", d: { id: o.id, gm: g.gm, e: "recusou" } },
+        { t: "Cancelei o envio para ele", act: "of-resp", d: { id: o.id, gm: g.gm, e: "cancelada" } }] })); })(),
+    ...o.gms.filter((g) => g.estado !== "oferecida").map((g) => ({ t: `${nomeGm(g.gm)}: ${{ confirmou: "✓ confirmou", recusou: "✗ recusou", cancelada: "envio cancelado" }[g.estado] || g.estado}`, act: "ed-nada", desab: true })),
     { sep: true }, { t: "Copiar mensagem para o WhatsApp", act: "of-copiar", d: { id: o.id } },
     { t: "Oferecer a mais GMs…", act: "of-mais", d: { id: o.id } },
-    { t: "Cancelar a oferta (volta a ficar vermelha)", act: "of-cancelar", d: { id: o.id } }], r.left, r.bottom + 2, el, {});
+    { t: ag.length ? "Cancelar o envio para todos que faltam responder" : "Encerrar a oferta", act: "of-cancelar", d: { id: o.id } }], r.left, r.bottom + 2, el, {});
 }
 // Dispensa a vaga descoberta só neste dia (reduz as vagas do turno), e ela sai dos avisos
 function deixarSemGm(postoId, turnos, dia) {
@@ -2503,9 +2516,10 @@ function vPadroes() {
   const eqImp = equipesDoPadrao("impar", mes), eqPar = equipesDoPadrao("par", mes);
   const conta = (eqs, per) => ativos.filter(({ v }) => eqs.includes(v.equipe) && equipe(v.equipe).periodo === per).length;
   const sem = ativos.filter(({ v }) => equipe(v.equipe)?.tipo === "semanal");
-  const abas = [["impar", `Padrão ímpar · ${conta(eqImp, "dia")} dia / ${conta(eqImp, "noite")} noite`], ["par", `Padrão par · ${conta(eqPar, "dia")} dia / ${conta(eqPar, "noite")} noite`], ["semanal", `Semanal · ${sem.length}`], ["inspetores", "Inspetores de serviço"]];
+  const abas = [["impar", `Padrão ímpar · ${conta(eqImp, "dia")} dia / ${conta(eqImp, "noite")} noite`], ["par", `Padrão par · ${conta(eqPar, "dia")} dia / ${conta(eqPar, "noite")} noite`], ["semanal", `Semanal · ${sem.length}`], ["inspetores", "Inspetores de serviço"], ["efetivo", `Efetivo · ${data.gms.filter((g) => g.ativo !== false).length}${semPadrao(ref).length ? ` · ${semPadrao(ref).length} sem posto` : ""}`]];
   let corpo;
-  if (pd.aba === "inspetores") corpo = tabelaInspetores(mes);
+  if (pd.aba === "efetivo") corpo = tabelaEfetivo(ref);
+  else if (pd.aba === "inspetores") corpo = tabelaInspetores(mes);
   else if (pd.aba === "semanal") {
     const livro = livroMes(data, mes);
     corpo = `<div class="tabela-wrap"><table class="lanc pad-sem"><thead><tr><th>GM</th><th>Posto</th><th>Dias</th><th>Horário fixo</th><th>Padrão par</th><th>HE fixa no mês</th></tr></thead><tbody>
@@ -2552,8 +2566,37 @@ function vPadroes() {
     <label class="desde">Mudanças valem a partir de <input type="date" id="pad-desde" value="${pd.desde}"></label></div>
   <div class="abas-pad" role="tablist">${abas.map(([k, t]) => `<button role="tab" aria-selected="${pd.aba === k}" data-act="pad-aba" data-aba="${k}">${t}</button>`).join("")}
     ${pd.aba === "inspetores" ? "" : `<span class="add-gm"><button class="btn" data-act="pad-novo">+ Posto / viatura / seção</button><button class="btn pri" data-act="pad-novo-gm">+ Adicionar GM${pd.aba === "semanal" ? " na semanal" : ""}</button></span>`}</div></div>
-  <p class="dica">${pd.aba === "inspetores" ? "Escala mensal dos inspetores de serviço. Clique no nome para trocar (vale só para aquele dia e período). Para férias ou curso, use “Substituir no período”." : pd.aba === "semanal" ? "Quem trabalha de segunda a sexta, com o horário fixo e a HE fixa de cada um. Clique no nome para editar." : `Composição do padrão ${pd.aba === "impar" ? "ímpar" : "par"} em ${nomeMes(mes).toLowerCase()} (quem trabalha nos dias ${pd.aba === "impar" ? "ímpares" : "pares"}), sem folgas e afastamentos. Clique no GM, no posto ou na seção para editar; o botão direito mostra mais opções (novo posto, subir/descer, desativar). Em vermelho: vaga sem GM ou quantidade diferente do outro padrão.`}</p>
+  ${["impar", "par", "semanal"].includes(pd.aba) && semPadrao(ref).length ? `<p class="aviso-falta">${semPadrao(ref).length} GM${semPadrao(ref).length === 1 ? "" : "s"} sem posto no padrão (fora da escala): ${semPadrao(ref).slice(0, 8).map((g) => `<b>${esc(g.nome)}</b>`).join(", ")}${semPadrao(ref).length > 8 ? "…" : ""} <button class="link" data-act="pad-aba" data-aba="efetivo">ver no Efetivo</button></p>` : ""}
+  <p class="dica">${pd.aba === "efetivo" ? "Cadastro de todos os GMs. Mude direto na linha: escala, posto, função, grupamentos (ex.: GESCOM) e CNH. Os grupamentos fazem o GM aparecer primeiro nas sugestões de HE das vagas daquele grupamento." : pd.aba === "inspetores" ? "Escala mensal dos inspetores de serviço. Clique no nome para trocar (vale só para aquele dia e período). Para férias ou curso, use “Substituir no período”." : pd.aba === "semanal" ? "Quem trabalha de segunda a sexta, com o horário fixo e a HE fixa de cada um. Clique no nome para editar." : `Composição do padrão ${pd.aba === "impar" ? "ímpar" : "par"} em ${nomeMes(mes).toLowerCase()} (quem trabalha nos dias ${pd.aba === "impar" ? "ímpares" : "pares"}), sem folgas e afastamentos. Clique no GM, no posto ou na seção para editar; o botão direito mostra mais opções (novo posto, subir/descer, desativar). Em vermelho: vaga sem GM ou quantidade diferente do outro padrão.`}</p>
   ${corpo}`;
+}
+// ---------- EFETIVO (cadastro de todos os GMs) ----------
+// "Sem posto no padrão": ativo, mas sem lotação, com posto excluído ou sem escala — ficaria fora da escala sem ninguém perceber
+function semPadrao(dia) {
+  return data.gms.filter((g) => { if (g.ativo === false) return false; const v = vigente(g, dia), p = v.lotacao?.posto && postoPorId(v.lotacao.posto); return !p || p.ativo === false || !equipe(v.equipe); });
+}
+const nomesGrupos = () => [...new Set([...data.secoes.filter((s) => !s.operacao).map((s) => s.nome), ...data.gms.flatMap((g) => g.grupos || [])])].sort();
+function tabelaEfetivo(ref) {
+  const f = (ui.efetivo ||= { busca: "", so: "" }), limbo = new Set(semPadrao(ref).map((g) => g.id));
+  const lista = data.gms.filter((g) => (f.so === "sem" ? limbo.has(g.id) : f.so === "inativos" ? g.ativo === false : g.ativo !== false))
+    .filter((g) => !f.busca || norm(`${g.nome} ${(g.grupos || []).join(" ")} ${postoPorId(vigente(g, ref).lotacao?.posto)?.nome || ""}`).includes(norm(f.busca)))
+    .sort((a, b) => limbo.has(b.id) - limbo.has(a.id) || a.nome.localeCompare(b.nome));
+  const sel = (g, campo, ops, val) => `<select class="ef-in" data-ef="${g.id}" data-campo="${campo}">${ops.map(([v, t]) => `<option value="${esc(v)}" ${v === val ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>`;
+  return `<div class="ef-barra"><input type="search" id="ef-busca" value="${esc(f.busca)}" placeholder="Buscar nome, posto ou grupamento" aria-label="Buscar GM">
+      ${[["", "Ativos"], ["sem", `Sem posto (${limbo.size})`], ["inativos", "Desativados"]].map(([k, t]) => `<button class="btn ${f.so === k ? "pri" : ""}" data-act="ef-filtro" data-so="${k}">${t}</button>`).join("")}
+      <button class="btn" data-act="pad-novo-gm">+ Adicionar GM</button></div>
+    <datalist id="ef-grupos">${nomesGrupos().map((n) => `<option value="${esc(n)}">`).join("")}</datalist>
+    <div class="tabela-wrap"><table class="lanc efetivo"><thead><tr><th>GM</th><th>Escala</th><th>Posto</th><th>Função</th><th>Grupamentos</th><th>CNH</th><th>Observação</th><th></th></tr></thead><tbody>
+    ${lista.map((g) => { const v = vigente(g, ref);
+      return `<tr class="${limbo.has(g.id) ? "limbo" : ""} ${g.ativo === false ? "inativo" : ""}"><td><button class="link" data-act="abrir-ficha" data-gm="${g.id}">${esc(g.nome)}</button>${limbo.has(g.id) ? ` <span class="tag furo">sem posto</span>` : ""}</td>
+        <td>${sel(g, "equipe", [["", "—"], ...data.equipes.map((e) => [e.id, rotuloEquipe(e, ref, true)])], v.equipe || "")}</td>
+        <td><select class="ef-in" data-ef="${g.id}" data-campo="posto"><option value="">— sem posto —</option>${opcoesPosto(v.lotacao?.posto || "")}</select></td>
+        <td>${sel(g, "funcao", [["", "—"], ["Motorista", "Motorista"], ["Patrulheiro", "Patrulheiro"]], v.lotacao?.funcao || "")}</td>
+        <td><input class="ef-in" data-ef="${g.id}" data-campo="grupos" list="ef-grupos" value="${esc((g.grupos || []).join(", "))}" placeholder="ex.: GESCOM"></td>
+        <td>${sel(g, "cnh", [["", "—"], ["A", "A (moto)"], ["B", "B"], ["AB", "AB"], ["D", "D"], ["AD", "AD"]], g.cnh || "")}</td>
+        <td><input class="ef-in" data-ef="${g.id}" data-campo="obs" value="${esc(g.obs || "")}" placeholder="opcional"></td>
+        <td>${g.ativo === false ? `<button class="link" data-act="ef-reativar" data-gm="${g.id}">reativar</button>` : `<button class="link" data-act="pad-gm" data-gm="${g.id}">mais…</button>`}</td></tr>`; }).join("")}
+    </tbody></table></div>`;
 }
 // ---------- INSPETORES DE SERVIÇO (escala mensal) ----------
 // inspetor de um dia/período: escala mensal; sem ela, o da equipe que trabalha no dia
@@ -2784,7 +2827,7 @@ document.addEventListener("click", (e) => {
     case "oferta-abrir": { const o = data.ocorrencias.find((x) => x.id === el.dataset.id); if (o) menuOferta(o, el); return; }
     case "of-resp": fecharMenu(); responderOferta(el.dataset.id, el.dataset.gm, el.dataset.e); return;
     case "of-copiar": { const o = data.ocorrencias.find((x) => x.id === el.dataset.id); fecharMenu(); copiarTexto(mensagemOferta(o)); return; }
-    case "of-cancelar": { const o = data.ocorrencias.find((x) => x.id === el.dataset.id); fecharMenu(); mudar("Oferta cancelada", () => { o.fechada = true; o.cancelada = true; }); return; }
+    case "of-cancelar": { const o = data.ocorrencias.find((x) => x.id === el.dataset.id); fecharMenu(); mudar("Oferta encerrada: envio cancelado para quem não respondeu", () => { for (const g of aguardando(o)) g.estado = "cancelada"; o.fechada = true; }); return; }
     case "of-mais": {
       const o = data.ocorrencias.find((x) => x.id === el.dataset.id), alvo = ui.menu.alvo; fecharMenu();
       const t = TURNOS.find((x) => sobrepoe(...intervalo(o.ini, o.fim), x.ini, x.fim) > 0);
@@ -2796,7 +2839,7 @@ document.addEventListener("click", (e) => {
     case "pend-copiar": { fecharMenu(); const x = el.dataset; copiarTexto(mensagemOferta({ posto: x.posto, de: x.dia, ini: x.ini, fim: x.fim, nat: "he" })); return; }
     case "ed-semgm": { const { posto, turno } = ed.ctx; fecharEditor(); deixarSemGm(posto, [turno], ui.dia); return; }
     case "pend-semgm": fecharMenu(); deixarSemGm(el.dataset.posto, el.dataset.turnos.split(","), el.dataset.dia); return;
-    case "ed-nat": { ed.ctx.nat = el.dataset.nat; document.querySelectorAll(".ed-nat .ed-chip").forEach((c) => { c.classList.toggle("on", c === el); c.classList.toggle("bh", c === el && el.dataset.nat === "bh"); }); $("#ed-in").focus(); return; }
+    case "ed-nat": { ed.ctx.nat = el.dataset.nat; document.querySelectorAll(".ed-nat .ed-chip").forEach((c) => { c.classList.toggle("on", c === el); c.classList.toggle("bh", c === el && el.dataset.nat === "bh"); c.classList.toggle("rem", c === el && el.dataset.nat === "rem"); }); ed.sel = 0; atualizarLista(); $("#ed-in").focus(); return; }
     case "ed-dur": { ed.ctx.ini = Number(el.dataset.ini); ed.ctx.fim = Number(el.dataset.fim); document.querySelectorAll(".ed-dur .ed-chip").forEach((c) => c.classList.toggle("on", c === el)); ed.sel = 0; atualizarLista(); $("#ed-in").focus(); return; }
     case "mn-secao": { const alvo = ui.menu.alvo; fecharMenu(); abrirPop("secao", alvo, { secao: el.dataset.secao, excluir: !!el.dataset.excluir }); return; }
     case "card": {
@@ -3108,6 +3151,8 @@ document.addEventListener("click", (e) => {
       });
       return;
     }
+    case "ef-filtro": ui.efetivo.so = el.dataset.so; render(); return;
+    case "ef-reativar": { const g = gmPorId(el.dataset.gm); mudar(`${g.nome} reativado`, () => { delete g.ativo; }); return; }
     case "pad-posto": abrirPop("posto", el, { posto: el.dataset.posto, aba: "sempre" }); return;
     case "pad-semvaga": mudarVagasPeriodo(postoPorId(el.dataset.posto), el.dataset.per, 0); return;
     case "pad-vagas": { const p = postoPorId(ui.menu.posto); fecharMenu(); mudarVagasPeriodo(p, el.dataset.per, Number(el.dataset.n)); return; }
@@ -3462,6 +3507,17 @@ document.addEventListener("change", (e) => {
     const x = data.frota.find((y) => y.id === e.target.dataset.fr), campo = e.target.dataset.campo, val = campo === "prefixo" ? v.trim() : v.trim();
     if (!x || (x[campo] || "") === val) return;
     mudar(`Viatura ${x.prefixo || val}: ${campo} atualizado`, () => { x[campo] = val; });
+    return;
+  }
+  if (e.target.dataset?.ef) {
+    const g = gmPorId(e.target.dataset.ef), campo = e.target.dataset.campo, desde = ui.padrao.desde, v0 = vigente(g, desde);
+    if (campo === "equipe") { mudarLotacao(g, { equipe: v || undefined, lotacao: v0.lotacao }, desde, `${g.nome}: ${v ? rotuloEquipe(equipe(v), desde) : "sem escala"} a partir de ${ddmm(desde)}`); return; }
+    if (campo === "posto") { mudarLotacao(g, { equipe: v0.equipe, lotacao: { ...(v0.lotacao || { segmentos: [{ ini: "07:00", fim: "19:00" }] }), posto: v || "" } }, desde, `${g.nome}: ${v ? postoPorId(v).nome : "sem posto"} a partir de ${ddmm(desde)}`); return; }
+    if (campo === "funcao") { mudarLotacao(g, { equipe: v0.equipe, lotacao: { ...v0.lotacao, funcao: v } }, desde, `${g.nome}: ${v || "sem função"} a partir de ${ddmm(desde)}`); return; }
+    mudar(`${g.nome}: ${campo === "grupos" ? "grupamentos" : campo === "cnh" ? "CNH" : "observação"} atualizado`, () => {
+      if (campo === "grupos") { const l = v.split(/[,;]/).map((x) => x.trim().toUpperCase()).filter(Boolean); if (l.length) g.grupos = l; else delete g.grupos; }
+      else if (v.trim()) g[campo] = v.trim(); else delete g[campo];
+    });
     return;
   }
   if (e.target.dataset?.inspDia) {

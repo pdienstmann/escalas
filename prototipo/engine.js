@@ -311,7 +311,7 @@ export function afastamentoNoDia(data, gmId, dia) {
 // Ordem: 0 escala oposta do mesmo posto e do mesmo turno (dia/noite) · 1 quem já está no posto hoje (estende)
 // · 2 outros GMs do mesmo turno · 3 mesmo posto, turno oposto · 4 o resto. Dentro de cada grupo: abaixo do teto e menos horas.
 export function prioridadeHE(x, teto) {
-  const grupo = x.eja ? -1 : x.noPostoHoje ? 1 : x.mesmoPosto && x.mesmoPeriodo ? 0 : x.mesmoPeriodo ? 2 : x.mesmoPosto ? 3 : 4;
+  const grupo = x.doGrupo ? -2 : x.eja ? -1 : x.noPostoHoje ? 1 : x.mesmoPosto && x.mesmoPeriodo ? 0 : x.mesmoPeriodo ? 2 : x.mesmoPosto ? 3 : 4;
   return [x.bloqueado ? 1 : 0, grupo, x.disponivel ? 0 : 1, x.heMes + x.transporte >= teto ? 1 : 0, x.heMes + x.transporte];
 }
 // dia (07–19) ou noite (19–07) de um horário em minutos
@@ -355,6 +355,14 @@ export function podeCobrir(data, gm, dia, postoId) {
   if (lot === postoId) return true;
   return !cargoProprio(data.postos.find((x) => x.id === lot));
 }
+// Grupamento de um posto (ex.: motos do GESCOM): o do posto, o da seção, ou o nome da seção marcada como grupamento
+export function grupoDoPosto(data, postoId) {
+  const p = data.postos.find((x) => x.id === postoId); if (!p) return "";
+  const s = (data.secoes || []).find((x) => x.id === p.secao);
+  return p.grupo || s?.grupo || s?.nome || "";
+}
+const normG = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+export const gmDoGrupo = (gm, grupo) => !!grupo && (gm.grupos || []).some((g) => normG(g) === normG(grupo) || normG(grupo).includes(normG(g)));
 // Posto existe neste dia? (desativado, extra de um dia só, ou equipe de operação com período)
 export const postoAtivoEm = (p, dia) => p.ativo !== false && (!p.so || p.so === dia) && (!p.de || p.de <= dia) && (!p.ate || dia <= p.ate);
 // Seção de operação (anexa à escala, com período e horário próprios)
@@ -367,7 +375,7 @@ export function sugerir(data, dia, postoId, ini, fim) {
   const reserva = new Set(data.postos.filter((p) => p.tipo === "reserva").map((p) => p.id));
   const livreParaRemanejar = (d) => d.nat !== "he" && d.nat !== "bh" && (d.posto === null || reserva.has(d.posto));
   // numa operação dá para puxar gente da própria escala do dia (o posto de origem fica com vaga)
-  const op = secaoOperacao(data, postoId);
+  const op = secaoOperacao(data, postoId), grupoVaga = grupoDoPosto(data, postoId);
   const daEscala = (d) => op && d.nat !== "he" && d.nat !== "bh" && d.posto && d.posto !== postoId && !secaoOperacao(data, d.posto);
   const remanejar = [], he = [];
   const afastados = new Set(data.ocorrencias.filter((o) => (["FERIAS", "LICENCA", "ATESTADO", "CURSO"].includes(o.tipo) && ocorrenciaCobre(o, dia)) || (DE_UM_DIA.includes(o.tipo) && o.de === dia)).map((o) => o.gm));
@@ -377,10 +385,11 @@ export function sugerir(data, dia, postoId, ini, fim) {
     if (afastados.has(gm.id)) continue;
     if (!podeCobrir(data, gm, dia, postoId)) continue;
     const disponivel = data.ocorrencias.some((o) => o.tipo === "DISP_HE" && o.gm === gm.id && o.de === dia);
+    const doGrupo = gmDoGrupo(gm, grupoVaga);
     const minhas = cd.designacoes.filter((d) => d.gm === gm.id);
     const l = livro.get(gm.id) || { he: 0, transporte: 0 };
     const lotPosto = vigente(gm, dia).lotacao?.posto;
-    const base = { gm, heMes: l.he, transporte: l.transporte, mesmoPosto: lotPosto === postoId, noPostoHoje: minhas.some((d) => d.posto === postoId && d.nat !== "he"), mesmoPeriodo: !minhas.length && mesmoPeriodo(data, gm, dia, ini), disponivel };
+    const base = { gm, heMes: l.he, transporte: l.transporte, mesmoPosto: lotPosto === postoId, noPostoHoje: minhas.some((d) => d.posto === postoId && d.nat !== "he"), mesmoPeriodo: !minhas.length && mesmoPeriodo(data, gm, dia, ini), disponivel, doGrupo };
     const sobre = minhas.filter((d) => sobrepoe(d.ini, d.fim, ini, fim) > 0);
     if (sobre.length) {
       if (sobre.every(livreParaRemanejar)) {
@@ -403,6 +412,7 @@ export function sugerir(data, dia, postoId, ini, fim) {
     if (base.noPostoHoje) notas.push(eb - ea < fim - ini ? `já está neste posto hoje · estende ${fmtHm(ea)}–${fmtHm(eb)}` : "já está neste posto hoje · estende");
     else if (eb - ea < fim - ini) notas.push(`trabalha hoje · estende ${fmtHm(ea)}–${fmtHm(eb)}`);
     if (disponivel) notas.unshift("se ofereceu para HE");
+    if (doGrupo) notas.unshift(`do ${grupoVaga}`);
     if (total >= teto) notas.push("já passou do teto de HE");
     else if (total + (fim - ini) > teto) notas.push("vai passar do teto de HE");
     if (gm.naoFazHE) notas.push("não realiza HE");
@@ -593,7 +603,7 @@ export function planejarCobertura(data, dias) {
         const x = { gm, heMes: l.he + (heExtra.get(gm.id + mes) || 0), transporte: l.transporte, mesmoPosto: vigente(gm, dia).lotacao?.posto === p.posto,
           noPostoHoje: cd.designacoes.some((d) => d.gm === gm.id && d.posto === p.posto && d.nat !== "he"), bloqueado: false,
           mesmoPeriodo: !cd.designacoes.some((d) => d.gm === gm.id) && mesmoPeriodo(data, gm, dia, p.ini), eja: !!horarioEja(data, dia, gm.id, p.posto, p.ini, p.fim),
-          disponivel: data.ocorrencias.some((o) => o.tipo === "DISP_HE" && o.gm === gm.id && o.de === dia) };
+          disponivel: data.ocorrencias.some((o) => o.tipo === "DISP_HE" && o.gm === gm.id && o.de === dia), doGrupo: gmDoGrupo(gm, grupoDoPosto(data, p.posto)) };
         if (!melhor || compararPrioridade(teto)(x, melhor) < 0) melhor = x;
       }
       // reserva técnica / à disposição só se ninguém puder fazer HE

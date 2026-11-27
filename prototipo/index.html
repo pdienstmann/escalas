@@ -726,6 +726,13 @@ table.quadro tr.tipo-vtr > th.posto { border-left-color: var(--accent); } table.
 table.quadro tr.tipo-reserva > th.posto { border-left-color: var(--res-bg); }
 table.quadro tbody tr:not(.secao):hover > td, table.quadro tbody tr:not(.secao):hover > th.posto { background-image: linear-gradient(rgba(26,86,184,.06), rgba(26,86,184,.06)); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) table.quadro tbody tr.alt > td { background-image: linear-gradient(rgba(255,255,255,.03), rgba(255,255,255,.03)); } }
+/* efetivo */
+.ef-barra { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; margin-bottom: .5rem; } .ef-barra input[type=search] { min-width: 240px; flex: 1; max-width: 360px; }
+table.efetivo td { padding: .2rem .35rem; vertical-align: middle; } table.efetivo select, table.efetivo input { font: inherit; font-size: .82rem; padding: .2rem .3rem; border: 1px solid transparent; background: transparent; border-radius: 4px; color: inherit; max-width: 14rem; }
+table.efetivo select:hover, table.efetivo input:hover, table.efetivo select:focus, table.efetivo input:focus { border-color: var(--line-strong); background: var(--surface); }
+table.efetivo tr.limbo td { background: var(--furo-bg); } table.efetivo tr.inativo td { opacity: .6; }
+.ed-chip.on.rem { background: var(--accent); color: #fff; border-color: var(--accent); }
+.oferta-pend { display: block; width: 100%; margin-top: .2rem; border: 1px dashed #f08c00; background: #fff1db; color: #b35c00; border-radius: 5px; padding: .25rem .35rem; text-align: left; font: 600 .75rem var(--f-grid); cursor: pointer; }
 /* finalizar escala e controle de HE */
 .btn.fin { border-color: var(--accent); color: var(--accent); font-weight: 600; padding: .2rem .6rem; }
 .fin-ok { color: var(--ok, #2e7d32); font-weight: 600; } .fin-ok .link { font-weight: 400; margin-left: .3rem; }
