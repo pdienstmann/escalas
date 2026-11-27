@@ -2,7 +2,21 @@
 
 - Endereço: https://escala-gm-piloto.pietrodienstmann.workers.dev
 - Worker: `escala-gm-piloto` · Banco D1: `escala-gm-piloto`
-- Login: nome + senha (segredo `SENHA` do Worker). Cookie assinado com o segredo `SEGREDO`.
+- Login: nome + senha. A senha do segredo `SENHA` do Worker entra como **escalante**. Cookie assinado com o segredo `SEGREDO`.
+
+## Perfis de acesso
+
+| Perfil | Vê | Pode mudar |
+|---|---|---|
+| Escalante (senha `SENHA`) | tudo | tudo |
+| Inspetor de serviço | quadro e folha de qualquer dia | nada |
+| Logística | viaturas; quadro e folha de hoje e amanhã | só as viaturas (QAP/FA) |
+| Reserva de armamento | quadro e folha de hoje e amanhã | nada |
+
+O escalante define uma senha por setor em **Ajustes → Acessos** (mínimo 6 caracteres). O servidor guarda só o hash
+(PBKDF2, tabela `acessos`) e confere as permissões em cada gravação; quem só visualiza não recebe controle de HE,
+requerimentos nem o texto de atestados e licenças. Trocar a senha de um setor desconecta quem usava a antiga (em até 1 min).
+Em Ajustes também há "ver como…", para o escalante conferir a tela de cada perfil.
 
 ## Trocar a senha
 

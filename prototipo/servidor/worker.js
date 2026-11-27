@@ -1,5 +1,6 @@
 // Servidor do piloto da escala: entrega a página e guarda os dados no D1.
-// - Login simples por senha (segredo SENHA) com cookie assinado (segredo SEGREDO).
+// - Login por senha com cookie assinado (segredo SEGREDO). Senha principal (segredo SENHA) = escalante;
+//   os outros perfis (inspetor, logística, reserva) têm senha definida pelo escalante em Ajustes.
 // - Cada alteração é um comando com a revisão esperada; o banco recusa se outra pessoa salvou antes.
 // - Histórico de alterações append-only (tabela eventos).
 import pagina from "./pagina.html";
@@ -24,8 +25,8 @@ function iguais(a, b) {
   for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return r === 0;
 }
-async function criarSessao(nome, env) {
-  const corpo = b64u(enc.encode(JSON.stringify({ nome, exp: Date.now() + 30 * DIA_SEG * 1000 })));
+async function criarSessao(nome, env, perfil = "escalante", ver = "") {
+  const corpo = b64u(enc.encode(JSON.stringify({ nome, perfil, ver, exp: Date.now() + 30 * DIA_SEG * 1000 })));
   return `${corpo}.${await assinar(corpo, env.SEGREDO)}`;
 }
 async function lerSessao(req, env) {
@@ -35,8 +36,76 @@ async function lerSessao(req, env) {
   if (!corpo || !ass || !iguais(ass, await assinar(corpo, env.SEGREDO))) return null;
   try {
     const s = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(corpo.replace(/-/g, "+").replace(/_/g, "/")), (ch) => ch.charCodeAt(0))));
-    return s.exp > Date.now() ? s : null;
+    if (!(s.exp > Date.now())) return null;
+    s.perfil = PERFIS[s.perfil] ? s.perfil : "escalante"; // sessões antigas (antes dos perfis) eram do escalante
+    if (s.perfil !== "escalante") { const a = await lerAcesso(env, s.perfil); if (!a || a.hash.slice(0, 12) !== s.ver) return null; } // senha trocada = sai
+    return s;
   } catch { return null; }
+}
+
+// ---------- perfis de acesso ----------
+// O escalante entra com a senha principal (segredo SENHA) e define, em Ajustes, uma senha para cada perfil.
+// As senhas ficam só como hash (PBKDF2) na tabela "acessos", que nunca vai para a tela.
+const PERFIS = {
+  escalante: { nome: "Escalante", edita: "tudo" },
+  inspetor: { nome: "Inspetor de serviço", edita: "" },
+  logistica: { nome: "Logística", edita: "frota" },
+  reserva: { nome: "Reserva de armamento", edita: "" },
+};
+let tabelaPronta = false;
+async function garantirTabela(env) {
+  if (tabelaPronta) return;
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS acessos (perfil TEXT PRIMARY KEY, hash TEXT NOT NULL, sal TEXT NOT NULL, atualizado TEXT NOT NULL, quem TEXT NOT NULL)").run();
+  tabelaPronta = true;
+}
+const cacheAcesso = new Map(); // perfil -> { a, ate }
+async function lerAcesso(env, perfil) {
+  const c = cacheAcesso.get(perfil); if (c && c.ate > Date.now()) return c.a;
+  await garantirTabela(env);
+  const a = await env.DB.prepare("SELECT perfil, hash, sal, atualizado, quem FROM acessos WHERE perfil = ?").bind(perfil).first();
+  cacheAcesso.set(perfil, { a, ate: Date.now() + 60000 });
+  return a;
+}
+async function hashSenha(senha, sal) {
+  const k = await crypto.subtle.importKey("raw", enc.encode(senha), "PBKDF2", false, ["deriveBits"]);
+  return b64u(await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: enc.encode(sal), iterations: 100000 }, k, 256));
+}
+async function perfilDaSenha(env, senha) {
+  if (iguais(await assinar(senha, env.SEGREDO), await assinar(env.SENHA, env.SEGREDO))) return { perfil: "escalante", ver: "" };
+  for (const p of Object.keys(PERFIS)) {
+    if (p === "escalante") continue;
+    const a = await lerAcesso(env, p);
+    if (a && iguais(await hashSenha(senha, a.sal), a.hash)) return { perfil: p, ver: a.hash.slice(0, 12) };
+  }
+  return null;
+}
+async function listarAcessos(env) {
+  await garantirTabela(env);
+  const r = await env.DB.prepare("SELECT perfil, atualizado, quem FROM acessos").all();
+  const m = new Map(r.results.map((x) => [x.perfil, x]));
+  return json({ perfis: Object.entries(PERFIS).filter(([k]) => k !== "escalante").map(([k, v]) => ({ perfil: k, nome: v.nome, definido: m.has(k), atualizado: m.get(k)?.atualizado || "", quem: m.get(k)?.quem || "" })) });
+}
+async function definirAcesso(env, sessao, corpo) {
+  const perfil = String(corpo?.perfil || ""), senha = String(corpo?.senha ?? "");
+  if (!PERFIS[perfil] || perfil === "escalante") return json({ erro: "Perfil inválido." }, 400);
+  await garantirTabela(env);
+  cacheAcesso.delete(perfil);
+  if (!senha) { await env.DB.prepare("DELETE FROM acessos WHERE perfil = ?").bind(perfil).run(); return json({ ok: true }); }
+  if (senha.length < 6) return json({ erro: "A senha precisa ter pelo menos 6 caracteres." }, 400);
+  if (iguais(await assinar(senha, env.SEGREDO), await assinar(env.SENHA, env.SEGREDO))) return json({ erro: "Use uma senha diferente da senha do escalante." }, 400);
+  for (const p of Object.keys(PERFIS)) if (p !== perfil && p !== "escalante") { const a = await lerAcesso(env, p); if (a && iguais(await hashSenha(senha, a.sal), a.hash)) return json({ erro: `Essa senha já é a de ${PERFIS[p].nome}. Use outra.` }, 400); }
+  const sal = b64u(crypto.getRandomValues(new Uint8Array(16)));
+  await env.DB.prepare("INSERT INTO acessos (perfil, hash, sal, atualizado, quem) VALUES (?, ?, ?, ?, ?) ON CONFLICT (perfil) DO UPDATE SET hash = excluded.hash, sal = excluded.sal, atualizado = excluded.atualizado, quem = excluded.quem")
+    .bind(perfil, await hashSenha(senha, sal), sal, agora(), sessao.nome).run();
+  return json({ ok: true });
+}
+// Quem só visualiza não recebe o que não precisa: controle de HE, requerimentos, ligação com o sistema de folgas
+// e o texto livre de atestados e licenças.
+function estadoParaPerfil(r, perfil) {
+  if (perfil === "escalante") return r;
+  const e = { ...r.estado, controle: [], requerimentos: {}, folgasSync: {} };
+  e.ocorrencias = e.ocorrencias.map((o) => ["ATESTADO", "LICENCA"].includes(o.tipo) ? { id: o.id, tipo: o.tipo, gm: o.gm, de: o.de, ate: o.ate } : o);
+  return { ...r, estado: e };
 }
 
 // ---------- páginas ----------
@@ -52,7 +121,7 @@ h1{margin:0;font-size:1.4rem}p{margin:0;color:var(--m)}label{display:grid;gap:4p
 input{font:inherit;padding:10px 12px;border:1px solid var(--l);border-radius:8px;background:var(--s);color:var(--i)}
 button{font:inherit;font-weight:700;padding:12px;border:0;border-radius:8px;background:var(--a);color:var(--s);cursor:pointer}
 .erro{color:var(--r);font-weight:600}</style></head><body>
-<form method="post" action="/login"><h1>Escala GM</h1><p>Entre com seu nome e a senha da escala.</p>
+<form method="post" action="/login"><h1>Escala GM</h1><p>Entre com seu nome e a senha do seu setor (escalante, inspetor, logística ou reserva de armamento).</p>
 ${erro ? `<p class="erro">${esc(erro)}</p>` : ""}
 <label>Seu nome <input name="nome" autocomplete="name" required value="${esc(nome)}" autofocus></label>
 <label>Senha <input name="senha" type="password" autocomplete="current-password" required></label>
@@ -107,6 +176,8 @@ const GUARDA = "(SELECT valor FROM meta WHERE chave = 'revisao') = ?";
 async function aplicarComando(env, sessao, corpo) {
   const { revisao, cmd, resumo, ops } = corpo || {};
   if (!Number.isInteger(revisao) || typeof cmd !== "string" || !/^[\w-]{6,64}$/.test(cmd) || !Array.isArray(ops) || ops.length > 2000) return json({ erro: "Comando inválido." }, 400);
+  const pode = PERFIS[sessao.perfil]?.edita;
+  if (pode !== "tudo" && !(pode === "frota" && ops.every((op) => op.t === "doc" && op.k === "frota"))) return json({ erro: "Seu acesso é só para visualizar." }, 403);
   const atual = await lerRevisao(env);
   if (atual.bruto.endsWith(":" + cmd)) return json({ revisao: atual.numero, repetido: true }); // mesmo comando reenviado
   if (atual.numero !== revisao) return json({ erro: "conflito", revisao: atual.numero }, 409);
@@ -157,8 +228,9 @@ export default {
       if (req.method === "POST") {
         const f = await req.formData();
         const nome = String(f.get("nome") || "").trim().slice(0, 60), senha = String(f.get("senha") || "");
-        if (!nome || !iguais(await assinar(senha, env.SEGREDO), await assinar(env.SENHA, env.SEGREDO))) return telaLogin("Senha incorreta. Tente de novo.", nome);
-        return new Response(null, { status: 303, headers: { location: "/", "set-cookie": `sessao=${await criarSessao(nome, env)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${30 * DIA_SEG}` } });
+        const acesso = nome && senha ? await perfilDaSenha(env, senha) : null;
+        if (!acesso) return telaLogin("Senha incorreta. Tente de novo.", nome);
+        return new Response(null, { status: 303, headers: { location: "/", "set-cookie": `sessao=${await criarSessao(nome, env, acesso.perfil, acesso.ver)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${30 * DIA_SEG}` } });
       }
       return telaLogin();
     }
@@ -168,11 +240,15 @@ export default {
 
     try {
       if (url.pathname === "/" && req.method === "GET") {
-        const html = pagina.replace("</head>", `<script>window.ESCALA_SERVIDOR = ${JSON.stringify({ nome: sessao.nome })};</script></head>`);
+        const html = pagina.replace("</head>", `<script>window.ESCALA_SERVIDOR = ${JSON.stringify({ nome: sessao.nome, perfil: sessao.perfil })};</script></head>`);
         return new Response(html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-frame-options": "DENY", "referrer-policy": "same-origin" } });
       }
-      if (url.pathname === "/api/estado" && req.method === "GET") return json(await lerEstado(env));
+      if (url.pathname === "/api/estado" && req.method === "GET") return json(estadoParaPerfil(await lerEstado(env), sessao.perfil));
+      if (url.pathname === "/api/revisao" && req.method === "GET") return json({ revisao: (await lerRevisao(env)).numero });
       if (url.pathname === "/api/comandos" && req.method === "POST") return await aplicarComando(env, sessao, await req.json());
+      if (sessao.perfil !== "escalante") return json({ erro: "Seu acesso não permite isso." }, 403);
+      if (url.pathname === "/api/acessos" && req.method === "GET") return await listarAcessos(env);
+      if (url.pathname === "/api/acessos" && req.method === "POST") return await definirAcesso(env, sessao, await req.json());
       if (url.pathname === "/api/importar" && req.method === "POST") return await importar(env, sessao, (await req.json()).estado);
       if (url.pathname === "/api/folgas" && req.method === "GET") return await lerSistemaFolgas(env, url.searchParams.get("mes") || "");
       if (url.pathname === "/api/eventos" && req.method === "GET") {

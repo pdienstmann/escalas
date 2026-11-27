@@ -27,3 +27,5 @@ CREATE TABLE IF NOT EXISTS eventos (
 );
 CREATE TRIGGER IF NOT EXISTS eventos_sem_update BEFORE UPDATE ON eventos BEGIN SELECT RAISE(ABORT, 'historico nao pode ser alterado'); END;
 CREATE TRIGGER IF NOT EXISTS eventos_sem_delete BEFORE DELETE ON eventos BEGIN SELECT RAISE(ABORT, 'historico nao pode ser apagado'); END;
+-- senhas dos perfis (inspetor, logística, reserva): só o hash PBKDF2; o escalante define em Ajustes
+CREATE TABLE IF NOT EXISTS acessos (perfil TEXT PRIMARY KEY, hash TEXT NOT NULL, sal TEXT NOT NULL, atualizado TEXT NOT NULL, quem TEXT NOT NULL);

@@ -767,6 +767,65 @@ fieldset.np-padrao input[type=radio] { margin-top: .2rem; flex: none; }
 fieldset.np-padrao legend { text-transform: none; letter-spacing: 0; }
 table.quadro tr.secao:hover > th { background-image: linear-gradient(rgba(30,80,200,.06), rgba(30,80,200,.06)); }
 table.quadro th.posto:hover, table.padrao td[data-pposto]:hover { box-shadow: inset 0 0 0 1px var(--line-strong); }
+/* perfis: quem só visualiza não vê ferramentas de edição */
+.perfil-selo { font-size: .78rem; color: inherit; opacity: .95; white-space: nowrap; } .perfil-selo .link { color: inherit; text-decoration: underline; }
+body.so-ver header.app .cmd, body.so-ver #btn-desfazer, body.so-ver .dica.como, body.so-ver .alca, body.so-ver .add-sec, body.so-ver .exemplo,
+body.so-ver [data-act="pad-novo"], body.so-ver [data-act="op-nova"], body.so-ver [data-act="rst-abrir"], body.so-ver [data-act="fin-abrir"], body.so-ver [data-act="fin-reabrir"],
+body.so-ver button.add, body.so-ver .furo-pad .link, body.so-ver .disposicao .dica, body.so-ver [data-act="av-lido"], body.so-ver [data-act="av-naolido"], body.so-ver [data-act="av-editar"], body.so-ver [data-act="abrir-ficha"].btn, body.so-ver [data-act="bg-lotacao"], body.so-ver .bg-card .selo-he { display: none !important; }
+body.edita-frota[data-view="frota"] #btn-desfazer { display: inline-flex !important; }
+body.so-ver button.furo, body.so-ver button.eq, body.so-ver .posto-btn, body.so-ver .secao-btn { pointer-events: none; cursor: default; }
+body.so-ver .posto-btn .lapis, body.so-ver .secao-btn .lapis { display: none; }
+table.acessos { min-width: 0; } table.acessos td { vertical-align: middle; }
+
+/* ---------- CELULAR (até 700px) ---------- */
+@media (max-width: 700px) {
+  header.app { position: static; padding-block: .4rem; gap: .35rem .6rem; }
+  header.app .cmd, header.app .exemplo .ficticio, .dica.como, .alca { display: none !important; }
+  .marca-txt small { font-size: .6rem; } .marca-txt b { font-size: 1rem; }
+  .ferr { margin-left: auto; } .ferr .btn { padding: .3rem .55rem; font-size: .85rem; }
+  .exemplo { font-size: .75rem; margin-left: 0; }
+  nav.abas { gap: .15rem; margin: 0 -16px; padding: 0 16px; } nav.abas a { padding: .45rem .65rem; font-size: .95rem; }
+  .perfil-selo { flex-basis: 100%; order: 6; white-space: normal; }
+  main { padding-block: .6rem 5rem; gap: .6rem; }
+  .datas input[type=date] { font-size: 1rem; }
+  .datas .ic { min-width: 44px; min-height: 40px; font-size: 1.2rem; }
+  .equipes { display: flex; flex-wrap: wrap; gap: .3rem; } .equipes .eq { font-size: .82rem; }
+  .faixa { gap: .35rem .7rem; font-size: .9rem; padding: .5rem .6rem; } .faixa .btn { padding: .35rem .6rem; }
+
+  /* quadro do dia em cartões: um posto por cartão, cada turno numa linha com o horário à esquerda */
+  .tabela-wrap:has(> table.quadro) { overflow: visible; }
+  table.quadro, table.quadro.padrao { min-width: 0 !important; }
+  main > * { min-width: 0; max-width: 100%; }
+  table.quadro, table.quadro tbody, table.quadro tr, table.quadro th, table.quadro td { display: block; width: auto; }
+  table.quadro colgroup, table.quadro thead { display: none; }
+  table.quadro tr.secao { margin-top: .9rem; } table.quadro tr.secao > th { padding: .5rem .6rem; border-radius: 8px 8px 0 0; }
+  table.quadro tbody > tr:not(.secao) { border: 1px solid var(--line-strong); border-radius: 8px; margin: .45rem 0; background: var(--surface); overflow: hidden; }
+  table.quadro th.posto { padding: .45rem .6rem; border-bottom: 1px solid var(--line); background: var(--bg); }
+  table.quadro th.posto .posto-btn { width: 100%; text-align: left; }
+  table.quadro td[data-turno], table.quadro td[data-pper] { display: grid; grid-template-columns: 4.1rem minmax(0, 1fr); column-gap: .5rem; align-items: start; padding: .35rem .5rem; border: 0; border-top: 1px solid var(--line); min-height: 0; }
+  table.quadro td[data-turno] > *, table.quadro td[data-pper] > * { grid-column: 2; }
+  table.quadro td[data-turno]::before, table.quadro td[data-pper]::before { grid-column: 1; grid-row: 1 / span 9; font: 600 .72rem var(--f-num); color: var(--muted); padding-top: .3rem; line-height: 1.25; white-space: pre; }
+  td[data-turno="t2"]::before { content: "2º turno\A 07–13"; } td[data-turno="t3"]::before { content: "3º turno\A 13–19"; }
+  td[data-turno="t4"]::before { content: "4º turno\A 19–01"; } td[data-turno="t1"]::before { content: "1º turno\A 01–07"; }
+  td[data-pper="dia"]::before { content: "DIA"; } td[data-pper="noite"]::before { content: "NOITE"; }
+  table.quadro td.fa-cel { padding: .45rem .6rem; }
+  /* turno vazio: some (no padrão e para quem só vê); o escalante ainda vê o "+ pôr GM" */
+  body.so-ver table.quadro td[data-turno]:not(:has(.chip, .furo, .rondas, .vazio, .oferta-pend)) { display: none; }
+  .chip { padding: .3rem .35rem; } .chip .nm, .chip .hr { padding: .15rem .2rem; }
+  table.quadro button.add { min-height: 30px; width: auto; justify-self: start; padding: .1rem .55rem; font-size: .8rem; margin-top: .15rem; }
+  .faixa { display: grid !important; grid-template-columns: 1fr 1fr; align-items: center; }
+  .faixa > .btn, .faixa > .link, .faixa > .fin-ok { justify-self: stretch; text-align: center; }
+  body.so-ver .faixa > .btn { grid-column: 1 / -1; }
+  .pop, .menu { max-width: calc(100vw - 16px); }
+  .menu .mn-item { padding-block: .6rem; }
+  .pad-fixo { position: static; }
+  main table.lanc:not(.acessos) { display: block; overflow-x: auto; min-width: 0; max-width: 100%; }
+  .faixa-modelo { flex-direction: column; align-items: flex-start !important; gap: .3rem !important; }
+  .faixa-modelo > span { display: block; }
+  table.acessos { min-width: 0; } table.acessos, table.acessos tbody, table.acessos tr, table.acessos td { display: block; }
+  table.acessos tr { border-bottom: 1px solid var(--line); padding: .4rem 0; } table.acessos td { border: 0; padding: .15rem 0; }
+  table.acessos input { width: 9rem; }
+}
 /* finalizar escala e controle de HE */
 .btn.fin { border-color: var(--accent); color: var(--accent); font-weight: 600; padding: .2rem .6rem; }
 .fin-ok { color: var(--ok, #2e7d32); font-weight: 600; } .fin-ok .link { font-weight: 400; margin-left: .3rem; }
@@ -895,7 +954,8 @@ body[data-view="padroes"] table.quadro.padrao td.dia { background: #fbf9ff; } bo
   <div class="ferr"><button id="btn-desfazer" class="btn" data-act="desfazer" disabled title="Desfaz a última alteração">↶ Desfazer</button>
     <button id="btn-letra" class="btn" data-act="letra" aria-pressed="false" title="Aumentar o tamanho da letra">A+</button>
     <span id="sync" class="sync" role="status" hidden></span></div>
-  <div class="exemplo"><button id="selo-folgas" class="selo-folgas" data-act="folgas-mud" hidden></button> <a href="#ajustes" data-nav="ajustes" class="link">Ajustes</a> · Nomes e dados fictícios · <button id="restaurar" class="link" data-act="restaurar">Restaurar exemplo</button></div>
+  <div id="perfil-selo" class="perfil-selo" hidden></div>
+  <div class="exemplo"><button id="selo-folgas" class="selo-folgas" data-act="folgas-mud" hidden></button> <a href="#ajustes" data-nav="ajustes" class="link">Ajustes</a> <span class="ficticio">· Nomes e dados fictícios ·</span> <button id="restaurar" class="link" data-act="restaurar">Restaurar exemplo</button></div>
 </header>
 <main id="main"><p class="dica">Carregando a escala…</p></main>
 <div id="veu" hidden></div>

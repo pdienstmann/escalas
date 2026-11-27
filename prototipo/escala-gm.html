@@ -774,6 +774,65 @@ fieldset.np-padrao input[type=radio] { margin-top: .2rem; flex: none; }
 fieldset.np-padrao legend { text-transform: none; letter-spacing: 0; }
 table.quadro tr.secao:hover > th { background-image: linear-gradient(rgba(30,80,200,.06), rgba(30,80,200,.06)); }
 table.quadro th.posto:hover, table.padrao td[data-pposto]:hover { box-shadow: inset 0 0 0 1px var(--line-strong); }
+/* perfis: quem só visualiza não vê ferramentas de edição */
+.perfil-selo { font-size: .78rem; color: inherit; opacity: .95; white-space: nowrap; } .perfil-selo .link { color: inherit; text-decoration: underline; }
+body.so-ver header.app .cmd, body.so-ver #btn-desfazer, body.so-ver .dica.como, body.so-ver .alca, body.so-ver .add-sec, body.so-ver .exemplo,
+body.so-ver [data-act="pad-novo"], body.so-ver [data-act="op-nova"], body.so-ver [data-act="rst-abrir"], body.so-ver [data-act="fin-abrir"], body.so-ver [data-act="fin-reabrir"],
+body.so-ver button.add, body.so-ver .furo-pad .link, body.so-ver .disposicao .dica, body.so-ver [data-act="av-lido"], body.so-ver [data-act="av-naolido"], body.so-ver [data-act="av-editar"], body.so-ver [data-act="abrir-ficha"].btn, body.so-ver [data-act="bg-lotacao"], body.so-ver .bg-card .selo-he { display: none !important; }
+body.edita-frota[data-view="frota"] #btn-desfazer { display: inline-flex !important; }
+body.so-ver button.furo, body.so-ver button.eq, body.so-ver .posto-btn, body.so-ver .secao-btn { pointer-events: none; cursor: default; }
+body.so-ver .posto-btn .lapis, body.so-ver .secao-btn .lapis { display: none; }
+table.acessos { min-width: 0; } table.acessos td { vertical-align: middle; }
+
+/* ---------- CELULAR (até 700px) ---------- */
+@media (max-width: 700px) {
+  header.app { position: static; padding-block: .4rem; gap: .35rem .6rem; }
+  header.app .cmd, header.app .exemplo .ficticio, .dica.como, .alca { display: none !important; }
+  .marca-txt small { font-size: .6rem; } .marca-txt b { font-size: 1rem; }
+  .ferr { margin-left: auto; } .ferr .btn { padding: .3rem .55rem; font-size: .85rem; }
+  .exemplo { font-size: .75rem; margin-left: 0; }
+  nav.abas { gap: .15rem; margin: 0 -16px; padding: 0 16px; } nav.abas a { padding: .45rem .65rem; font-size: .95rem; }
+  .perfil-selo { flex-basis: 100%; order: 6; white-space: normal; }
+  main { padding-block: .6rem 5rem; gap: .6rem; }
+  .datas input[type=date] { font-size: 1rem; }
+  .datas .ic { min-width: 44px; min-height: 40px; font-size: 1.2rem; }
+  .equipes { display: flex; flex-wrap: wrap; gap: .3rem; } .equipes .eq { font-size: .82rem; }
+  .faixa { gap: .35rem .7rem; font-size: .9rem; padding: .5rem .6rem; } .faixa .btn { padding: .35rem .6rem; }
+
+  /* quadro do dia em cartões: um posto por cartão, cada turno numa linha com o horário à esquerda */
+  .tabela-wrap:has(> table.quadro) { overflow: visible; }
+  table.quadro, table.quadro.padrao { min-width: 0 !important; }
+  main > * { min-width: 0; max-width: 100%; }
+  table.quadro, table.quadro tbody, table.quadro tr, table.quadro th, table.quadro td { display: block; width: auto; }
+  table.quadro colgroup, table.quadro thead { display: none; }
+  table.quadro tr.secao { margin-top: .9rem; } table.quadro tr.secao > th { padding: .5rem .6rem; border-radius: 8px 8px 0 0; }
+  table.quadro tbody > tr:not(.secao) { border: 1px solid var(--line-strong); border-radius: 8px; margin: .45rem 0; background: var(--surface); overflow: hidden; }
+  table.quadro th.posto { padding: .45rem .6rem; border-bottom: 1px solid var(--line); background: var(--bg); }
+  table.quadro th.posto .posto-btn { width: 100%; text-align: left; }
+  table.quadro td[data-turno], table.quadro td[data-pper] { display: grid; grid-template-columns: 4.1rem minmax(0, 1fr); column-gap: .5rem; align-items: start; padding: .35rem .5rem; border: 0; border-top: 1px solid var(--line); min-height: 0; }
+  table.quadro td[data-turno] > *, table.quadro td[data-pper] > * { grid-column: 2; }
+  table.quadro td[data-turno]::before, table.quadro td[data-pper]::before { grid-column: 1; grid-row: 1 / span 9; font: 600 .72rem var(--f-num); color: var(--muted); padding-top: .3rem; line-height: 1.25; white-space: pre; }
+  td[data-turno="t2"]::before { content: "2º turno\A 07–13"; } td[data-turno="t3"]::before { content: "3º turno\A 13–19"; }
+  td[data-turno="t4"]::before { content: "4º turno\A 19–01"; } td[data-turno="t1"]::before { content: "1º turno\A 01–07"; }
+  td[data-pper="dia"]::before { content: "DIA"; } td[data-pper="noite"]::before { content: "NOITE"; }
+  table.quadro td.fa-cel { padding: .45rem .6rem; }
+  /* turno vazio: some (no padrão e para quem só vê); o escalante ainda vê o "+ pôr GM" */
+  body.so-ver table.quadro td[data-turno]:not(:has(.chip, .furo, .rondas, .vazio, .oferta-pend)) { display: none; }
+  .chip { padding: .3rem .35rem; } .chip .nm, .chip .hr { padding: .15rem .2rem; }
+  table.quadro button.add { min-height: 30px; width: auto; justify-self: start; padding: .1rem .55rem; font-size: .8rem; margin-top: .15rem; }
+  .faixa { display: grid !important; grid-template-columns: 1fr 1fr; align-items: center; }
+  .faixa > .btn, .faixa > .link, .faixa > .fin-ok { justify-self: stretch; text-align: center; }
+  body.so-ver .faixa > .btn { grid-column: 1 / -1; }
+  .pop, .menu { max-width: calc(100vw - 16px); }
+  .menu .mn-item { padding-block: .6rem; }
+  .pad-fixo { position: static; }
+  main table.lanc:not(.acessos) { display: block; overflow-x: auto; min-width: 0; max-width: 100%; }
+  .faixa-modelo { flex-direction: column; align-items: flex-start !important; gap: .3rem !important; }
+  .faixa-modelo > span { display: block; }
+  table.acessos { min-width: 0; } table.acessos, table.acessos tbody, table.acessos tr, table.acessos td { display: block; }
+  table.acessos tr { border-bottom: 1px solid var(--line); padding: .4rem 0; } table.acessos td { border: 0; padding: .15rem 0; }
+  table.acessos input { width: 9rem; }
+}
 /* finalizar escala e controle de HE */
 .btn.fin { border-color: var(--accent); color: var(--accent); font-weight: 600; padding: .2rem .6rem; }
 .fin-ok { color: var(--ok, #2e7d32); font-weight: 600; } .fin-ok .link { font-weight: 400; margin-left: .3rem; }
@@ -902,7 +961,8 @@ body[data-view="padroes"] table.quadro.padrao td.dia { background: #fbf9ff; } bo
   <div class="ferr"><button id="btn-desfazer" class="btn" data-act="desfazer" disabled title="Desfaz a última alteração">↶ Desfazer</button>
     <button id="btn-letra" class="btn" data-act="letra" aria-pressed="false" title="Aumentar o tamanho da letra">A+</button>
     <span id="sync" class="sync" role="status" hidden></span></div>
-  <div class="exemplo"><button id="selo-folgas" class="selo-folgas" data-act="folgas-mud" hidden></button> <a href="#ajustes" data-nav="ajustes" class="link">Ajustes</a> · Nomes e dados fictícios · <button id="restaurar" class="link" data-act="restaurar">Restaurar exemplo</button></div>
+  <div id="perfil-selo" class="perfil-selo" hidden></div>
+  <div class="exemplo"><button id="selo-folgas" class="selo-folgas" data-act="folgas-mud" hidden></button> <a href="#ajustes" data-nav="ajustes" class="link">Ajustes</a> <span class="ficticio">· Nomes e dados fictícios ·</span> <button id="restaurar" class="link" data-act="restaurar">Restaurar exemplo</button></div>
 </header>
 <main id="main"><p class="dica">Carregando a escala…</p></main>
 <div id="veu" hidden></div>
@@ -1974,6 +2034,7 @@ function carregar() {
 }
 function salvar() { if (SERVIDOR) { sincronizar(); return; } try { localStorage.setItem(CHAVE, JSON.stringify({ ...data, _versao: undefined })); } catch { /* ignora */ } }
 function mudar(msg, fn) {
+  if (typeof soVer === "function" && soVer() && !editaFrota()) { toast("Seu acesso é só para visualizar a escala."); return; }
   desfazer.push(JSON.stringify({ o: data.ocorrencias, p: data.postos, s: data.secoes, g: data.gms, r: data.requerimentos || {}, e: data.equipes, c: data.controle || [], i: data.inspetores || {}, f: data.frota || [], fs: data.folgasSync || {} }));
   if (desfazer.length > 30) desfazer.shift();
   fn();
@@ -2022,6 +2083,14 @@ if (typeof window !== "undefined") { window.addEventListener("beforeprint", () =
 function render() {
   document.querySelectorAll("[data-nav]").forEach((a) => a.setAttribute("aria-current", a.dataset.nav === ui.view ? "page" : "false"));
   if (SERVIDOR && (!ui.pronto || ui.vazio)) { $("#main").innerHTML = telaServidor(); $("#drawer").hidden = true; $("#veu").hidden = true; return; }
+  if (!podeView(ui.view)) { ui.view = P().views[0]; ui.drawer = null; history.replaceState(null, "", "#" + ui.view); }
+  limitarDia();
+  document.querySelectorAll("header.app [data-nav]").forEach((a) => { a.hidden = !podeView(a.dataset.nav); });
+  document.body.dataset.perfil = perfilAtual(); document.body.classList.toggle("so-ver", soVer()); document.body.classList.toggle("edita-frota", P().edita === "frota");
+  const selo = $("#perfil-selo");
+  if (selo) { selo.hidden = !soVer(); selo.innerHTML = soVer()
+    ? `<b>${esc(P().nome)}</b> · ${P().edita === "frota" ? "edita viaturas" : "só visualização"}${ui.perfilTeste && !(SERVIDOR && SERVIDOR.perfil !== "escalante") ? ` <button class="link" data-act="perfil-sair">voltar ao escalante</button>` : SERVIDOR ? ` <a class="link" href="/sair">sair</a>` : ""}`
+    : SERVIDOR ? `${esc(SERVIDOR.nome)} · <a class="link" href="/sair">sair</a>` : ""; }
   const main = $("#main");
   const html = { padroes: vPadroes, pendencias: vPendencias, ajustes: vAjustes, quadro: vQuadro, lancamentos: vLancamentos, mes: vMes, ficha: vFicha, folha: vFolha, frota: vFrota }[ui.view]();
   main.innerHTML = html;
@@ -2029,9 +2098,9 @@ function render() {
   $("#drawer").hidden = !ui.drawer;
   $("#veu").hidden = !ui.drawer;
   $("#btn-desfazer").disabled = !desfazer.length;
-  if (SERVIDOR && ui.view === "ajustes") carregarHistorico();
+  if (SERVIDOR && ui.view === "ajustes") { carregarHistorico(); carregarAcessos(); }
   if (ui.view === "folha") alinharFolha();
-  document.querySelectorAll("table.quadro .secao-btn[data-secao], table.quadro .posto-btn[data-posto]").forEach((x) => { // alça para arrastar e reordenar
+  if (!soVer()) document.querySelectorAll("table.quadro .secao-btn[data-secao], table.quadro .posto-btn[data-posto]").forEach((x) => { // alça para arrastar e reordenar
     if (x.previousElementSibling?.classList.contains("alca")) return;
     const a = document.createElement("span"); a.className = "alca"; a.draggable = true; a.textContent = "⠿"; a.setAttribute("aria-hidden", "true");
     a.title = "Arraste para mudar a ordem"; if (x.dataset.secao) a.dataset.secao = x.dataset.secao; else a.dataset.posto = x.dataset.posto;
@@ -3202,6 +3271,7 @@ function vAjustes() {
     </div>
     <p class="dica">Os brasões aparecem no cabeçalho da folha impressa, como no PDF da escala.</p>
     <div><button class="btn pri" data-act="salvar-ajustes">Salvar ajustes</button></div></section>
+    ${painelAcessos()}
     ${SERVIDOR ? `<section class="painel ajustes"><h2>Histórico de alterações</h2><p class="dica">Quem mudou o quê, do mais recente para o mais antigo. O histórico não pode ser apagado.</p><div id="historico"><p class="dica">Carregando…</p></div></section>` : ""}`;
 }
 
@@ -3473,19 +3543,20 @@ function cartaoBuscaGm(g) {
   const longo = !af && data.ocorrencias.find((o) => o.gm === g.id && ["FERIAS", "LICENCA", "ATESTADO", "CURSO"].includes(o.tipo) && o.de <= dia && dia <= (o.ate || o.de));
   let prox = ""; if (!des.length && !af && !longo && g.ativo !== false) for (let k = 1; k <= 7; k++) { const d2 = somaDias(dia, k); if (trabalhaNoDia(data, g, d2)) { prox = `${SEMANA[diaSemana(d2)].toLowerCase()} ${ddmm(d2)}`; break; } }
   const m = mesDe(dia), folgas = data.ocorrencias.filter((o) => o.tipo === "FOLGA" && o.gm === g.id && o.de.startsWith(m)).map((o) => ddmm(o.de));
-  const ofertas = ofertasAbertas(dia).filter((o) => aguardando(o).some((x) => x.gm === g.id));
+  const sv = soVer(), ofertas = sv ? [] : ofertasAbertas(dia).filter((o) => aguardando(o).some((x) => x.gm === g.id));
+  const nomeAf = (t) => sv && ["ATESTADO", "LICENCA"].includes(t) ? "Afastado" : TIPOS[t] || t;
   const situ = g.ativo === false ? `<span class="tag furo">desativado</span>`
     : des.length ? des.map((d) => `<div class="bg-onde"><b>${esc(d.posto ? postoPorId(d.posto)?.nome : "À disposição")}</b> <span class="hr">${fmtHm(d.ini)}–${fmtHm(d.fim)}</span>${d.nat === "he" && !d.fixa ? ` <span class="tag he">HE</span>` : d.nat === "bh" ? ` <span class="tag bh">BH+</span>` : d.fixa ? ` <span class="tag he">HE fixa</span>` : ""}${d.remanejado ? ` <span class="tag rem">remanejado</span>` : ""}${d.funcao ? ` <small class="meta">${esc(d.funcao)}</small>` : ""}</div>`).join("")
-    : af ? `<div class="bg-onde fora"><b>${esc(TIPOS[af.tipo] || af.tipo)}</b>${af.oc?.ate && af.oc.ate !== af.oc.de ? ` até ${ddmm(af.oc.ate)}` : ""}${af.tipo === "TROCA" ? ` · coberto por ${esc(nomeGm(af.oc.substituto))}` : ""}</div>`
-    : longo ? `<div class="bg-onde fora"><b>${esc(TIPOS[longo.tipo])}</b> até ${ddmm(longo.ate || longo.de)}</div>`
+    : af ? `<div class="bg-onde fora"><b>${esc(nomeAf(af.tipo))}</b>${af.oc?.ate && af.oc.ate !== af.oc.de ? ` até ${ddmm(af.oc.ate)}` : ""}${af.tipo === "TROCA" ? ` · coberto por ${esc(nomeGm(af.oc.substituto))}` : ""}</div>`
+    : longo ? `<div class="bg-onde fora"><b>${esc(nomeAf(longo.tipo))}</b> até ${ddmm(longo.ate || longo.de)}</div>`
     : `<div class="bg-onde fora">Não trabalha neste dia${prox ? ` · próximo serviço: <b>${prox}</b>` : ""}</div>`;
-  return `<div class="bg-card"><div class="bg-cab"><b class="bg-nome">${esc(g.nome)}</b>${seloHE(minHE(g.id, dia))}</div>
+  return `<div class="bg-card"><div class="bg-cab"><b class="bg-nome">${esc(g.nome)}</b>${sv ? "" : seloHE(minHE(g.id, dia))}</div>
     ${situ}
     <dl class="bg-dl"><dt>Padrão</dt><dd>${eq ? esc(rotuloEquipe(eq, dia)) : "<b class='ruim'>sem escala</b>"}</dd>
       <dt>Posto</dt><dd>${p ? `${esc(p.nome)}${p.ativo === false ? " <b class='ruim'>(excluído)</b>" : ""}` : "<b class='ruim'>sem posto</b>"}${v.lotacao?.funcao ? ` · ${esc(v.lotacao.funcao)}` : ""}</dd>
       <dt>Horário</dt><dd>${esc(textoHorario(v.lotacao?.segmentos))}</dd>
       <dt>Folgas em ${MESES[Number(m.slice(5)) - 1]}</dt><dd>${folgas.length ? folgas.join(", ") : "nenhuma"}</dd>
-      ${g.grupos?.length ? `<dt>Grupamentos</dt><dd>${esc(g.grupos.join(", "))}</dd>` : ""}${g.cnh ? `<dt>CNH</dt><dd>${esc(g.cnh)}</dd>` : ""}${g.obs ? `<dt>Obs.</dt><dd>${esc(g.obs)}</dd>` : ""}
+      ${g.grupos?.length ? `<dt>Grupamentos</dt><dd>${esc(g.grupos.join(", "))}</dd>` : ""}${g.cnh ? `<dt>CNH</dt><dd>${esc(g.cnh)}</dd>` : ""}${g.obs && !sv ? `<dt>Obs.</dt><dd>${esc(g.obs)}</dd>` : ""}
       ${ofertas.length ? `<dt>HE oferecida</dt><dd>aguardando resposta (${ofertas.map((o) => esc(postoPorId(o.posto)?.nome)).join(", ")})</dd>` : ""}</dl>
     <div class="linha">${des.some((d) => d.posto) ? `<button class="btn pri" data-act="bg-mostrar" data-gm="${g.id}">Mostrar no quadro</button>` : ""}
       <button class="btn" data-act="abrir-ficha" data-gm="${g.id}">Ficha</button><button class="btn" data-act="bg-lotacao" data-gm="${g.id}">Lotação e horário…</button><button class="link" data-act="bg-limpar">outro GM</button></div></div>`;
@@ -3637,6 +3708,31 @@ function popInsp(s) {
 // Sem servidor, tudo fica no navegador (localStorage). Com servidor, cada alteração vira um
 // comando enviado com a revisão que a tela conhece; se outra pessoa salvou antes, recarrega.
 const SERVIDOR = typeof window !== "undefined" ? window.ESCALA_SERVIDOR : null;
+
+// ---------- PERFIS DE ACESSO ----------
+// Escalante: tudo. Inspetor: vê a escala de qualquer dia. Logística: edita as viaturas e vê a escala.
+// Reserva de armamento: só vê a escala. Quem só vê enxerga hoje e amanhã (o inspetor, todos os dias).
+// O servidor também confere: quem só visualiza não consegue gravar, e não recebe controle de HE nem requerimentos.
+const PERFIS = {
+  escalante: { nome: "Escalante", views: null, edita: "tudo" },
+  inspetor: { nome: "Inspetor de serviço", views: ["quadro", "folha"], edita: "", dias: null },
+  logistica: { nome: "Logística", views: ["frota", "quadro", "folha"], edita: "frota", dias: 1 },
+  reserva: { nome: "Reserva de armamento", views: ["quadro", "folha"], edita: "", dias: 1 },
+};
+const perfilAtual = () => { const p = SERVIDOR?.perfil; return p && p !== "escalante" ? p : ui.perfilTeste || "escalante"; };
+const P = () => PERFIS[perfilAtual()] || PERFIS.escalante;
+const soVer = () => P().edita !== "tudo";
+const editaFrota = () => P().edita === "frota" && ui.view === "frota";
+const podeView = (v) => !P().views || P().views.includes(v);
+function limitarDia() {
+  const n = P().dias; if (n == null) return;
+  const h = hojeBase(), fim = somaDias(h, n);
+  if (ui.dia < h) ui.dia = h; else if (ui.dia > fim) ui.dia = fim;
+  ui.mes = mesDe(ui.dia);
+}
+// ações que quem só visualiza pode usar (navegar, buscar, imprimir)
+const LIVRES = new Set(["dia", "ir-hoje", "imprimir", "letra", "busca-gm", "bg-escolher", "bg-limpar", "bg-mostrar", "pop-fechar", "so-furos", "mn-proxy", "mn-nova-aba", "mn-busca-gm", "ed-nada", "ver-todos", "lemb-todos", "perfil-sair", "fechar"]);
+function bloqueadoParaPerfil(a) { return soVer() && !LIVRES.has(a) && !(editaFrota() && (a.startsWith("fr-") || a === "desfazer")); }
 const DOCS_SYNC = ["postos", "secoes", "equipes", "config", "requerimentos", "inspetores", "frota", "folgasSync"];
 const srv = { revisao: 0, foto: null, enviando: false, pendente: false, resumos: [], estado: "ok" };
 function fotografar(d) {
@@ -3720,7 +3816,20 @@ async function carregarDoServidor() {
   ui.vazio = false; ui.pronto = true;
   mostrarSync("ok");
   render();
-  conferirFolgas(false);
+  if (!soVer()) conferirFolgas(false);
+}
+// Escala sempre atualizada: ao voltar para a aba (e a cada 3 min para quem só visualiza) confere só o número da revisão
+// (uma leitura no banco) e recarrega se alguém salvou.
+async function conferirRevisao(forcar) {
+  if (!SERVIDOR || !ui.pronto || document.hidden || srv.enviando || ed.modo || ui.drawer) return;
+  if (!forcar && Date.now() - (srv.checado || 0) < 30000) return;
+  srv.checado = Date.now();
+  try { if (diferenca().length) return; const { corpo } = await api("/api/revisao");
+    if (corpo.revisao != null && corpo.revisao !== srv.revisao) { const dia = ui.dia; await carregarDoServidor(); ui.dia = dia; render(); toast("A escala foi atualizada com as últimas mudanças."); } } catch { /* tenta depois */ }
+}
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => conferirRevisao(false));
+  setInterval(() => { if (SERVIDOR && soVer()) conferirRevisao(true); }, 180000);
 }
 function telaServidor() {
   if (!ui.pronto) return `<div class="tela-centro"><p class="dica">Carregando a escala…</p></div>`;
@@ -3732,6 +3841,35 @@ async function iniciarServidor() {
   $("#restaurar").outerHTML = `<span>${esc(SERVIDOR.nome)}</span> · <a class="link" href="/sair">Sair</a>`;
   try { await carregarDoServidor(); }
   catch { $("#main").innerHTML = `<div class="tela-centro"><p class="dica">Não consegui falar com o servidor. Verifique a internet e recarregue a página.</p></div>`; }
+}
+// Acessos: uma senha por perfil, definida pelo escalante. A senha nunca volta para a tela (o servidor guarda só o hash).
+function painelAcessos() {
+  const ver = Object.entries(PERFIS).filter(([k]) => k !== "escalante");
+  const desc = { inspetor: "vê a escala de todos os dias (quadro e folha)", logistica: "edita as viaturas (QAP/FA) e vê a escala de hoje e amanhã", reserva: "vê a escala de hoje e amanhã" };
+  return `<section class="painel ajustes"><h2>Acessos</h2>
+    <p class="dica">Cada setor entra com o próprio nome e a senha do setor. Quem entra como inspetor, logística ou reserva <b>não consegue mudar a escala</b>${SERVIDOR ? "" : " (na versão do servidor)"}. Trocar a senha de um setor desconecta quem estava usando a antiga.</p>
+    <table class="lanc acessos"><tbody>${ver.map(([k, v]) => `<tr><td><b>${esc(v.nome)}</b><br><span class="meta">${desc[k]}</span></td>
+      ${SERVIDOR ? `<td id="ac-st-${k}" class="meta">…</td><td><input type="password" id="ac-${k}" placeholder="nova senha" autocomplete="new-password" size="12" aria-label="Nova senha de ${esc(v.nome)}"> <button class="btn" data-act="acesso-salvar" data-perfil="${k}">Definir</button> <button class="link" data-act="acesso-remover" data-perfil="${k}" hidden id="ac-rm-${k}">tirar acesso</button></td>` : ""}
+      <td><button class="link" data-act="perfil-ver" data-perfil="${k}">ver como ${esc(v.nome.split(" ")[0].toLowerCase())}</button></td></tr>`).join("")}</tbody></table></section>`;
+}
+async function carregarAcessos() {
+  if (!$("table.acessos")) return;
+  try {
+    const { corpo } = await api("/api/acessos");
+    for (const a of corpo.perfis || []) { const st = $("#ac-st-" + a.perfil), rm = $("#ac-rm-" + a.perfil);
+      if (st) st.textContent = a.definido ? `senha definida em ${ddmm(a.atualizado.slice(0, 10))} por ${a.quem}` : "sem acesso (senha não definida)";
+      if (rm) rm.hidden = !a.definido; }
+  } catch { /* fica com reticências */ }
+}
+async function salvarAcesso(perfil, remover) {
+  const inp = $("#ac-" + perfil), senha = remover ? "" : inp?.value || "";
+  if (!remover && senha.length < 6) { toast("A senha precisa ter pelo menos 6 caracteres."); inp?.focus(); return; }
+  if (remover && !confirm(`Tirar o acesso de ${PERFIS[perfil].nome}? Quem estiver usando sai na hora.`)) return;
+  const { status, corpo } = await api("/api/acessos", { method: "POST", body: JSON.stringify({ perfil, senha }) });
+  if (status !== 200) { toast(corpo.erro || "Não consegui salvar."); return; }
+  if (inp) inp.value = "";
+  toast(remover ? `Acesso de ${PERFIS[perfil].nome} removido.` : `Senha de ${PERFIS[perfil].nome} definida. Passe a senha só para o setor.`);
+  carregarAcessos();
 }
 async function carregarHistorico() {
   const el = $("#historico");
@@ -3845,6 +3983,24 @@ document.addEventListener("mouseover", (e) => {
   const sub = e.target.closest?.("#menu .mn-sub"); if (!sub) return; const fly = sub.querySelector(":scope > .mn-fly"); if (!fly) return;
   requestAnimationFrame(() => { fly.style.top = "-5px"; const r = fly.getBoundingClientRect(), passa = r.bottom - (innerHeight - 8); if (passa > 0) fly.style.top = `${-5 - Math.min(passa, r.top - 8)}px`; });
 });
+// Toque longo (celular): abre o mesmo menu do botão direito. O Android já manda "contextmenu"; o iPhone não.
+const toque = { t: 0, x: 0, y: 0, alvo: null, veio: false };
+document.addEventListener("pointerdown", (e) => {
+  if (e.pointerType !== "touch") return;
+  clearTimeout(toque.t); Object.assign(toque, { x: e.clientX, y: e.clientY, alvo: e.target, veio: false, inicio: Date.now() });
+  toque.t = setTimeout(() => {
+    if (toque.veio || !toque.alvo?.isConnected || toque.alvo.closest("input, textarea, select")) return;
+    toque.alvo.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: toque.x, clientY: toque.y }));
+    ui.ignorarClique = Date.now(); ui.ignorarToque = true; // o dedo saindo não vira clique
+  }, 550);
+});
+const cancelarToque = (e) => { if (e.type !== "pointermove" || Math.hypot(e.clientX - toque.x, e.clientY - toque.y) > 10) clearTimeout(toque.t); };
+document.addEventListener("pointermove", cancelarToque, { passive: true });
+document.addEventListener("pointerup", cancelarToque); document.addEventListener("pointercancel", cancelarToque);
+document.addEventListener("contextmenu", (e) => { toque.veio = true; clearTimeout(toque.t); if (Date.now() - (toque.inicio || 0) < 2000) { ui.ignorarClique = Date.now(); ui.ignorarToque = true; } }, true);
+document.addEventListener("pointerdown", (e) => { if (e.pointerType !== "touch") toque.inicio = 0; }, true);
+// depois do toque longo, o dedo saindo não pode "clicar" na opção que ficou embaixo dele
+document.addEventListener("touchend", (e) => { if (ui.ignorarToque && Date.now() - ui.ignorarClique < 6000) { e.preventDefault(); ui.ignorarClique = 0; ui.ignorarToque = false; } }, { passive: false });
 // ---------- ORDENAR SEÇÕES E POSTOS ----------
 // Arrastar pelo nome: seção sobre outra seção = vai para antes dela; posto sobre outro posto = antes dele (pode trocar de seção);
 // posto sobre o nome de uma seção = vai para o topo dela.
@@ -3942,6 +4098,7 @@ function fecharMenu() { const m = $("#menu"); if (m && !m.hidden) { m.hidden = t
 document.addEventListener("contextmenu", (e) => {
   // menu normal do navegador só em campos de texto, texto selecionado (copiar) ou com Shift
   if (e.shiftKey || e.target.closest("input, textarea, select, #menu") || String(getSelection?.() || "").trim()) return;
+  if (soVer() && !editaFrota()) { menuSoVer(e); return; }
   const liEd = e.target.closest("#ed-lista li[data-i]");
   if (liEd) { e.preventDefault(); menuSugestao(Number(liEd.dataset.i), liEd, e.clientX, e.clientY); return; }
   if (e.target.closest("#inline")) { e.preventDefault(); ui.proxies = []; const it = itensDosBotoes($("#inline")).slice(0, 12); if (it.length) abrirMenu(it, e.clientX, e.clientY, $("#inline"), {}); return; }
@@ -3979,6 +4136,15 @@ function itensDosBotoes(box) {
 }
 function itensDeGm(gm) {
   return [{ t: "Onde está hoje / situação…", act: "mn-busca-gm", d: { gm } }, { t: "Ficha do GM", act: "abrir-ficha", d: { gm } }, { t: "Lotação e horário…", act: "bg-lotacao", d: { gm } }];
+}
+// Quem só visualiza: botão direito mostra onde o GM está, buscar e imprimir
+function menuSoVer(e) {
+  e.preventDefault(); fecharMenu(); ui.proxies = [];
+  const nav = e.target.closest("a[data-nav]"), chip = e.target.closest("button.chip[data-des]"), d = chip && ui.desMap.get(chip.dataset.des);
+  const itens = nav ? [{ t: "Abrir em nova aba", act: "mn-nova-aba", d: { href: nav.getAttribute("href") } }]
+    : [...(d ? [{ t: `Onde está ${nomeGm(d.gm)} hoje…`, act: "mn-busca-gm", d: { gm: d.gm }, padrao: true }, { sep: true }] : []),
+      { t: "Buscar GM…", act: "mn-busca-gm", d: { gm: "" }, atalho: "Ctrl+F" }, ...(ui.view === "quadro" ? [{ t: `${ui.soFuros ? "✓ " : ""}Ver só o que falta cobrir`, act: "so-furos" }] : []), { t: "Imprimir", act: "imprimir", atalho: "Ctrl+P" }];
+  abrirMenu(itens, e.clientX, e.clientY, e.target, {});
 }
 // Sugestão da lista (pôr GM / trocar / cobrir): botão direito = as mesmas escolhas do clique, mais ficha e situação
 function menuSugestao(i, li, x, y) {
@@ -4098,7 +4264,7 @@ function encerrarArrasto() {
   marcarAlvo(null);
 }
 document.addEventListener("pointerdown", (e) => {
-  if (e.pointerType !== "mouse" || e.button !== 0 || ui.colando) return; // no toque, use o toque longo (menu) para mover
+  if (e.pointerType !== "mouse" || e.button !== 0 || ui.colando || soVer()) return; // no toque, use o toque longo (menu) para mover
   const el = e.target.closest("table.quadro button.chip[data-des], .disposicao button.chip[data-des]");
   if (!el) return;
   const d = ui.desMap.get(el.dataset.des);
@@ -4243,6 +4409,7 @@ function substituirGm(d, X, via, m) {
 }
 
 function abrirEditor(modo, el, ctx) {
+  if (soVer()) return;
   fecharMenu(); fecharPop(); fecharEditor();
   const r = el.getBoundingClientRect(), box = $("#inline");
   Object.assign(ed, { modo, el, ctx, d: ctx.des || null, sel: 0, aberto: Date.now(), oferta: null });
@@ -4473,7 +4640,7 @@ function colar(alvoEl) {
   else toast(`${nomeGm(ui.copiado.gm)} já está aqui nesse horário.`);
 }
 document.addEventListener("keydown", (e) => {
-  if (ed.modo || !$("#menu").hidden || ui.pop) return;
+  if (ed.modo || !$("#menu").hidden || ui.pop || soVer()) return;
   const el = document.activeElement;
   if (!el?.closest?.("table.quadro")) return;
   const chipEl = el.matches("button.chip[data-des]") ? el : null, td = el.matches("td[data-posto]") ? el : null;
@@ -4936,7 +5103,7 @@ function abrirFuro(posto, turno) {
 }
 document.addEventListener("click", (e) => {
   if (ui.colando && e.target.closest("table.quadro td[data-posto]") && !e.target.closest("#menu, #pop, #inline")) { e.preventDefault(); colar(e.target.closest("td[data-posto]")); return; }
-  if (ui.ignorarClique) { const recente = Date.now() - ui.ignorarClique < 400; ui.ignorarClique = 0; if (recente && !e.target.closest("#menu")) return; } // o clique que encerra um arrasto não abre o cartão
+  if (ui.ignorarClique) { const toq = ui.ignorarToque, recente = Date.now() - ui.ignorarClique < (toq ? 6000 : 400); ui.ignorarClique = 0; ui.ignorarToque = false; if (recente && (toq || !e.target.closest("#menu"))) { e.preventDefault(); return; } } // o clique que encerra um arrasto não abre o cartão
   const noMenu = e.target.closest("#menu");
   if (!noMenu) fecharMenu();
   else {
@@ -4948,6 +5115,12 @@ document.addEventListener("click", (e) => {
   if (ui.pop && !e.target.closest("#pop")) fecharPop();
   const el = e.target.closest("[data-act],[data-nav]");
   if (!el) return;
+  if (el.dataset.nav && !podeView(el.dataset.nav)) { e.preventDefault(); return; }
+  if (!el.dataset.nav && soVer()) { // quem só visualiza: clicar num GM mostra onde ele está; o resto fica travado
+    const chip = e.target.closest("button.chip[data-des]");
+    if (chip && bloqueadoParaPerfil(el.dataset.act)) { e.preventDefault(); const d = ui.desMap.get(chip.dataset.des); if (d) abrirPop("buscagm", chip, { q: "", gm: d.gm }); return; }
+    if (bloqueadoParaPerfil(el.dataset.act)) { e.preventDefault(); return; }
+  }
   if (el.dataset.nav) { ui.view = el.dataset.nav; ui.drawer = null; ui.plano = null; location.hash = ui.view; render(); return; }
   const a = el.dataset.act;
   const d = ui.drawer;
@@ -5503,6 +5676,9 @@ document.addEventListener("click", (e) => {
       mudar(q ? `${p.nome} agora só existe no padrão ${q === "impar" ? "ímpar" : "par"}` : `${p.nome} agora existe nos dois padrões`, () => { if (eqs) p.equipes = eqs; else delete p.equipes; });
       return;
     }
+    case "perfil-sair": ui.perfilTeste = ""; render(); toast("De volta ao acesso do escalante."); return;
+    case "perfil-ver": { ui.perfilTeste = el.dataset.perfil; ui.view = PERFIS[el.dataset.perfil].views[0]; location.hash = ui.view; render(); toast(`Vendo como ${PERFIS[el.dataset.perfil].nome}. Para voltar, clique em "voltar ao escalante" no alto.`); return; }
+    case "acesso-salvar": case "acesso-remover": salvarAcesso(el.dataset.perfil, el.dataset.act === "acesso-remover"); return;
     case "mn-nova-aba": fecharMenu(); window.open(location.pathname + location.search + el.dataset.href, "_blank"); return;
     case "mn-ed-escolher": { fecharMenu(); escolherEditor(Number(el.dataset.i)); return; }
     case "mn-proxy": { const b = ui.proxies?.[Number(el.dataset.i)]; fecharMenu(); if (b?.isConnected) b.click(); return; }
@@ -5699,7 +5875,7 @@ document.addEventListener("click", (e) => {
       return;
     }
     case "ir-mes-fin": ui.view = "mes"; ui.mes = mesDe(ui.dia); location.hash = "mes"; render(); $("[data-act=fin-pendentes]")?.click(); return;
-    case "so-furos": ui.soFuros = true; render(); return;
+    case "so-furos": fecharMenu(); ui.soFuros = el.closest("#menu") ? !ui.soFuros : true; render(); return;
     case "lemb-todos": { const k = el.dataset.k, a = (ui.lembAberto ||= new Set()); a.has(k) ? a.delete(k) : a.add(k); render(); return; }
     case "ir-efetivo": ui.view = "padroes"; (ui.padrao ||= { aba: "efetivo", mes: mesDe(ui.dia), desde: ui.dia }).aba = "efetivo"; ui.efetivo = { busca: "", so: "sem" }; location.hash = "padroes"; render(); return;
     case "ir-frota": ui.view = "frota"; location.hash = "frota"; render(); return;
@@ -5809,6 +5985,7 @@ document.addEventListener("click", (e) => {
 });
 document.addEventListener("change", (e) => {
   const id = e.target.id, v = e.target.value;
+  if (soVer() && !["q-dia", "q-sofuros", "aj-perfil"].includes(id) && !(editaFrota() && e.target.matches(".fr-in, #fr-busca"))) return;
   if (id === "np-modelo" && ui.pop) { const nome = $("#np-nome")?.value || "", sec = $("#np-secao")?.value; ui.pop.modeloPosto = v; if (sec && ui.pop.modo === "novo") ui.pop.secao = sec; desenharPop(); const n = $("#np-nome"); if (n) { n.value = nome; n.focus(); } return; }
   if (id === "pad-desde" && v) { ui.padrao.desde = v; ui.padrao.mes = mesDe(v); render(); return; }
   if (e.target.closest?.(".form-hf")) { previaHorarioFixo(); return; }
