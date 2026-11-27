@@ -492,3 +492,13 @@ test("posto de todos os dias com GM da semanal: no fim de semana a vaga dele apa
   const fg = calcularDia(data, seg).furos.filter((f) => f.posto === "cit" && ["t2", "t3"].includes(f.turno));
   assert.equal(fg.length, 0, "segunda: ele cobre");
 });
+
+test("vaga de viatura: GMs lotados em viatura aparecem antes dos de posto fixo", () => {
+  const data = base(), d = diaDe(data, "D1");
+  data.postos.find((p) => p.id === "vtr").tipo = "vtr"; data.postos.find((p) => p.id === "noite").tipo = "vtr";
+  data._versao++;
+  const s = sugerir(data, d, "vtr", 420, 1140).he.filter((x) => !x.bloqueado);
+  const i = s.findIndex((x) => x.foraVtr);
+  assert.ok(i === -1 || s.slice(i).every((x) => x.foraVtr), "depois do primeiro de posto fixo, só vem posto fixo");
+  assert.ok(s.some((x) => !x.foraVtr));
+});

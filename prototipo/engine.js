@@ -328,7 +328,7 @@ export function afastamentoNoDia(data, gmId, dia) {
 // · 2 outros GMs do mesmo turno · 3 mesmo posto, turno oposto · 4 o resto. Dentro de cada grupo: abaixo do teto e menos horas.
 export function prioridadeHE(x, teto) {
   const grupo = x.doGrupo ? -2 : x.eja ? -1 : x.estende ? (x.noPostoHoje ? -0.6 : -0.5) : x.noPostoHoje ? 1 : x.mesmoPosto && x.mesmoPeriodo ? 0 : x.mesmoPeriodo ? 2 : x.mesmoPosto ? 3 : 4;
-  return [x.bloqueado ? 1 : 0, grupo, x.disponivel ? 0 : 1, x.heMes + x.transporte >= teto ? 1 : 0, x.heMes + x.transporte];
+  return [x.bloqueado ? 1 : 0, x.foraVtr ? 1 : 0, grupo, x.disponivel ? 0 : 1, x.heMes + x.transporte >= teto ? 1 : 0, x.heMes + x.transporte];
 }
 // dia (07–19) ou noite (19–07) de um horário em minutos
 export const periodoDoHorario = (m) => { const x = ((m % 1440) + 1440) % 1440; return x >= 420 && x < 1140 ? "dia" : "noite"; };
@@ -406,7 +406,8 @@ export function sugerir(data, dia, postoId, ini, fim) {
     const minhas = cd.designacoes.filter((d) => d.gm === gm.id);
     const l = livro.get(gm.id) || { he: 0, transporte: 0 };
     const lotPosto = vigente(gm, dia).lotacao?.posto;
-    const base = { gm, heMes: l.he, transporte: l.transporte, mesmoPosto: lotPosto === postoId, noPostoHoje: minhas.some((d) => d.posto === postoId && d.nat !== "he"), mesmoPeriodo: !minhas.length && mesmoPeriodo(data, gm, dia, ini), disponivel, doGrupo };
+    const tipoVaga = data.postos.find((x) => x.id === postoId)?.tipo, tipoDele = data.postos.find((x) => x.id === lotPosto)?.tipo;
+    const base = { foraVtr: tipoVaga === "vtr" && tipoDele !== "vtr", gm, heMes: l.he, transporte: l.transporte, mesmoPosto: lotPosto === postoId, noPostoHoje: minhas.some((d) => d.posto === postoId && d.nat !== "he"), mesmoPeriodo: !minhas.length && mesmoPeriodo(data, gm, dia, ini), disponivel, doGrupo };
     const sobre = minhas.filter((d) => sobrepoe(d.ini, d.fim, ini, fim) > 0);
     if (sobre.length) {
       if (sobre.every(livreParaRemanejar)) {
